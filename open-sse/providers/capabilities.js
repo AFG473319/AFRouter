@@ -235,6 +235,13 @@ export const PROVIDER_CAPABILITIES = {
     // contract). maxOutput 128000 per the server's product-config payload.
     "deepseek-v4.1-flash": { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 128000 },
   },
+  // CodeBuddy intl — same gateway catalog as CN, so deepseek-v4.1-flash mirrors
+  // the codebuddy-cn entry (the openai-style reasoning_effort format matters:
+  // the generic *deepseek-v4* pattern would otherwise pick the vendor-native
+  // "deepseek" thinking shape, which the CodeBuddy gateway does not accept).
+  "codebuddy-intl": {
+    "deepseek-v4.1-flash": { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 128000 },
+  },
   // Qoder — upstream exposes opaque internal ids (dfmodel, kmodel, …); the
   // registry `name` is display-only and capability lookup matches on the raw
   // id, so every qoder model would fall through to DEFAULT_CAPABILITIES
@@ -325,6 +332,16 @@ export const PROVIDER_CAPABILITIES = {
     "z-ai/glm-5.3-flash-free": { reasoning: true, thinkingFormat: "openai", vision: true, videoInput: true, contextWindow: 1000000, maxOutput: 128000 },
     "deepseek/deepseek-chat":     { contextWindow: 1048576, maxOutput: 384000 },
     "deepseek/deepseek-reasoner": { reasoning: true, thinkingFormat: "deepseek", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 384000 },
+  },
+  // Ollama Cloud — the generic *deepseek-v4* pattern misses the vision badge
+  // the library page publishes for this model (text+image in, 1M context).
+  // ponytail: thinkingFormat stays "deepseek" to preserve today's body shape;
+  // Ollama's native toggle is the top-level `think` field (bool or
+  // low/medium/high/max), which no format in thinkingUnified.js emits yet —
+  // openai-to-ollama.js drops it. Wire a "think" format when thinking on
+  // Ollama Cloud is actually needed.
+  "ollama": {
+    "deepseek-v4.1-flash:cloud": { vision: true, reasoning: true, thinkingFormat: "deepseek", contextWindow: 1000000, maxOutput: 384000 },
   },
 };
 
