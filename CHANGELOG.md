@@ -1,12 +1,21 @@
-# v0.5.80 (2026-09-15)
+# v0.5.81 (2026-09-16)
 
 ## Features
 - **CLI tools**: add DeepSeek Harness (`dsh`) integration — a new card writes an `afrouter` provider route (`llm-pi-ai.providers.afrouter`, `api: openai-completions`) into `$DSH_HOME/settings.yaml` and stores the key as `refs.AFROUTER_API_KEY` in `$DSH_HOME/.credentials.yaml`, so dsh's model picker offers AFRouter models without hand-editing YAML. Multi-model management with catalog-accurate `contextWindow`/`maxTokens`/`input`/`reasoningEfforts`, an optional DeepSeek thinking-off `compat` toggle, Manual Config snippets (settings + credentials + optional default-model pin), and a Reset that removes only the AFRouter route and preserves a real dashboard key. Honors `DSH_HOME`; writes are backup + atomic; a corrupt `settings.yaml` is never overwritten.
 
 ## Fixes
+- **CLI tools**: ZCode model ownership is now tracked in a durable ledger (`~/.afrouter/zcode-model-ownership.json`) instead of an in-config marker that ZCode's rewriter strips on exit — previously every model AFRouter applied became unowned after ZCode restarted, and a later Reset could no longer remove them. Apply/Reset classification now distinguishes owned models, marker-bearing pre-ledger models, and "bootstrap candidates" (resolvable but never recorded): candidates are never claimed or deleted silently — Apply adopts them only with an explicit `adoptBootstrap` flag (card: "Adopt as mine"), Reset reports them as `skippedCandidates`, and re-sending the whole hydrated chip list never escalates hand-added models into owned ones or rewrites their user-tuned specs.
+- **OpenCode**: derive Responses-only routing from the model registry, and route OpenCode Go `gpt-5.6-luna` (including thinking variants) to the Responses API.
+
+# v0.5.80 (2026-09-15)
+
+## Features
+- **CLI tools**: add ZCode integration (provider card + settings route + spec-kit artifacts)
+
+## Fixes
 - **CLI tools**: ZCode card now reflects the real AFRouter entry contents (chips render every model in the entry; user-added models are dimmed and protected), hydration no longer clobbers an in-progress selection while the model modal is open, and a chip is removed only when the server confirms removal. Replace the placeholder icon with the official Z logo. Also names the provider entry AFRouter (not 9Router) — shipped too late for 0.5.79, which still bakes the old name.
 
-﻿# v0.5.79 (2026-09-15)
+# v0.5.79 (2026-09-15)
 
 ## Features
 - **CLI tools**: add ZCode integration (provider card + settings route + spec-kit artifacts)
