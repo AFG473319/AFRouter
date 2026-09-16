@@ -1,4 +1,45 @@
-﻿# v0.5.78 (2026-09-14)
+# v0.5.80 (2026-09-15)
+
+## Features
+- **CLI tools**: add DeepSeek Harness (`dsh`) integration — a new card writes an `afrouter` provider route (`llm-pi-ai.providers.afrouter`, `api: openai-completions`) into `$DSH_HOME/settings.yaml` and stores the key as `refs.AFROUTER_API_KEY` in `$DSH_HOME/.credentials.yaml`, so dsh's model picker offers AFRouter models without hand-editing YAML. Multi-model management with catalog-accurate `contextWindow`/`maxTokens`/`input`/`reasoningEfforts`, an optional DeepSeek thinking-off `compat` toggle, Manual Config snippets (settings + credentials + optional default-model pin), and a Reset that removes only the AFRouter route and preserves a real dashboard key. Honors `DSH_HOME`; writes are backup + atomic; a corrupt `settings.yaml` is never overwritten.
+
+## Fixes
+- **CLI tools**: ZCode card now reflects the real AFRouter entry contents (chips render every model in the entry; user-added models are dimmed and protected), hydration no longer clobbers an in-progress selection while the model modal is open, and a chip is removed only when the server confirms removal. Replace the placeholder icon with the official Z logo. Also names the provider entry AFRouter (not 9Router) — shipped too late for 0.5.79, which still bakes the old name.
+
+﻿# v0.5.79 (2026-09-15)
+
+## Features
+- **CLI tools**: add ZCode integration (provider card + settings route + spec-kit artifacts)
+- **Antigravity**: pool-aware quota routing with cache warm-up and 503 fit-block; grouped pool quota display with subscription tier badges; warm quota cache after background token refresh
+- **CommandCode**: track credit windows and plan allowance in the usage dashboard; record prompt-cache reads as usage detail
+- **Combos**: add Cursor/Claude default presets and bulk select
+- **Usage**: add all-time period to usage stats and chart
+- **GitHub**: track AI Credits and enforce local usage limits
+- **Models**: merge member capabilities into combo `/v1/models` entries
+- **Claude**: store account email and real plan on OAuth connect
+- **Providers**: add OrcaRouter (`orcarouter.ai`) — OpenAI-compatible gateway routing to OpenAI, Anthropic, Google, DeepSeek, Qwen, Kimi, GLM, MiniMax & more at provider cost; seeds current-gen models only (GPT 5.6 series, `orcarouter/free` / `orcarouter/fusion*` routers, the $0 free pool), plus embeddings/TTS/image endpoints and live `/v1/models` catalog fetching with older ids available on demand
+- **Capabilities**: resolve OrcaRouter router ids (`orcarouter/fusion*`, `orcarouter/free`) and its legacy `deepseek-chat`/`deepseek-reasoner` aliases (1M V4-Flash) with real catalog specs scoped to the provider; add `gpt-image-1.5`/`gpt-image-1-mini` to the canonical image-model table
+- **Dashboard**: fix suggested-models fetch for generic OpenAI-shaped catalogs (`openai` filter type was unregistered — tokenrouter, venice, vercel, perplexity-agent silently returned nothing); only catalogs whose filter actually selects $0 models are labeled "Suggested free models" now, free ids sort first, and ctx-less entries no longer render "NaNk ctx" tooltips; surface why a provider connection test failed
+
+## Fixes
+- **Auth**: don't cool down an account for a request-scoped 4xx
+- **Translator**: keep Responses tool-output images as images; strip `output_config.format` for Claude-compatible gateways
+- **Passthrough**: strip `output_config.format` for Claude passthrough targets
+- **RTK**: skip ponytail injection on media-carrying requests
+- **Cursor**: route bare Cursor catalog ids to `cu/` not `openai`
+- **CommandCode**: render credit amounts with a dot decimal
+- **Gemini**: do not mistake schema maps for schemas when recursing; expand shorthand string subschemas in tool declarations
+- **Stream**: stop blocking an Ollama upstream's NDJSON as a non-SSE body
+- **OAuth**: parse numeric epoch `expiresAt` so imported connections still refresh
+- **DB**: prevent silent database wipe on SQLite corruption and add startup `quick_check`
+- **Google PSE**: configure and validate search engine IDs
+
+## Performance
+- **Memory**: cap per-stream content/thinking capture to 4KB (`STREAM_CONTENT_CAPTURE_MAX`) — long agent/dashboard streams no longer pin the whole response text in heap; usage estimation still uses the unbounded `totalContentLength` counter. Remove the write-only unbounded content accumulator in the Ollama translator.
+- **Performance (usage stats)**: bound the `getUsageStats` last-used overlay scan to a 60-day window even for the `all` period, so the dashboard `/api/usage/stream` tick no longer reads the entire `usageHistory` table on every request.
+- **GitHub**: throttle AI Credits usage checks
+
+# v0.5.78 (2026-09-14)
 
 ## Features
 - **Rebrand**: rename everything from 9Router to AFRouter — packages (`afrouter-app`, `@afg473319/afrouter`), CLI binary (`afrouter`), data dirs (`~/.afrouter`), internal headers (`x-afr-*`), default keys (`sk_afrouter`), skill ids, and UI strings; default port stays **20128**

@@ -350,6 +350,22 @@ amp --model "{{model}}"
       { type: "warning", text: "Config path: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml" },
     ],
   },
+  "deepseek-harness": {
+    id: "deepseek-harness",
+    name: "DeepSeek Harness",
+    image: "/providers/deepseek-harness.png",
+    color: "#4D6BFE",
+    description: "DeepSeek Harness (dsh) agent runtime",
+    docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
+    configType: "custom",
+    defaultCommand: "dsh",
+    modelAliases: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    notes: [
+      { type: "info", text: "AFRouter writes an `afrouter` provider route into $DSH_HOME/settings.yaml and stores the key in $DSH_HOME/.credentials.yaml." },
+      { type: "info", text: "dsh re-reads settings on the next request and hot-reloads credentials — no restart needed. Pick the `afrouter` route in dsh's model picker." },
+      { type: "warning", text: "Config path: ~/.dsh/settings.yaml (or $DSH_HOME/settings.yaml). Apply rewrites the YAML document, so comments may be normalized." },
+    ],
+  },
   jcode: {
     id: "jcode",
     name: "jcode",

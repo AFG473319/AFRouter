@@ -11,6 +11,7 @@ export { default as CopilotToolCard } from "./CopilotToolCard";
 export { default as ClineToolCard } from "./ClineToolCard";
 export { default as KiloToolCard } from "./KiloToolCard";
 export { default as DeepSeekTuiToolCard } from "./DeepSeekTuiToolCard";
+export { default as DeepSeekHarnessToolCard } from "./DeepSeekHarnessToolCard";
 export { default as JcodeToolCard } from "./JcodeToolCard";
 export { default as GrokBuildToolCard } from "./GrokBuildToolCard";
 export { default as ZCodeToolCard } from "./ZCodeToolCard";
