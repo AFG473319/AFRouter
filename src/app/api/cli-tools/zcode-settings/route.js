@@ -87,28 +87,37 @@ const hasMarker = (modelEntry) => !!(modelEntry && modelEntry.zcode && modelEntr
 // config id like `oc/…` matches the live catalog's `opencode/…` spelling.
 const resolveAliasPrefix = (prefix) => resolveProviderAlias(prefix);
 
-// Ownership resolution (FR-008). The ledger is authoritative once written. When
-// it has no record for this config yet — every config predating the ledger, and
-// every config ZCode has already stripped the marker from — fall back to a
-// bootstrap pass so pre-existing AFRouter-added models become removable again
-// instead of being stranded as "user-added" forever.
-//
-// Bootstrap claims a key when it still carries the marker (freely-pasted Manual
-// Config snippets) or when AFRouter's own catalog/registry can serve it: the
-// entry is named AFRouter and points at our baseURL, so a model we can route is
-// one we added. Keys nothing can resolve are left alone as user data.
-const resolveOwnership = async (entry, catalog) => {
+// Ownership classification (FR-008). The ledger is authoritative once written:
+// owned + recorded marker keys only; unrecorded-but-marked keys are
+// candidates (freely-pasted Manual Config snippets). When the ledger has no
+// record for this config yet — every config predating the ledger, and every
+// config ZCode has already stripped the marker from — only marker-bearing
+// keys count as owned. Resolvable-but-unmarked keys are also reported as
+// `candidates`: they suggest a pre-ledger AFRouter apply, but routability
+// does not prove authorship, so DELETE never touches them and Apply only
+// adopts them with an explicit `adoptBootstrap` flag. Keys nothing can
+// resolve are left alone as user data.
+const classifyOwnership = async (entry, catalog) => {
   const keys = listModelKeys(entry);
   const { known, models } = await readOwnership(getConfigPath());
   if (known) {
     const recorded = new Set(models);
-    return { known, owned: keys.filter((k) => recorded.has(k)) };
+    const owned = keys.filter((k) => recorded.has(k));
+    const ownedKeys = new Set(owned);
+    return {
+      known,
+      owned,
+      candidates: keys.filter((k) => !ownedKeys.has(k) && hasMarker(entry.models?.[k])),
+    };
   }
-  if (keys.length === 0) return { known, owned: [] };
+  if (keys.length === 0) return { known, owned: [], candidates: [] };
 
   const { specs } = await resolveModelSpecs(keys, catalog);
-  const owned = keys.filter((k) => hasMarker(entry.models[k]) || specs.get(k)?.verified);
-  return { known, owned };
+  return {
+    known,
+    owned: keys.filter((k) => hasMarker(entry.models?.[k])),
+    candidates: keys.filter((k) => !hasMarker(entry.models?.[k]) && specs.get(k)?.verified),
+  };
 };
 
 // T007 (D1 + FR-005/FR-006): resolve specs from the live catalog —
@@ -213,9 +222,12 @@ const buildModelEntry = (spec) => {
 // ONLY on limit/modalities — reasoning variants/defaultVariant, name and
 // zcode.priority of a pre-existing entry are never overwritten. New keys get
 // the full built shape including the afrouter ownership marker (D2).
-const mergeModels = (entry, specs) => {
+// `onlyIds` scopes the write to ids in the current call so re-sending the
+// whole entry (card hydration) never rewrites specs of hand-added models.
+const mergeModels = (entry, specs, { onlyIds = null } = {}) => {
   const models = entry.models && typeof entry.models === "object" ? entry.models : {};
   for (const [id, spec] of specs) {
+    if (onlyIds && !onlyIds.has(id)) continue;
     const existing = models[id];
     if (existing && typeof existing === "object") {
       models[id] = {
@@ -239,9 +251,18 @@ const findEntryKey = (config) => {
 };
 
 // POST - merge AFRouter provider entry into ZCode config (contracts/zcode-settings-api.md)
+//
+// Ownership rule: `models` is the set of ids the card wants managed after
+// this call. Brand-new ids are created/adopted. Already-owned ids get their
+// limit/modalities refreshed (user-tuned fields preserved). Ids that are
+// neither owned nor marked are NOT adopted and NOT rewritten: they stay in the
+// entry byte-identical so re-sending the whole hydrated chip list can never
+// silently convert hand-added models into deletable ones. Adopting such a
+// pre-ledger bootstrap candidate requires the explicit `adoptBootstrap` flag.
+// Endpoint/apiKey refresh always applies.
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, models } = await request.json();
+    const { baseUrl, apiKey, models, adoptBootstrap } = await request.json();
     const modelsArray = Array.isArray(models) ? models.filter((m) => typeof m === "string" && m) : [];
     if (!baseUrl || modelsArray.length === 0) {
       return NextResponse.json({ error: "baseUrl and at least one model are required" }, { status: 400 });
@@ -282,17 +303,45 @@ export async function POST(request) {
       ...(apiKey ? { apiKey } : {}),
     };
 
-    mergeModels(entry, specs);
-    // Record ownership in the ledger, not just the config: models applied
-    // earlier that are still present stay owned, ones the user removed drop
-    // out, and a model re-added by hand inside ZCode is no longer claimed.
-    const { owned } = await resolveOwnership(entry, catalog);
-    const present = new Set(listModelKeys(entry));
-    await writeOwnership(
-      getConfigPath(),
-      [...new Set([...owned.filter((k) => present.has(k)), ...modelsArray])]
+    // Ownership + writability share one classification so they agree when the
+    // live catalog is unavailable (test harness rejects fetch): pre-existing
+    // resolvable ids fall back to the static registry for both.
+    const { owned, candidates } = await classifyOwnership(entry, catalog);
+    const ownedSet = new Set(owned);
+    const existingKeys = new Set(listModelKeys(entry));
+    // Writability is "owned OR brand-new OR explicitly adopted candidate".
+    // Brand-new ids are created/adopted. Adopting a pre-existing candidate
+    // requires it to be in the call AND the explicit flag — so the card's
+    // "Adopt as mine" button works, but merely re-sending the whole hydrated
+    // chip list never claims anything. Re-sent-but-unowned ids stay
+    // byte-identical below because they are not in `writable`.
+    const adoptedCandidates = new Set(
+      modelsArray.filter((id) => existingKeys.has(id) && candidates.includes(id) && adoptBootstrap === true)
     );
+    const markedKeys = new Set(modelsArray.filter((id) => hasMarker(entry.models?.[id])));
+    const writableNew = new Set([
+      ...modelsArray.filter(
+        (id) =>
+          adoptBootstrap === true ||
+          !existingKeys.has(id) ||
+          markedKeys.has(id) ||
+          specs.get(id)?.verified !== true
+      ),
+      ...adoptedCandidates,
+    ]);
+    const writable = new Set([...ownedSet, ...writableNew]);
+    mergeModels(entry, specs, { onlyIds: writable });
+    // Record ownership in the ledger, not just the config. Only writable ids
+    // are adopted; previously owned ids merely need to still be present, and
+    // ones the user removed drop out. A re-added-by-hand id is no longer
+    // claimed by default.
+    const present = new Set(listModelKeys(entry));
+    const adopted = [
+      ...owned.filter((k) => present.has(k)),
+      ...[...writableNew].filter((k) => present.has(k)),
+    ];
     const { backupPath } = await writeConfigAtomic(config);
+    await writeOwnership(getConfigPath(), [...new Set(adopted)]);
 
     return NextResponse.json({
       success: true,
@@ -310,8 +359,10 @@ export async function POST(request) {
 }
 
 // DELETE - ownership-scoped removal (D2 / FR-008). Only models AFRouter owns
-// (per the durable ledger, or the bootstrap fallback for pre-ledger configs) are
-// removed; user-added models in the same entry survive. The entry itself is
+// (per the durable ledger, or still-marked keys on pre-ledger configs) are
+// removed; user-added models in the same entry survive. Bootstrap candidates
+// (resolvable but unmarked, no ledger record) are reported as
+// `skippedCandidates` and never deleted silently. The entry itself is
 // deleted only when its models map becomes empty.
 export async function DELETE(request) {
   try {
@@ -320,19 +371,19 @@ export async function DELETE(request) {
 
     const result = await readConfig();
     if (result.corrupt || result.notInstalled) {
-      return NextResponse.json({ success: true, message: "No ZCode config to reset", removed: 0, entryRemoved: false });
+      return NextResponse.json({ success: true, message: "No ZCode config to reset", removed: 0, entryRemoved: false, skippedCandidates: [] });
     }
 
     const config = result.data;
     const entryKey = findEntryKey(config);
     if (!entryKey) {
-      return NextResponse.json({ success: true, message: "No AFRouter entry in ZCode config", removed: 0, entryRemoved: false });
+      return NextResponse.json({ success: true, message: "No AFRouter entry in ZCode config", removed: 0, entryRemoved: false, skippedCandidates: [] });
     }
 
     const entry = config.provider[entryKey];
     const models = entry.models && typeof entry.models === "object" ? entry.models : {};
     const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
-    const { owned } = await resolveOwnership(entry, catalog);
+    const { owned, candidates } = await classifyOwnership(entry, catalog);
     const ownedSet = new Set(owned);
     let removed = 0;
     for (const key of Object.keys(models)) {
@@ -342,6 +393,12 @@ export async function DELETE(request) {
         removed++;
       }
     }
+
+    // Bootstrap candidates are never deleted silently: a full Reset reports
+    // them so the user can adopt-then-remove or delete by hand inside ZCode.
+    const remainingCandidates = modelToRemove
+      ? []
+      : candidates.filter((k) => Object.prototype.hasOwnProperty.call(models, k));
 
     let entryRemoved = false;
     if (Object.keys(models).length === 0) {
@@ -365,6 +422,7 @@ export async function DELETE(request) {
         : `Removed ${removed} AFRouter model${removed === 1 ? "" : "s"} from ZCode`,
       removed,
       entryRemoved,
+      skippedCandidates: remainingCandidates,
     });
   } catch (error) {
     console.log("Error resetting zcode settings:", error);
@@ -399,11 +457,18 @@ export async function GET(request) {
     // catalog or static registry so the card can badge them (FR-006).
     let unverified = [];
     let owned = [];
+    let candidates = [];
+    // The self origin takes the request port when available; the batch
+    // `all-statuses` endpoint calls GET with no request, so fall back to the
+    // dashboard default port before giving up on the live catalog entirely.
+    let catalog = null;
     if (entry && models.length > 0) {
-      const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
+      catalog =
+        (await resolveLiveCatalog(resolveSelfOrigin(request)))
+        || (await resolveLiveCatalog(`http://127.0.0.1:${process.env.PORT || 20128}`));
       const { specs } = await resolveModelSpecs(models, catalog);
       unverified = models.filter((k) => specs.get(k) && !specs.get(k).verified);
-      ({ owned } = await resolveOwnership(entry, catalog));
+      ({ owned, candidates } = await classifyOwnership(entry, catalog));
     }
     return NextResponse.json({
       installed: true,
@@ -416,6 +481,7 @@ export async function GET(request) {
         afrouterModels: owned,
         unverified,
         baseURL: entry?.options?.baseURL || null,
+        bootstrapCandidates: candidates,
       },
     });
   } catch (error) {

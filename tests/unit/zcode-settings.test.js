@@ -5,8 +5,11 @@
  *  - GET never 500s on missing/corrupt config (SC-004)
  *  - POST creates the AFRouter entry (UUID key) and records ownership in the
  *    ~/.afrouter ledger as well as stamping the in-config marker
+ *  - POST only adopts ids in the call: re-sending the whole entry never
+ *    escalates hand-added models into owned ones
  *  - POST refresh preserves user-tuned fields (variants/name/priority, FR-005)
  *  - DELETE is ownership-scoped: user-added models survive (FR-008)
+ *  - DELETE never removes pre-ledger bootstrap candidates silently
  *  - DELETE removes the whole entry only when its models map empties
  *  - Ownership survives ZCode rewriting config.json without the marker — the
  *    regression this suite exists to pin down.
@@ -36,7 +39,8 @@ vi.mock("next/server", () => ({
 
 // Only ids in this table resolve; everything else returns NaN so it takes the
 // conservative-fallback path. Drives both the FR-006 badge and the bootstrap
-// ownership pass (a resolvable model inside the AFRouter entry is ours).
+// candidate pass (a resolvable model suggests a pre-ledger AFRouter apply, but
+// routability alone never proves ownership).
 const RESOLVABLE = new Set([
   "cl/z-ai/glm-5.3-flash",
   "oc/mimo-v2.5-free",
@@ -139,7 +143,7 @@ describe("GET /api/cli-tools/zcode-settings", () => {
     expect(res.body.zcode).toBeNull();
   });
 
-  it("separates AFRouter-managed models from user-added ones", async () => {
+  it("reports bootstrap candidates separately instead of claiming them", async () => {
     writeFixture(
       entryFixture({
         "mine/hand-added": { zcode: { modalitiesConfigured: true } },
@@ -147,11 +151,25 @@ describe("GET /api/cli-tools/zcode-settings", () => {
       })
     );
     const res = await GET();
+    expect(res.status).toBe(200);
     expect(res.body.hasAFRouter).toBe(true);
     expect(res.body.zcode.models).toHaveLength(2);
-    // No ledger yet: bootstrap claims the resolvable id, leaves the unknown one.
-    expect(res.body.zcode.afrouterModels).toEqual(["cl/z-ai/glm-5.3-flash"]);
+    // No ledger yet: the resolvable id is a candidate, not owned — Reset must
+    // not touch it and the card offers explicit adoption instead.
+    expect(res.body.zcode.afrouterModels).toEqual([]);
+    expect(res.body.zcode.bootstrapCandidates).toEqual(["cl/z-ai/glm-5.3-flash"]);
     expect(res.body.ambiguousEntry).toBe(false);
+  });
+
+  it("still owns still-marked keys on pre-ledger configs", async () => {
+    writeFixture(
+      entryFixture({
+        "cl/z-ai/glm-5.3-flash": { zcode: { modalitiesConfigured: true, afrouter: true } },
+      })
+    );
+    const res = await GET();
+    expect(res.body.zcode.afrouterModels).toEqual(["cl/z-ai/glm-5.3-flash"]);
+    expect(res.body.zcode.bootstrapCandidates).toEqual([]);
   });
 
   it("keeps claiming models whose marker ZCode stripped once the ledger exists", async () => {
@@ -268,6 +286,43 @@ describe("POST /api/cli-tools/zcode-settings", () => {
     expect(findEntry(cfg).models["mine/hand-added"]).toEqual(userModel);
   });
 
+  it("does not touch specs or ownership of hand-added models merely re-sent by the card", async () => {
+    const userModel = {
+      limit: { context: 999, output: 9 },
+      modalities: { input: ["text"], output: ["text"] },
+      zcode: { modalitiesConfigured: true },
+    };
+    writeFixture({
+      provider: {
+        existing: {
+          name: "AFRouter",
+          source: "custom",
+          kind: "openai-compatible",
+          options: { apiKey: "k", baseURL: "http://x/v1" },
+          models: { "cl/z-ai/glm-5.3-flash": userModel },
+        },
+      },
+    });
+    // The card hydrates chips from the whole entry, so Apply re-sends even
+    // ids it never added. The resolvable-but-unowned id must keep its user
+    // specs and stay out of the ledger without the explicit adopt flag.
+    const res = await post({ baseUrl: "http://x/v1", models: ["cl/z-ai/glm-5.3-flash"] });
+    expect(res.status).toBe(200);
+    const cfg = readConfigFile();
+    expect(findEntry(cfg).models["cl/z-ai/glm-5.3-flash"]).toEqual(userModel);
+    expect(readLedger()[configPath()]?.models ?? []).toEqual([]);
+  });
+
+  it("adopts bootstrap candidates only with the explicit flag", async () => {
+    writeFixture(entryFixture({ "cl/z-ai/glm-5.3-flash": { zcode: { modalitiesConfigured: true } } }));
+    // Without the flag the candidate stays user data even when re-sent.
+    await post({ baseUrl: "http://127.0.0.1:20128/v1", models: ["cl/z-ai/glm-5.3-flash", "unknown/new-model"] });
+    expect(readLedger()[configPath()].models).toEqual(["unknown/new-model"]);
+    // With the flag the candidate present in the call is adopted too.
+    await post({ baseUrl: "http://127.0.0.1:20128/v1", models: ["cl/z-ai/glm-5.3-flash", "unknown/new-model"], adoptBootstrap: true });
+    expect(readLedger()[configPath()].models).toEqual(expect.arrayContaining(["cl/z-ai/glm-5.3-flash", "unknown/new-model"]));
+  });
+
   it("does not claim an unresolvable pre-existing model when applying", async () => {
     writeFixture(entryFixture({ "mine/hand-added": { zcode: {} } }));
     await post({ baseUrl: "http://127.0.0.1:20128/v1", models: ["unknown/new-model"] });
@@ -284,6 +339,9 @@ describe("POST /api/cli-tools/zcode-settings", () => {
 
 describe("DELETE /api/cli-tools/zcode-settings", () => {
   function deleteFixture() {
+    // Pre-ledger fixture with explicit markers (e.g. freshly applied, ZCode
+    // has not rewritten the file yet): marked ids are owned, the unmarked one
+    // is user data.
     return entryFixture({
       "af/one": { zcode: { afrouter: true } },
       "af/two": { zcode: { afrouter: true } },
@@ -313,6 +371,26 @@ describe("DELETE /api/cli-tools/zcode-settings", () => {
     expect(findEntry(readConfigFile())).toBeUndefined();
   });
 
+  it("never deletes a bootstrap candidate silently; reports it instead", async () => {
+    // Pre-ledger config, no markers, resolvable id: Reset removes nothing and
+    // reports the candidate so the UI can offer adopt-or-remove.
+    writeFixture(entryFixture({ "cl/z-ai/glm-5.3-flash": { zcode: { modalitiesConfigured: true } } }));
+    const res = await del(null);
+    expect(res.body.removed).toBe(0);
+    expect(res.body.entryRemoved).toBe(false);
+    expect(res.body.skippedCandidates).toEqual(["cl/z-ai/glm-5.3-flash"]);
+    expect(findEntry(readConfigFile()).models["cl/z-ai/glm-5.3-flash"]).toBeDefined();
+  });
+
+  it("adopts then removes a candidate in two explicit steps", async () => {
+    writeFixture(entryFixture({ "cl/z-ai/glm-5.3-flash": { zcode: { modalitiesConfigured: true } } }));
+    await post({ baseUrl: "http://127.0.0.1:20128/v1", models: ["cl/z-ai/glm-5.3-flash", "unknown/new-model"], adoptBootstrap: true });
+    const res = await del(null);
+    expect(res.body.removed).toBe(2);
+    expect(res.body.entryRemoved).toBe(true);
+    expect(findEntry(readConfigFile())).toBeUndefined();
+  });
+
   it("single-model delete is idempotent for user-added models (removed: 0)", async () => {
     writeFixture(deleteFixture());
     const res = await del("mine/keep");
@@ -321,8 +399,10 @@ describe("DELETE /api/cli-tools/zcode-settings", () => {
   });
 
   it("removes a single owned model and drops it from the ledger", async () => {
+    // Adopt the pre-existing ids explicitly (card "Adopt as mine" flow), then
+    // a single-model delete removes just that id from config + ledger.
     writeFixture(entryFixture({ "cl/z-ai/glm-5.3-flash": {}, "oc/mimo-v2.5-free": {} }));
-    await post({ baseUrl: "http://127.0.0.1:20128/v1", models: ["cl/z-ai/glm-5.3-flash", "oc/mimo-v2.5-free"] });
+    await post({ baseUrl: "http://127.0.0.1:20128/v1", models: ["cl/z-ai/glm-5.3-flash", "oc/mimo-v2.5-free"], adoptBootstrap: true });
     const res = await del("oc/mimo-v2.5-free");
     expect(res.body.removed).toBe(1);
     expect(readLedger()[configPath()].models).toEqual(["cl/z-ai/glm-5.3-flash"]);
@@ -335,6 +415,7 @@ describe("DELETE /api/cli-tools/zcode-settings", () => {
     writeFixture(f);
     const res = await del(null);
     expect(res.body.entryRemoved).toBe(true);
+    expect(res.body.skippedCandidates).toEqual([]);
     expect(findEntry(readConfigFile())).toBeUndefined();
   });
 

@@ -66,10 +66,3 @@ export async function writeOwnership(configPath, models) {
     }
   }
 }
-
-export async function removeOwnedModels(configPath, models) {
-  const drop = new Set(models || []);
-  const { known, models: current } = await readOwnership(configPath);
-  if (!known) return;
-  await writeOwnership(configPath, current.filter((m) => !drop.has(m)));
-}

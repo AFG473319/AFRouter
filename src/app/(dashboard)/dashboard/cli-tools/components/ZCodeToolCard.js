@@ -99,7 +99,7 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
     }
   };
 
-  const handleApply = async () => {
+  const handleApply = async (adoptBootstrap = false) => {
     setApplying(true);
     setMessage(null);
     try {
@@ -114,6 +114,7 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
           baseUrl: getEffectiveBaseUrl(),
           apiKey: keyToUse,
           models: selectedModels,
+          ...(adoptBootstrap ? { adoptBootstrap: true } : {}),
         }),
       });
       const data = await res.json();
@@ -121,6 +122,9 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
         rememberEndpoint(getEffectiveBaseUrl(), { tunnelPublicUrl, tailscaleUrl });
         const unverifiedNote = Array.isArray(data.unverified) && data.unverified.length > 0
           ? ` Unverified (not in catalog, conservative specs): ${data.unverified.join(", ")}.`
+          : "";
+        const candidateNote = Array.isArray(data.skippedCandidates) && data.skippedCandidates.length > 0
+          ? ` Left untouched (looks AFRouter-added but not recorded — adopt inside ZCode or re-add): ${data.skippedCandidates.join(", ")}.`
           : "";
         setMessage({ type: "success", text: "ZCode settings applied! Restart ZCode if it is running — it loads config at session start." + unverifiedNote });
         checkStatus();
@@ -141,7 +145,10 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
       const res = await fetch(ENDPOINT, { method: "DELETE" });
       const data = await res.json();
       if (res.ok) {
-        setMessage({ type: "success", text: data.message || "AFRouter models removed from ZCode!" });
+        const candidateNote = Array.isArray(data.skippedCandidates) && data.skippedCandidates.length > 0
+          ? ` Left untouched (not recorded as AFRouter-added): ${data.skippedCandidates.join(", ")}.`
+          : "";
+        setMessage({ type: "success", text: (data.message || "AFRouter models removed from ZCode!") + candidateNote });
         setSelectedModels([]);
         checkStatus();
       } else {
@@ -169,9 +176,12 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
     }
   };
 
-  // AFRouter-managed (marker-bearing) models can be removed from the card;
-  // user-added ones are read-only here and are managed inside ZCode.
+  // AFRouter-owned models can be removed from the card; user-added ones are
+  // read-only here and are managed inside ZCode. Bootstrap candidates look
+  // AFRouter-added but were never recorded — offer one-click adoption instead
+  // of letting Apply claim them silently.
   const managedModels = status?.zcode?.afrouterModels || [];
+  const candidateModels = status?.zcode?.bootstrapCandidates || [];
 
   // Snippet mirrors the exact entry shape the route writes (data-model.md),
   // including the zcode.afrouter ownership marker, so remotely-pasted configs
@@ -338,6 +348,21 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
                     </div>
                     <button onClick={() => setModalOpen(true)} disabled={!activeProviders?.length} className={`self-start px-2 py-1 rounded border text-xs transition-colors ${activeProviders?.length ? "bg-surface border-border text-text-main hover:border-primary cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}>Add Model</button>
                     <span className="text-xs text-text-muted">Highlighted models are AFRouter-managed (× to remove); dimmed ones were added outside AFRouter and are left untouched. Pick the active model inside ZCode — AFRouter does not set it.</span>
+                    {candidateModels.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2 rounded border border-yellow-500/40 bg-yellow-500/10 px-2 py-1.5 text-xs text-yellow-700 dark:text-yellow-300">
+                        <span>Possible AFRouter models from before tracking ({candidateModels.join(", ")}) — Reset will not touch them.</span>
+                        <button
+                          onClick={() => handleApply(true)}
+                          disabled={applying || selectedModels.length === 0}
+                          className="rounded border border-yellow-500/50 px-2 py-0.5 hover:bg-yellow-500/20 disabled:opacity-50"
+                        >
+                          Adopt as mine
+                        </button>
+                      </div>
+                    )}
+                    {status?.ambiguousEntry && (
+                      <span className="text-xs text-yellow-600 dark:text-yellow-400">Multiple AFRouter entries found in ZCode config — showing the first. Merge them inside ZCode to avoid surprises.</span>
+                    )}
                   </div>
                 </div>
 
