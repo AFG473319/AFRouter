@@ -6,6 +6,8 @@ import path from "path";
 import os from "os";
 import crypto from "crypto";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { resolveProviderAlias } from "open-sse/services/model.js";
+import { readOwnership, writeOwnership } from "@/lib/zcodeModelOwnership.js";
 
 const PROVIDER_NAME = "AFRouter";
 
@@ -73,26 +75,79 @@ const writeConfigAtomic = async (config) => {
 
 const listModelKeys = (entry) => Object.keys((entry && entry.models) || {});
 
-const isAFRouterAdded = (modelEntry) => !!(modelEntry && modelEntry.zcode && modelEntry.zcode.afrouter === true);
+// The in-config marker is written for interop, but it is NOT durable: ZCode
+// rebuilds every model entry from its own key list on exit and drops unknown
+// keys, so `zcode.afrouter` disappears the first time ZCode closes. Observed on
+// a real config (7 marked models -> 7 unmarked, none removed), which is why
+// ownership is tracked in the ~/.afrouter ledger instead and the marker is only
+// a bootstrap hint.
+const hasMarker = (modelEntry) => !!(modelEntry && modelEntry.zcode && modelEntry.zcode.afrouter === true);
+
+// Alias -> provider id, using the same resolver the request path uses, so a
+// config id like `oc/…` matches the live catalog's `opencode/…` spelling.
+const resolveAliasPrefix = (prefix) => resolveProviderAlias(prefix);
+
+// Ownership resolution (FR-008). The ledger is authoritative once written. When
+// it has no record for this config yet — every config predating the ledger, and
+// every config ZCode has already stripped the marker from — fall back to a
+// bootstrap pass so pre-existing AFRouter-added models become removable again
+// instead of being stranded as "user-added" forever.
+//
+// Bootstrap claims a key when it still carries the marker (freely-pasted Manual
+// Config snippets) or when AFRouter's own catalog/registry can serve it: the
+// entry is named AFRouter and points at our baseURL, so a model we can route is
+// one we added. Keys nothing can resolve are left alone as user data.
+const resolveOwnership = async (entry, catalog) => {
+  const keys = listModelKeys(entry);
+  const { known, models } = await readOwnership(getConfigPath());
+  if (known) {
+    const recorded = new Set(models);
+    return { known, owned: keys.filter((k) => recorded.has(k)) };
+  }
+  if (keys.length === 0) return { known, owned: [] };
+
+  const { specs } = await resolveModelSpecs(keys, catalog);
+  const owned = keys.filter((k) => hasMarker(entry.models[k]) || specs.get(k)?.verified);
+  return { known, owned };
+};
 
 // T007 (D1 + FR-005/FR-006): resolve specs from the live catalog —
 // self-fetch of our own /v1/models (no auth), falling back to the static
 // registry, then conservative fallback + unverified flag. Never invent values.
-const resolveLiveCatalog = async () => {
+const resolveLiveCatalog = async (origin) => {
   try {
-    const port = process.env.PORT || 20128;
-    const res = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${origin}/v1/models`, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) return null;
     const json = await res.json();
     const models = Array.isArray(json?.data) ? json.data : [];
     const byId = new Map();
+    // Also index by alias-translated id so config ids using a different alias
+    // spelling than the catalog (e.g. `oc/…` vs `opencode/…`) still hit.
+    const byAliasId = new Map();
     for (const m of models) {
-      if (m?.id && m.capabilities) byId.set(m.id, m.capabilities);
+      if (!m?.id || !m.capabilities) continue;
+      byId.set(m.id, m.capabilities);
+      const bare = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
+      const owner = m.owned_by || (m.id.includes("/") ? m.id.slice(0, m.id.indexOf("/")) : null);
+      if (bare && owner) byAliasId.set(`${owner}/${bare}`, m.capabilities);
     }
-    return byId;
+    return { byId, byAliasId };
   } catch {
     return null;
   }
+};
+
+// Self-fetch must target the port this instance actually listens on. The
+// request URL carries it; `process.env.PORT` is only a fallback because the
+// Next server may be started with --port and no PORT env.
+const resolveSelfOrigin = (request) => {
+  try {
+    const url = new URL(request?.url || "");
+    if (url.port) return `http://127.0.0.1:${url.port}`;
+  } catch {
+    // fall through
+  }
+  return `http://127.0.0.1:${process.env.PORT || 20128}`;
 };
 
 const capsToSpec = (caps) => ({
@@ -107,18 +162,24 @@ const capsToSpec = (caps) => ({
   reasoning: caps.reasoning === true,
 });
 
-// Resolve model IDs -> per-ID spec + unverified list. Catalog first, static
-// registry second, conservative fallback (flagged) last.
-const resolveModelSpecs = async (ids) => {
-  const catalog = await resolveLiveCatalog();
+// Resolve model IDs -> per-ID spec + unverified list. Catalog first (exact id,
+// then alias-translated id), static registry second, conservative fallback
+// (flagged) last.
+const resolveModelSpecs = async (ids, catalog) => {
   const specs = new Map();
   const unverified = [];
   for (const id of ids) {
-    let caps = catalog?.get(id) || null;
+    const bare = id.includes("/") ? id.slice(id.indexOf("/") + 1) : id;
+    const prefix = id.includes("/") ? id.slice(0, id.indexOf("/")) : null;
+    let caps = catalog?.byId?.get(id) || null;
+    if (!caps && prefix) {
+      const translatedPrefix = resolveAliasPrefix(prefix);
+      caps = catalog?.byAliasId?.get(`${translatedPrefix}/${bare}`)
+        || catalog?.byAliasId?.get(`${prefix}/${bare}`)
+        || null;
+    }
     if (!caps) {
-      const bare = id.includes("/") ? id.slice(id.indexOf("/") + 1) : id;
-      const provider = id.includes("/") ? id.slice(0, id.indexOf("/")) : null;
-      const staticCaps = getCapabilitiesForModel(provider, bare);
+      const staticCaps = getCapabilitiesForModel(prefix, bare);
       if (staticCaps && Number.isFinite(staticCaps.contextWindow)) {
         caps = staticCaps;
       }
@@ -197,7 +258,8 @@ export async function POST(request) {
     }
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    const { specs, unverified } = await resolveModelSpecs(modelsArray);
+    const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
+    const { specs, unverified } = await resolveModelSpecs(modelsArray, catalog);
 
     // Upsert entry: fresh UUID key when absent (D4), preserve otherwise.
     let entryKey = findEntryKey(config);
@@ -221,6 +283,15 @@ export async function POST(request) {
     };
 
     mergeModels(entry, specs);
+    // Record ownership in the ledger, not just the config: models applied
+    // earlier that are still present stay owned, ones the user removed drop
+    // out, and a model re-added by hand inside ZCode is no longer claimed.
+    const { owned } = await resolveOwnership(entry, catalog);
+    const present = new Set(listModelKeys(entry));
+    await writeOwnership(
+      getConfigPath(),
+      [...new Set([...owned.filter((k) => present.has(k)), ...modelsArray])]
+    );
     const { backupPath } = await writeConfigAtomic(config);
 
     return NextResponse.json({
@@ -238,9 +309,10 @@ export async function POST(request) {
   }
 }
 
-// DELETE - marker-scoped removal (D2 / FR-008): only models carrying
-// zcode.afrouter === true are removed; user-added models in the same entry
-// survive. The entry itself is deleted only when its models map becomes empty.
+// DELETE - ownership-scoped removal (D2 / FR-008). Only models AFRouter owns
+// (per the durable ledger, or the bootstrap fallback for pre-ledger configs) are
+// removed; user-added models in the same entry survive. The entry itself is
+// deleted only when its models map becomes empty.
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -259,10 +331,13 @@ export async function DELETE(request) {
 
     const entry = config.provider[entryKey];
     const models = entry.models && typeof entry.models === "object" ? entry.models : {};
+    const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
+    const { owned } = await resolveOwnership(entry, catalog);
+    const ownedSet = new Set(owned);
     let removed = 0;
     for (const key of Object.keys(models)) {
       const matches = modelToRemove ? key === modelToRemove : true;
-      if (matches && isAFRouterAdded(models[key])) {
+      if (matches && ownedSet.has(key)) {
         delete models[key];
         removed++;
       }
@@ -276,6 +351,11 @@ export async function DELETE(request) {
 
     if (removed > 0 || entryRemoved) {
       await writeConfigAtomic(config);
+      const remaining = Object.keys(models);
+      await writeOwnership(
+        getConfigPath(),
+        entryRemoved ? [] : owned.filter((k) => remaining.includes(k))
+      );
     }
 
     return NextResponse.json({
@@ -292,7 +372,7 @@ export async function DELETE(request) {
   }
 }
 // GET - report install + AFRouter routing status per contracts/zcode-settings-api.md
-export async function GET() {
+export async function GET(request) {
   try {
     const result = await readConfig();
     if (result.notInstalled) {
@@ -318,9 +398,12 @@ export async function GET() {
     // T013: flag entry models whose specs are not resolvable from the live
     // catalog or static registry so the card can badge them (FR-006).
     let unverified = [];
+    let owned = [];
     if (entry && models.length > 0) {
-      const { specs } = await resolveModelSpecs(models);
+      const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
+      const { specs } = await resolveModelSpecs(models, catalog);
       unverified = models.filter((k) => specs.get(k) && !specs.get(k).verified);
+      ({ owned } = await resolveOwnership(entry, catalog));
     }
     return NextResponse.json({
       installed: true,
@@ -330,7 +413,7 @@ export async function GET() {
       ambiguousEntry: ambiguous,
       zcode: {
         models,
-        afrouterModels: entry ? models.filter((k) => isAFRouterAdded(entry.models[k])) : [],
+        afrouterModels: owned,
         unverified,
         baseURL: entry?.options?.baseURL || null,
       },

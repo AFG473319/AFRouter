@@ -17,7 +17,9 @@ All unknowns were resolved by direct observation of a live ZCode config and AFRo
 
 ## D2: AFRouter-ownership tracking for selective DELETE (FR-008)
 
-**Decision**: In-config marker — every model AFRouter writes gets `zcode: { modalitiesConfigured: true, afrouter: true }`. DELETE removes only entries carrying `afrouter: true`; when none remain, the whole `AFRouter` entry is removed. Pre-existing (user-added) models never carry the marker and are never removed. The Manual Config snippet includes the marker so remotely-configured setups get identical ownership semantics.
+**Status: REVISED — the in-config marker does not survive.** The original decision below was falsified in production; see "Outcome" at the end of this section.
+
+**Decision (original)**: In-config marker — every model AFRouter writes gets `zcode: { modalitiesConfigured: true, afrouter: true }`. DELETE removes only entries carrying `afrouter: true`; when none remain, the whole `AFRouter` entry is removed. Pre-existing (user-added) models never carry the marker and are never removed. The Manual Config snippet includes the marker so remotely-configured setups get identical ownership semantics.
 
 **Rationale**: Keeps AFRouter stateless (constitution IV spirit: no new AFRouter-side persistence for what is config-file state), and the marker travels inside the config file — correct behavior even for configs copied across machines. Safe extensibility is observed: real configs show the `zcode` block carrying varied extra keys (`modalitiesConfigured`, `modified`, `priority`), and ZCode tolerates entries with/without each.
 
@@ -27,6 +29,23 @@ All unknowns were resolved by direct observation of a live ZCode config and AFRo
 - Treat whole entry as AFRouter-owned (Hermes-style full-entry delete): rejected by clarification Q5 — must preserve user-added models.
 
 **Risk**: ZCode could, in principle, rewrite/drop unknown keys inside `zcode` blocks. Mitigation: quickstart verification step (apply → relaunch ZCode → confirm marker survived and picker works). If ZCode strips it, fall back to spec-hash matching is possible but not needed unless proven broken.
+
+**Outcome (2026-09-15): the risk materialized — this cost both usability bugs the feature then shipped with.**
+
+ZCode rewrites `~/.zcode/v2/config.json` on exit and rebuilds each model entry from a fixed key list. Its schema for the model-level `zcode` block (extracted from `app.asar`) is `{ modalitiesConfigured, kinds, defaultKind, modelIdByKind, disabledReason, supportsTools, supportsStructuredOutput, reasoningProfile, reasoning, hasMaxOutputTokens, priority, modified, deleted }` — our `afrouter` key is not in it, so it is dropped on the next ZCode close even though the block itself is preserved.
+
+Evidence from one real config's timestamped backups: `…134741` had 7 models / 7 marked; `…141826` and later had 10 / 0 — every marker gone, zero models removed. Consequences:
+
+1. "Can't remove the models" — DELETE tested `zcode.afrouter === true`, so after the first ZCode close nothing was removable and the whole card silently degraded to "user-added, manage inside ZCode".
+2. "Doesn't recognize its own models" — the card's `afrouterModels` list came from the same marker, so it rendered empty.
+
+**Revised decision**: ownership lives in a durable ledger at `~/.afrouter/zcode-model-ownership.json`, keyed by config path (`src/lib/zcodeModelOwnership.js`); the marker is still written for interop but is only a bootstrap hint. When the ledger has no record for a config, `resolveOwnership` bootstraps by claiming keys that either still carry the marker or resolve in AFRouter's own catalog/static registry — the entry is named AFRouter and points at our baseURL, so a routable key is one we added. Unresolvable keys are left alone as user data. The ledger is rewritten on every apply/delete, so a key removed by the user drops out of ownership and a hand-re-added key is no longer claimed.
+
+Two related fixes shipped with it:
+- `resolveModelSpecs` now matches a config id against the live catalog through the request path's own alias resolver, so `oc/…` IDs match the catalog's `opencode/…` spelling instead of needlessly falling back to conservative specs.
+- The catalog self-fetch derives its port from the incoming request URL instead of assuming `process.env.PORT` (the Next server is commonly started with `--port` and no `PORT` env, which made the fetch miss and every model look unverified).
+
+**Cost of the original choice**: it was the cheapest option only while true. Because it was load-bearing for both recognition and removal, one wrong assumption broke two user-visible features at once, and it took a relaunch to surface. A marker whose survival is an assumption should not gate a destructive operation.
 
 ## D3: Atomic write + backup on Windows (FR-007)
 
