@@ -28,6 +28,20 @@ const SUBSCRIPTIONS_URL = `${API_BASE}/alpha/billing/subscriptions`;
 // header so upstream sees one consistent client identity.
 const CLI_VERSION = "0.25.7";
 
+// Upstream plan ids → friendly dashboard labels (from the 9Router Quota
+// Tracker contribution). The raw planId is still shown alongside so
+// quota-table snapshots stay greppable.
+const PLAN_NAMES = {
+  "individual-go": "Go",
+  "individual-goat": "GOAT",
+  "individual-pro": "Pro",
+  "individual-pro-v1": "Pro",
+  "individual-provider": "Provider",
+  "individual-max": "Max",
+  "individual-ultra": "Ultra",
+  "teams-pro": "Teams Pro",
+};
+
 function buildHeaders(apiKey) {
   return {
     Authorization: `Bearer ${apiKey}`,
@@ -190,7 +204,10 @@ export async function getCommandCodeUsage(apiKey = null, proxyOptions = null) {
     const limited = windowLimits?.limited === true;
     const planId = subscription.data?.data?.planId || null;
 
-    const planLabel = planId ? `Command Code (${planId})` : "Command Code";
+    const friendlyPlan = (planId && PLAN_NAMES[planId]) || null;
+    const planLabel = planId
+      ? `Command Code (${friendlyPlan ? `${friendlyPlan} · ` : ""}${planId})`
+      : "Command Code";
     return {
       plan: limited && exceeded ? `${planLabel} — limit exceeded` : planLabel,
       quotas: quotaMap,
