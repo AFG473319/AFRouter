@@ -1,10 +1,20 @@
 "use client";
 
-import { DEFAULT_LOCALE, LOCALE_COOKIE, normalizeLocale } from "./config";
+import { DEFAULT_LOCALE, LOCALE_COOKIE, normalizeLocale, getLocaleDir } from "./config";
 
 let translationMap = {};
 let currentLocale = DEFAULT_LOCALE;
 let reloadCallbacks = [];
+
+// Apply <html lang dir> so RTL locales (fa/ar/he/ur) flip layout and fix
+// mixed Persian+English line ordering (bidi). Must run on init + every
+// locale switch + route change (via reloadTranslations).
+export function applyLocaleToDocument(locale) {
+  if (typeof document === "undefined") return;
+  const normalized = normalizeLocale(locale);
+  document.documentElement.lang = normalized;
+  document.documentElement.dir = getLocaleDir(normalized);
+}
 
 // Read locale from cookie
 function getLocaleFromCookie() {
@@ -125,6 +135,7 @@ export async function initRuntimeI18n() {
   if (typeof window === "undefined") return;
   
   currentLocale = getLocaleFromCookie();
+  applyLocaleToDocument(currentLocale);
   await loadTranslations(currentLocale);
   
   // Process existing DOM
@@ -152,6 +163,7 @@ export async function initRuntimeI18n() {
 // Reload translations when locale changes
 export async function reloadTranslations() {
   currentLocale = getLocaleFromCookie();
+  applyLocaleToDocument(currentLocale);
   await loadTranslations(currentLocale);
   
   // Notify all registered callbacks

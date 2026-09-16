@@ -109,7 +109,7 @@ export default function Sidebar({ onClose }) {
 
   return (
     <>
-      <aside className="flex w-72 flex-col border-r border-border-subtle bg-vibrancy backdrop-blur-xl transition-colors duration-300 min-h-full">
+      <aside className="flex w-72 flex-col border-e border-border-subtle bg-vibrancy backdrop-blur-xl transition-colors duration-300 min-h-full">
         {/* Traffic lights */}
         <div className="flex items-center gap-2 px-6 pt-5 pb-2">
           <div className="w-3 h-3 rounded-full bg-[#FF5F56]" />
@@ -145,7 +145,7 @@ export default function Sidebar({ onClose }) {
                 <button
                   onClick={() => copy(INSTALL_CMD)}
                   title="Copy install command"
-                  className="flex-1 text-left hover:opacity-80 transition-opacity cursor-pointer min-w-0"
+                  className="flex-1 text-start hover:opacity-80 transition-opacity cursor-pointer min-w-0"
                 >
                   <code className="block text-[10px] text-green-600/80 dark:text-amber-400/70 font-mono truncate">
                     {copied ? "✓ copied!" : INSTALL_CMD}
@@ -199,13 +199,13 @@ export default function Sidebar({ onClose }) {
               )}
             >
               <span className="material-symbols-outlined text-[18px]">perm_media</span>
-              <span className="text-[13px] font-medium flex-1 text-left">Media Providers</span>
+              <span className="text-[13px] font-medium flex-1 text-start">Media Providers</span>
               <span className="material-symbols-outlined text-[14px] transition-transform" style={{ transform: mediaOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
                 expand_more
               </span>
             </button>
             {mediaOpen && (
-              <div className="pl-4">
+              <div className="ps-4">
                 {MEDIA_PROVIDER_KINDS.filter((k) => VISIBLE_MEDIA_KINDS.includes(k.id)).map((kind) => (
                   <Link
                     key={kind.id}

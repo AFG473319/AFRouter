@@ -38,6 +38,17 @@ export const LOCALES = [
 export const DEFAULT_LOCALE = "en";
 export const LOCALE_COOKIE = "locale";
 
+// Locales with right-to-left layout (sidebar flips, text aligns right).
+export const RTL_LOCALES = ["fa", "ar", "he", "ur"];
+
+export function getLocaleDir(locale) {
+  return RTL_LOCALES.includes(normalizeLocale(locale)) ? "rtl" : "ltr";
+}
+
+export function isRtlLocale(locale) {
+  return getLocaleDir(locale) === "rtl";
+}
+
 export const LOCALE_NAMES = {
   en: "English",
   vi: "Tiếng Việt",

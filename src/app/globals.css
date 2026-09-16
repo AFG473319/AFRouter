@@ -195,8 +195,8 @@ select {
   --shadow-elev: var(--shadow-elev);
   --shadow-focus: var(--shadow-focus);
 
-  /* Font - Inter primary, Apple system fallback */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  /* Font - Inter primary, Vazirmatn for Persian/Arabic script, system fallback */
+  --font-sans: 'Vazirmatn', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Tahoma, system-ui, sans-serif;
 }
 
 /* Base */
@@ -601,4 +601,72 @@ button:disabled,
   border: none;
   border-top: 1px solid var(--color-border);
   margin: 1.5rem 0;
+}
+
+/* ============================================================
+   RTL + bidi support (fa / ar / he / ur)
+   - <html dir> is set server-side (layout.js) and client-side
+     (i18n/runtime applyLocaleToDocument) on every locale switch.
+   - Fixes mixed Persian+English lines: with dir=rtl the bidi
+     algorithm orders embedded Latin runs correctly instead of
+     requiring manual re-ordering.
+   ============================================================ */
+
+/* Persian/Arabic-script text gets the dedicated font; Latin keeps Inter. */
+html[dir="rtl"] body {
+  font-family: var(--font-sans);
+  letter-spacing: 0 !important;
+}
+
+/* Code, paths, keys, model ids, URLs: always LTR + isolated so they don't
+   get reordered inside Persian sentences. */
+html[dir="rtl"] code,
+html[dir="rtl"] pre,
+html[dir="rtl"] kbd,
+html[dir="rtl"] samp,
+html[dir="rtl"] .font-mono {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+
+/* Brand/product names and other untranslated runs (marked data-i18n-skip
+   at the call site) stay in logical order without flipping. */
+html[dir="rtl"] [data-i18n-skip] {
+  unicode-bidi: isolate;
+}
+
+/* Form fields hold either Persian or LTR technical values (API keys,
+   URLs, paths). plaintext lets the browser pick per content. */
+html[dir="rtl"] input,
+html[dir="rtl"] textarea {
+  unicode-bidi: plaintext;
+}
+html[dir="rtl"] input[type="password"],
+html[dir="rtl"] input[type="number"] {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+
+/* Opt-in helper for numbers/units inside Persian text: keeps "24h",
+   "v1.2", "/models" LTR-isolated. */
+.bidi-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+}
+
+/* Layout mirroring for physical Tailwind utilities used in the shell. */
+html[dir="rtl"] aside {
+  border-right-width: 0 !important;
+  border-left: 1px solid var(--color-border-subtle);
+}
+html[dir="rtl"] .changelog-body ul {
+  padding-left: 0;
+  padding-right: 1.5rem;
+}
+html[dir="rtl"] .changelog-body ol {
+  padding-left: 0;
+  padding-right: 1.5rem;
 }
