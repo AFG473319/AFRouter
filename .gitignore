@@ -102,3 +102,19 @@ afrouter-*
 .start-dev.ps1
 start-dev-silent.cjs
 debug.log
+
+# Agent/tooling local state (per-machine, not shipped)
+.grok/
+.opencode/
+.specify/
+.zcode/
+.demo-shot/
+specs/
+AGENTS.md
+
+# npm pack artifacts + one-off publish scratch
+*.tgz
+*.log
+audit-tarball.mjs
+prs*.txt
+prs_raw.json
