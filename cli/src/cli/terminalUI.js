@@ -3,8 +3,12 @@ const { showMenuWithBack } = require("./utils/menuHelper");
 const { showProvidersMenu } = require("./menus/providers");
 const { showApiKeysMenu } = require("./menus/apiKeys");
 const { showCombosMenu } = require("./menus/combos");
+const { showModelsMenu } = require("./menus/models");
+const { showUsageMenu } = require("./menus/usage");
+const { showNetworkMenu } = require("./menus/network");
 const { showSettingsMenu } = require("./menus/settings");
 const { showCliToolsMenu } = require("./menus/cliTools");
+const { showMitmMediaMenu } = require("./menus/mitmMedia");
 
 const COLORS = {
   reset: "\x1b[0m",
@@ -96,6 +100,34 @@ async function startTerminalUI(port) {
         label: "Combos",
         action: async () => {
           await showCombosMenu([...basePath, "Combos"]);
+          return true;
+        }
+      },
+      {
+        label: "Models",
+        action: async () => {
+          await showModelsMenu([...basePath, "Models"]);
+          return true;
+        }
+      },
+      {
+        label: "Usage & Quota",
+        action: async () => {
+          await showUsageMenu([...basePath, "Usage & Quota"]);
+          return true;
+        }
+      },
+      {
+        label: "Endpoint & Network",
+        action: async () => {
+          await showNetworkMenu(port, [...basePath, "Endpoint & Network"]);
+          return true;
+        }
+      },
+      {
+        label: "MITM & Media",
+        action: async () => {
+          await showMitmMediaMenu([...basePath, "MITM & Media"]);
           return true;
         }
       },

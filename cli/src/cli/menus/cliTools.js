@@ -582,11 +582,54 @@ async function showHermesMenu(port, breadcrumb = []) {
  */
 async function showCliToolsMenu(port, breadcrumb = []) {
   const { endpoint } = await getEndpoint(port);
+  const extra = require("./cliToolsExtra");
+  const managedItems = [
+    ...extra.SINGLE_MODEL_TOOLS.map(tool => ({
+      label: extra.toolName(tool),
+      action: async () => { await extra.showGenericToolMenu(port, tool, false, [...breadcrumb, extra.toolName(tool)]); return true; }
+    })),
+    ...extra.MULTI_MODEL_TOOLS.map(tool => ({
+      label: extra.toolName(tool),
+      action: async () => { await extra.showGenericToolMenu(port, tool, true, [...breadcrumb, extra.toolName(tool)]); return true; }
+    })),
+  ];
+  const guideItems = Object.keys(extra.GUIDE_TOOLS).map(tool => ({
+    label: `${extra.toolName(tool)} (guide)`,
+    action: async () => { await extra.showGuideToolMenu(port, tool, [...breadcrumb, extra.toolName(tool)]); return true; }
+  }));
   await showMenuWithBack({
     title: "🔧 CLI Tools",
     breadcrumb,
     headerContent: `Configure CLI tools to use AFRouter\nEndpoint: ${endpoint}`,
     items: [
+      {
+        label: "📋 All Statuses",
+        action: async () => {
+          const apiAll = require("../api/client");
+          const res = await apiAll.getAllCliToolStatuses();
+          const { printJson } = require("../utils/output");
+          if (res.success) {
+            const entries = Object.entries(res.data);
+            const { printResult } = require("../utils/output");
+            printResult({
+              headers: ["Tool", "Installed", "Configured"],
+              rows: entries.map(([id, st]) => {
+                const s = st || {};
+                return [
+                  extra.toolName(id),
+                  s.installed === false ? "✗" : "✓",
+                  s.hasAFRouter === true ? "✓" : (s.installed === false ? "-" : "?"),
+                ];
+              }),
+              jsonData: res.data,
+            });
+          } else {
+            showStatus(`Failed: ${res.error}`, "error");
+          }
+          await pause();
+          return true;
+        }
+      },
       {
         label: "Claude Code",
         action: async () => { await showClaudeCodeMenu(port, [...breadcrumb, "Claude Code"]); return true; }
@@ -610,6 +653,12 @@ async function showCliToolsMenu(port, breadcrumb = []) {
       {
         label: "Hermes",
         action: async () => { await showHermesMenu(port, [...breadcrumb, "Hermes"]); return true; }
+      },
+      ...managedItems,
+      ...guideItems,
+      {
+        label: "🕵️  MITM (Antigravity)",
+        action: async () => { await extra.showMitmMenu([...breadcrumb, "MITM"]); return true; }
       }
     ]
   });

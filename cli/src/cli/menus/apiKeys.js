@@ -182,6 +182,16 @@ async function showKeyActions(key, port, breadcrumb = []) {
         }
       },
       {
+        label: "View as JSON",
+        action: async () => {
+          const { printJson } = require("../utils/output");
+          const res = await api.getApiKeyById(key.id);
+          printJson(res.success ? res.data : key);
+          await pause();
+          return true;
+        }
+      },
+      {
         label: "Delete Key",
         action: async () => {
           await handleDeleteKey(key);

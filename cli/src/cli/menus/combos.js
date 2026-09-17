@@ -29,7 +29,7 @@ async function showComboActions(combo, breadcrumb = []) {
   await showMenuWithBack({
     title: `🔀 ${combo.name}`,
     breadcrumb: [...breadcrumb, combo.name],
-    headerContent: `Name: ${combo.name}\nModels: ${modelsChain}`,
+    headerContent: `Name: ${combo.name}\nKind: ${combo.kind || "(default)"}\nModels: ${modelsChain}`,
     items: [
       {
         label: "Edit Combo",
@@ -59,6 +59,7 @@ async function handleEditSingleCombo(combo) {
   
   const newName = await prompt(`New name (Enter to keep "${combo.name}"): `);
   const name = newName || combo.name;
+  const newKind = await prompt(`Kind (Enter to keep "${combo.kind || "default"}"): `);
   
   console.log("\nCurrent models: " + (Array.isArray(combo.models) ? combo.models.map(formatModel).join(" → ") : ""));
   console.log("\nSelect models for this combo (add one by one):");
@@ -84,8 +85,10 @@ async function handleEditSingleCombo(combo) {
   
   // Use new models if any were added, otherwise keep current
   const finalModels = models.length > 0 ? models : combo.models;
-  
-  const result = await api.updateCombo(combo.id, { name, models: finalModels });
+
+  const updateBody = { name, models: finalModels };
+  if (newKind && newKind.trim()) updateBody.kind = newKind.trim();
+  const result = await api.updateCombo(combo.id, updateBody);
   
   if (result.success) {
     showStatus("Combo updated!", "success");
@@ -113,10 +116,44 @@ async function handleDeleteSingleCombo(combo) {
 }
 
 /**
- * Main combos menu - list all combos and actions
+ * Main combos menu - hub: manage list, presets, bulk actions, strategies
  * @param {Array<string>} breadcrumb - Breadcrumb path
  */
 async function showCombosMenu(breadcrumb = []) {
+  await showMenuWithBack({
+    title: "🔀 Combos Management",
+    breadcrumb,
+    headerContent: async () => {
+      const result = await api.getCombos();
+      const combos = result.success ? (result.data.combos || []) : [];
+      return `Combos: ${combos.length} defined`;
+    },
+    refresh: async () => ({}),
+    items: [
+      {
+        label: "List / Create / Edit / Delete",
+        action: async () => { await showCombosList(breadcrumb); return true; }
+      },
+      {
+        label: "Preset Generator (Cursor / Claude defaults)",
+        action: async () => { await handleComboPresets([...breadcrumb, "Presets"]); return true; }
+      },
+      {
+        label: "Bulk Delete",
+        action: async () => { await handleBulkDeleteCombos(); return true; }
+      },
+      {
+        label: "Fallback & Strategy Settings",
+        action: async () => { await handleComboStrategies(); return true; }
+      },
+    ]
+  });
+}
+
+/**
+ * Combo list (create/edit/delete per combo).
+ */
+async function showCombosList(breadcrumb = []) {
   const { showListMenu } = require("../utils/menuHelper");
   
   await showListMenu({
@@ -474,4 +511,120 @@ async function handleDeleteCombo(combos) {
   await pause();
 }
 
-module.exports = { showCombosMenu };
+/**
+ * Preset generator: preview + bulk-create Cursor/Claude default combos.
+ */
+async function handleComboPresets(breadcrumb = []) {
+  await showMenuWithBack({
+    title: "🎁 Combo Presets",
+    breadcrumb,
+    headerContent: "Bulk-generate cu/… / cc/… combos from Cursor/Claude defaults.",
+    refresh: async () => ({}),
+    items: ["cursor", "claude"].map(source => ({
+      label: `Preview "${source}" presets`,
+      action: async () => {
+        clearScreen();
+        console.log(`\n🎁 Presets: ${source}\n`);
+        const res = await api.getComboPresets(source);
+        if (!res.success) {
+          showStatus(`Failed: ${res.error}`, "error");
+          await pause();
+          return true;
+        }
+        const items = res.data.items || [];
+        const { printResult } = require("../utils/output");
+        printResult({
+          headers: ["Combo", "Models", "Exists?"],
+          rows: items.map(i => [i.name, (i.models || []).join(" → ").slice(0, 50), i.exists ? "skip" : "create"]),
+          jsonData: res.data,
+          emptyMessage: "No preset items.",
+        });
+        console.log(`\n  To create: ${res.data.toCreate ?? "?"} • To skip: ${res.data.toSkip ?? "?"}`);
+        const go = await confirm("\nCreate missing combos now?");
+        if (go) {
+          const created = await api.createComboPresets(source);
+          if (created.success) {
+            showStatus(`✓ Created ${created.data.createdCount ?? "?"} (skipped ${created.data.skippedCount ?? "?"})`, "success");
+          } else {
+            showStatus(`Failed: ${created.error}`, "error");
+          }
+        }
+        await pause();
+        return true;
+      }
+    }))
+  });
+}
+
+/**
+ * Bulk delete combos by name filter.
+ */
+async function handleBulkDeleteCombos() {
+  clearScreen();
+  console.log("\n🗑️  Bulk Delete Combos\n");
+  const result = await api.getCombos();
+  if (!result.success) {
+    showStatus(`Failed: ${result.error}`, "error");
+    await pause();
+    return;
+  }
+  const combos = result.data.combos || [];
+  if (combos.length === 0) {
+    showStatus("No combos to delete.", "warning");
+    await pause();
+    return;
+  }
+  const filter = await prompt("Delete combos whose name contains (empty = cancel): ");
+  if (!filter) { showStatus("Cancelled", "warning"); await pause(); return; }
+  const matched = combos.filter(c => (c.name || "").includes(filter));
+  if (matched.length === 0) {
+    showStatus("No combos match.", "warning");
+    await pause();
+    return;
+  }
+  console.log(`\nMatched (${matched.length}): ${matched.map(c => c.name).join(", ")}`);
+  const ok = await confirm("\nDelete all matched?");
+  if (!ok) { showStatus("Cancelled", "info"); await pause(); return; }
+  let deleted = 0;
+  for (const c of matched) {
+    const r = await api.deleteCombo(c.id);
+    if (r.success) deleted++;
+  }
+  showStatus(`Deleted ${deleted}/${matched.length}`, deleted === matched.length ? "success" : "warning");
+  await pause();
+}
+
+/**
+ * Fallback & strategy settings (PATCH /api/settings).
+ */
+async function handleComboStrategies() {
+  clearScreen();
+  console.log("\n⚙️  Fallback & Strategy Settings\n");
+  const cur = await api.getSettings();
+  const s = cur.success ? (cur.data.settings || cur.data || {}) : {};
+  console.log(`  fallbackStrategy: ${s.fallbackStrategy ?? "(default)"}`);
+  console.log(`  comboStrategies:  ${s.comboStrategies ? JSON.stringify(s.comboStrategies).slice(0, 120) : "(default)"}`);
+  console.log(`  capacityAdapter:  ${s.capacityAdapter ? JSON.stringify(s.capacityAdapter).slice(0, 120) : "(default)"}`);
+  console.log("\nLeave blank to keep current value.\n");
+  const fallback = await prompt("fallbackStrategy (e.g. fallback, round-robin): ");
+  const comboStr = await prompt("comboStrategies (JSON object): ");
+  const updates = {};
+  if (fallback && fallback.trim()) updates.fallbackStrategy = fallback.trim();
+  if (comboStr && comboStr.trim()) {
+    try {
+      updates.comboStrategies = JSON.parse(comboStr);
+    } catch {
+      showStatus("Invalid JSON for comboStrategies — skipped.", "warning");
+    }
+  }
+  if (Object.keys(updates).length === 0) {
+    showStatus("No changes.", "warning");
+    await pause();
+    return;
+  }
+  const res = await api.updateSettings(updates);
+  showStatus(res.success ? "✓ Strategies updated!" : `✗ Failed: ${res.error}`, res.success ? "success" : "error");
+  await pause();
+}
+
+module.exports = { showCombosMenu, showCombosList };

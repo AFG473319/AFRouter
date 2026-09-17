@@ -215,6 +215,32 @@ async function showProvidersMenu(breadcrumb = []) {
 
   // Custom provider nodes section
   providerItems.push({
+    label: () => `${COLORS.dim}── Actions ──${COLORS.reset}`,
+    action: async () => true, // separator, no-op
+    isSeparator: true,
+  });
+  providerItems.push({
+    label: () => "Test All Connections (batch)",
+    action: async () => {
+      await handleTestBatch();
+      return true;
+    }
+  });
+  providerItems.push({
+    label: () => "Bulk Import Tokens (codex/cursor/kiro/...)",
+    action: async (data) => {
+      await showBulkImportMenu([...breadcrumb, "Bulk Import"]);
+      return true;
+    }
+  });
+  providerItems.push({
+    label: () => "Suggested Models Catalog",
+    action: async () => {
+      await handleSuggestedModels();
+      return true;
+    }
+  });
+  providerItems.push({
     label: () => `${COLORS.dim}── Custom Providers ──${COLORS.reset}`,
     action: async () => true, // separator, no-op
     isSeparator: true,
@@ -359,6 +385,21 @@ async function showConnectionActions(connection, providerId, breadcrumb = []) {
         }
       },
       {
+        label: ( ) => connection.isActive === false ? "Enable Connection" : "Disable Connection",
+        action: async () => {
+          const next = connection.isActive === false ? true : false;
+          const result = await api.updateConnection(connection.id, { isActive: next });
+          if (result.success) {
+            connection.isActive = next;
+            showStatus(next ? "Connection enabled!" : "Connection disabled!", "success");
+          } else {
+            showStatus(`Failed: ${result.error}`, "error");
+          }
+          await pause();
+          return true;
+        }
+      },
+      {
         label: "Test Connection",
         action: async () => {
           showStatus("Testing connection...", "info");
@@ -368,6 +409,44 @@ async function showConnectionActions(connection, providerId, breadcrumb = []) {
           } else {
             showStatus(`Test failed: ${result.error}`, "error");
           }
+          await pause();
+          return true;
+        }
+      },
+      {
+        label: "Test Specific Models",
+        action: async () => {
+          await handleTestConnectionModels(connection);
+          return true;
+        }
+      },
+      {
+        label: "Add Custom Model",
+        action: async () => {
+          await handleAddConnectionModel(connection);
+          return true;
+        }
+      },
+      {
+        label: "Assign Proxy Pool",
+        action: async () => {
+          await handleAssignProxyPool(connection);
+          return true;
+        }
+      },
+      {
+        label: "View Usage",
+        action: async () => {
+          await handleConnectionUsage(connection);
+          return true;
+        }
+      },
+      {
+        label: "View as JSON",
+        action: async () => {
+          const { printJson } = require("../utils/output");
+          const res = await api.getProviderById(connection.id);
+          printJson(res.success ? res.data : res);
           await pause();
           return true;
         }
@@ -851,6 +930,243 @@ async function handleEditCustomNode(node) {
   if (res.success) {
     Object.assign(node, updates);
     showStatus("✓ Updated!", "success");
+  } else {
+    showStatus(`✗ Failed: ${res.error}`, "error");
+  }
+  await pause();
+}
+
+// ============================================================================
+// PROVIDERS++ — batch test, suggested models, bulk imports, per-conn extras
+// ============================================================================
+
+const BATCH_MODES = ["oauth", "free", "apikey", "provider", "compatible", "all"];
+
+/**
+ * Batch-test connections by group (POST /api/providers/test-batch).
+ */
+async function handleTestBatch() {
+  clearScreen();
+  console.log("\n🧪 Batch Test Connections\n");
+  BATCH_MODES.forEach((m, i) => console.log(`  ${i + 1}. ${m}`));
+  const input = await prompt("\nMode (number, default: all): ");
+  let mode = "all";
+  const num = parseInt(input, 10);
+  if (!isNaN(num) && num >= 1 && num <= BATCH_MODES.length) mode = BATCH_MODES[num - 1];
+  else if (input && BATCH_MODES.includes(input.trim())) mode = input.trim();
+
+  let providerId = undefined;
+  if (mode === "provider") {
+    providerId = await prompt("Provider ID (e.g. codex): ");
+    if (!providerId) { showStatus("Cancelled", "warning"); await pause(); return; }
+  }
+
+  showStatus(`Testing (${mode})...`, "info");
+  const res = await api.testProvidersBatch(mode, providerId);
+  if (!res.success) {
+    showStatus(`Batch test failed: ${res.error}`, "error");
+    await pause();
+    return;
+  }
+  const { printResult } = require("../utils/output");
+  const results = res.data.results || res.data || [];
+  if (Array.isArray(results)) {
+    printResult({
+      headers: ["Connection", "Provider", "Result"],
+      rows: results.map(r => [
+        r.name || r.connectionId || r.id || "?",
+        r.provider || r.providerId || "?",
+        r.valid === true || r.ok === true || r.success === true ? "✓" : `✗ ${r.error || r.diagnosis || ""}`.trim(),
+      ]),
+      jsonData: res.data,
+      emptyMessage: "No connections tested.",
+    });
+  } else {
+    const { printJson } = require("../utils/output");
+    printJson(res.data);
+  }
+  await pause();
+}
+
+/**
+ * Browse the suggested-models catalog (GET /api/providers/suggested-models).
+ */
+async function handleSuggestedModels() {
+  clearScreen();
+  console.log("\n✨ Suggested Models\n");
+  showStatus("Loading...", "info");
+  const res = await api.getSuggestedModels();
+  if (!res.success) {
+    showStatus(`Failed: ${res.error}`, "error");
+    await pause();
+    return;
+  }
+  const { printResult, offerJsonView } = require("../utils/output");
+  const items = res.data.models || res.data.suggestions || res.data.items || [];
+  if (Array.isArray(items)) {
+    printResult({
+      headers: ["Model", "Provider", "Note"],
+      rows: items.map(m => [
+        typeof m === "string" ? m : (m.id || m.model || JSON.stringify(m)),
+        typeof m === "string" ? "" : (m.provider || m.providerId || ""),
+        typeof m === "string" ? "" : (m.description || m.note || ""),
+      ]),
+      jsonData: res.data,
+    });
+    await offerJsonView(res.data);
+  } else {
+    const { printJson } = require("../utils/output");
+    printJson(res.data);
+  }
+  await pause();
+}
+
+/**
+ * Test specific model IDs on a connection.
+ */
+async function handleTestConnectionModels(connection) {
+  clearScreen();
+  console.log(`\n🧪 Test Models on ${connection.name || connection.id}\n`);
+  const input = await prompt("Model IDs (comma-separated): ");
+  if (!input) { showStatus("Cancelled", "warning"); await pause(); return; }
+  const models = input.split(",").map(s => s.trim()).filter(Boolean);
+  showStatus("Testing models...", "info");
+  const res = await api.testProviderModels(connection.id, models);
+  const { printJson } = require("../utils/output");
+  if (!res.success) showStatus(`Failed: ${res.error}`, "error");
+  else {
+    showStatus("Done!", "success");
+    printJson(res.data);
+  }
+  await pause();
+}
+
+/**
+ * Add a custom model to a connection.
+ */
+async function handleAddConnectionModel(connection) {
+  clearScreen();
+  console.log(`\n➕ Add Custom Model to ${connection.name || connection.id}\n`);
+  const id = await prompt("Model ID: ");
+  if (!id) { showStatus("Cancelled", "warning"); await pause(); return; }
+  const name = await prompt("Display name (optional): ");
+  const body = { id: id.trim() };
+  if (name && name.trim()) body.name = name.trim();
+  const res = await api.addProviderModel(connection.id, body);
+  showStatus(res.success ? "✓ Model added!" : `✗ Failed: ${res.error}`, res.success ? "success" : "error");
+  await pause();
+}
+
+/**
+ * Assign (or clear) a proxy pool on a connection (PUT proxyPoolId).
+ */
+async function handleAssignProxyPool(connection) {
+  clearScreen();
+  console.log(`\n🔀 Proxy Pool for ${connection.name || connection.id}\n`);
+  const res = await api.getProxyPools();
+  if (!res.success) {
+    showStatus(`Failed to load pools: ${res.error}`, "error");
+    await pause();
+    return;
+  }
+  const pools = res.data.pools || res.data || [];
+  console.log("  0. (none — clear assignment)");
+  pools.forEach((p, i) => console.log(`  ${i + 1}. ${p.name} [${p.type || "http"}]${p.isActive === false ? " (disabled)" : ""}`));
+  const input = await prompt("\nSelect pool (number): ");
+  const num = parseInt(input, 10);
+  if (isNaN(num) || num < 0 || num > pools.length) { showStatus("Cancelled", "warning"); await pause(); return; }
+  const proxyPoolId = num === 0 ? "__none__" : pools[num - 1].id;
+  const upd = await api.updateConnection(connection.id, { proxyPoolId });
+  showStatus(upd.success ? "✓ Proxy pool updated!" : `✗ Failed: ${upd.error}`, upd.success ? "success" : "error");
+  await pause();
+}
+
+/**
+ * Show per-connection usage + Codex credit reset shortcut.
+ */
+async function handleConnectionUsage(connection) {
+  clearScreen();
+  console.log(`\n📊 Usage — ${connection.name || connection.id}\n`);
+  const res = await api.getConnectionUsage(connection.id);
+  const { printJson } = require("../utils/output");
+  if (!res.success) {
+    showStatus(`Failed: ${res.error}`, "error");
+  } else {
+    const d = res.data;
+    if (d && typeof d === "object" && (d.tokens !== undefined || d.requests !== undefined || d.cost !== undefined)) {
+      console.log(`  Tokens:   ${d.tokens ?? d.totalTokens ?? "-"}`);
+      console.log(`  Requests: ${d.requests ?? d.totalRequests ?? "-"}`);
+      console.log(`  Cost:     ${d.cost ?? d.totalCost ?? "-"}`);
+    } else {
+      printJson(d);
+    }
+  }
+  const provider = connection.provider || connection.providerId || "";
+  if (provider === "codex") {
+    const reset = await confirm("\nReset Codex credits for this connection?");
+    if (reset) {
+      const r = await api.resetCodexCredits(connection.id);
+      showStatus(r.success ? "✓ Credits reset!" : `✗ Failed: ${r.error}`, r.success ? "success" : "error");
+    }
+  }
+  await pause();
+}
+
+// Bulk/token import definitions: [menu label, provider, action]
+const BULK_IMPORTS = [
+  { label: "Codex — single token import", provider: "codex", action: "import-token" },
+  { label: "Codex — bulk token import", provider: "codex", action: "bulk-import" },
+  { label: "Grok CLI — bulk token import", provider: "grok-cli", action: "bulk-import" },
+  { label: "Cursor — token import", provider: "cursor", action: "import" },
+  { label: "Cursor — auto-import (from CLI)", provider: "cursor", action: "auto-import" },
+  { label: "Kiro — API key save", provider: "kiro", action: "api-key" },
+  { label: "Kiro — auto-import (from CLI)", provider: "kiro", action: "auto-import" },
+  { label: "Kiro — file import", provider: "kiro", action: "import" },
+  { label: "Kiro — CLI-proxy import", provider: "kiro", action: "import-cli-proxy" },
+  { label: "iFlow — browser cookie capture", provider: "iflow", action: "cookie" },
+  { label: "GitLab — personal access token", provider: "gitlab", action: "pat" },
+  { label: "Xiaomi MiMo — API key save", provider: "xiaomi-mimo", action: "api-key" },
+  { label: "Xiaomi MiMo — auto-import", provider: "xiaomi-mimo", action: "auto-import" },
+];
+
+/**
+ * Bulk import submenu — paste a token / JSON payload per vendor route.
+ */
+async function showBulkImportMenu(breadcrumb = []) {
+  await showMenuWithBack({
+    title: "📥 Bulk Import Tokens",
+    breadcrumb,
+    headerContent: "Paste exported tokens/cookies per vendor route.\nJSON objects are sent as-is; plain text is sent as { token }.",
+    items: BULK_IMPORTS.map(def => ({
+      label: def.label,
+      action: async () => {
+        await handleBulkImport(def);
+        return true;
+      }
+    }))
+  });
+}
+
+/**
+ * Run one bulk-import route.
+ */
+async function handleBulkImport(def) {
+  clearScreen();
+  console.log(`\n📥 ${def.label}\n${COLORS.dim}Route: POST /api/oauth/${def.provider}/${def.action}${COLORS.reset}\n`);
+  const pasted = await prompt("Paste token/payload (empty to cancel): ");
+  if (!pasted) { showStatus("Cancelled", "warning"); await pause(); return; }
+  let body;
+  try {
+    body = JSON.parse(pasted);
+  } catch {
+    body = { token: pasted };
+  }
+  showStatus("Importing...", "info");
+  const res = await api.oauthImport(def.provider, def.action, body);
+  const { printJson } = require("../utils/output");
+  if (res.success) {
+    showStatus("✓ Import done!", "success");
+    printJson(res.data);
   } else {
     showStatus(`✗ Failed: ${res.error}`, "error");
   }
