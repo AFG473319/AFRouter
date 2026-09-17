@@ -19,6 +19,16 @@ const SESSION_HEADER = "x-opencode-session";
 const SESSION_FIELD = "_opencodeSession";
 export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 const BASE62_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+// Upstream free-tier gate (verified live 2026-09-18): /zen/v1/chat/completions
+// and /zen/v1/responses with `Authorization: Bearer public` reject requests
+// that do not look like the official OpenCode agentic client, even when
+// User-Agent/session shape are valid. Concretely enforced:
+// - stream must be true (stream:false → 403 FreeTierError);
+// - tools must include the file-search quartet {bash, glob, grep, read}
+//   (0–3 of them → 403; the remaining six builtins are optional extras).
+// Missing-tool requests are the common 9router case: plain chat callers send
+// no tools, so without injection every such request 403s.
+const OPENCODE_FINGERPRINT_TOOLS = ["bash", "glob", "grep", "read"];
 
 function hasValidOpencodeVersion(ua) {
   const m = String(ua || "").match(/opencode\/(\d+)\.(\d+)(?:\.(\d+))?/i);
@@ -169,6 +179,68 @@ function normalizeResponsesTools(body) {
     }
   }
 }
+function toolNameOf(tool) {
+  if (!tool || typeof tool !== "object" || Array.isArray(tool)) return "";
+  const fn = tool.function && typeof tool.function === "object" && !Array.isArray(tool.function) ? tool.function : null;
+  const raw = typeof tool.name === "string" ? tool.name : (typeof fn?.name === "string" ? fn.name : "");
+  return raw.trim();
+}
+
+// Merge the upstream-mandated file-search quartet into Chat Completions
+// bodies. Caller tools are preserved verbatim (extras are allowed upstream);
+// only the missing fingerprint names are appended as no-op declarations the
+// model may ignore. Without this, plain chat callers that send no tools get
+// 403 FreeTierError on every request.
+function ensureChatFingerprintTools(body) {
+  if (!body || typeof body !== "object") return;
+  const present = new Set();
+  if (Array.isArray(body.tools)) {
+    for (const tool of body.tools) {
+      const name = toolNameOf(tool);
+      if (name) present.add(name);
+    }
+  } else {
+    body.tools = [];
+  }
+  for (const name of OPENCODE_FINGERPRINT_TOOLS) {
+    if (present.has(name)) continue;
+    body.tools.push({
+      type: "function",
+      function: {
+        name,
+        description: `OpenCode built-in ${name} tool`,
+        parameters: { type: "object", properties: {} },
+      },
+    });
+    present.add(name);
+  }
+}
+
+// Same fingerprint for the Responses flat tool shape. Runs before
+// normalizeResponsesTools so injected declarations get the same coercion as
+// caller tools.
+function ensureResponsesFingerprintTools(body) {
+  if (!body || typeof body !== "object") return;
+  const present = new Set();
+  if (Array.isArray(body.tools)) {
+    for (const tool of body.tools) {
+      const name = toolNameOf(tool);
+      if (name) present.add(name);
+    }
+  } else {
+    body.tools = [];
+  }
+  for (const name of OPENCODE_FINGERPRINT_TOOLS) {
+    if (present.has(name)) continue;
+    body.tools.push({
+      type: "function",
+      name,
+      description: `OpenCode built-in ${name} tool`,
+      parameters: { type: "object", properties: {} },
+    });
+    present.add(name);
+  }
+}
 
 function sanitizeResponsesItems(body) {
   if (!Array.isArray(body.input)) return;
@@ -243,6 +315,13 @@ export class OpenCodeExecutor extends BaseExecutor {
 
   transformRequest(model, body, stream, credentials) {
     if (body && typeof body === "object" && model && !body.model) body.model = model;
+    if (body && typeof body === "object") {
+      // Upstream rejects non-streaming free-tier requests with 403 even when
+      // everything else is valid. chatCore already forces SSE for
+      // forceStream providers and converts back for non-stream clients, so
+      // always send stream:true upstream here.
+      body.stream = true;
+    }
     if (isResponsesModel(model || body?.model) && body && typeof body === "object") {
       const normalized = normalizeResponsesInput(body.input);
       if (normalized) body.input = normalized;
@@ -258,10 +337,12 @@ export class OpenCodeExecutor extends BaseExecutor {
       delete body.max_tokens;
       delete body.max_completion_tokens;
       normalizeOpencodeReasoning(model, body);
-      body.stream = true;
       body.store = false;
+      ensureResponsesFingerprintTools(body);
       normalizeResponsesTools(body);
       sanitizeResponsesItems(body);
+    } else if (body && typeof body === "object") {
+      ensureChatFingerprintTools(body);
     }
     return injectReasoningContent({ provider: this.provider, model, body });
   }

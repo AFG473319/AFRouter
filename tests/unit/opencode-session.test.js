@@ -200,3 +200,70 @@ describe("OpenCode Free User-Agent Validation", () => {
     expect(headersFuture["User-Agent"]).toBe("opencode/1.19.0");
   });
 });
+
+describe("OpenCode Free Upstream Gates (stream + tool fingerprint)", () => {
+  it("forces stream:true upstream on chat bodies even for non-stream clients", () => {
+    const executor = getExecutor("opencode");
+    const out = executor.transformRequest(
+      "mimo-v2.5-free",
+      { model: "mimo-v2.5-free", messages: [{ role: "user", content: "hi" }] },
+      false,
+      { rawHeaders: {} },
+    );
+    expect(out.stream).toBe(true);
+  });
+
+  it("injects the file-search quartet into chat bodies without tools", () => {
+    const executor = getExecutor("opencode");
+    const out = executor.transformRequest(
+      "mimo-v2.5-free",
+      { model: "mimo-v2.5-free", messages: [{ role: "user", content: "hi" }] },
+      true,
+      { rawHeaders: {} },
+    );
+    const names = out.tools.map((t) => t.function?.name);
+    for (const required of ["bash", "glob", "grep", "read"]) {
+      expect(names).toContain(required);
+    }
+  });
+
+  it("preserves caller chat tools and only appends the missing fingerprint names", () => {
+    const executor = getExecutor("opencode");
+    const out = executor.transformRequest(
+      "mimo-v2.5-free",
+      {
+        model: "mimo-v2.5-free",
+        messages: [{ role: "user", content: "hi" }],
+        tools: [{ type: "function", function: { name: "my_tool", description: "m", parameters: { type: "object", properties: {} } } }],
+      },
+      true,
+      { rawHeaders: {} },
+    );
+    const names = out.tools.map((t) => t.function?.name);
+    expect(names[0]).toBe("my_tool");
+    for (const required of ["bash", "glob", "grep", "read"]) {
+      expect(names).toContain(required);
+    }
+  });
+
+  it("injects the fingerprint into Responses bodies and keeps stream/store gates", () => {
+    const executor = getExecutor("opencode");
+    const out = executor.transformRequest(
+      "muse-spark-1.3-contributor-free",
+      { input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }] },
+      false,
+      { rawHeaders: {} },
+    );
+    expect(out.stream).toBe(true);
+    expect(out.store).toBe(false);
+    const names = out.tools.map((t) => t.name);
+    for (const required of ["bash", "glob", "grep", "read"]) {
+      expect(names).toContain(required);
+    }
+  });
+
+  it("declares forceStream on the opencode transport so chatCore serves SSE upstream", async () => {
+    const { PROVIDERS } = await import("../../open-sse/config/providers.js");
+    expect(PROVIDERS["opencode"]?.forceStream).toBe(true);
+  });
+});

@@ -181,12 +181,37 @@ describe("OpenCode Free Muse Spark thinking", () => {
     // User message, function_call, function_call_output, and next user message survive
     const types = out.input.map((item) => item.type);
     expect(types).toEqual(["message", "function_call", "function_call_output", "message"]);
-    // Tools flattened and empty properties added
+    // Tools flattened and empty properties added; the upstream-mandated
+    // file-search quartet is merged in so free-tier requests pass the gate.
     expect(out.tools).toEqual([
       {
         type: "function",
         name: "shell",
         description: "Run shell command",
+        parameters: { type: "object", properties: {} },
+      },
+      {
+        type: "function",
+        name: "bash",
+        description: "OpenCode built-in bash tool",
+        parameters: { type: "object", properties: {} },
+      },
+      {
+        type: "function",
+        name: "glob",
+        description: "OpenCode built-in glob tool",
+        parameters: { type: "object", properties: {} },
+      },
+      {
+        type: "function",
+        name: "grep",
+        description: "OpenCode built-in grep tool",
+        parameters: { type: "object", properties: {} },
+      },
+      {
+        type: "function",
+        name: "read",
+        description: "OpenCode built-in read tool",
         parameters: { type: "object", properties: {} },
       },
     ]);
