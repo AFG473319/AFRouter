@@ -80,6 +80,25 @@ if (args[0] === "xai" && args[1] === "video") {
   return;
 }
 
+// Headless subcommands (`afrouter status`, `afrouter providers list`, …) run
+// against an already-running gateway and bypass the launcher flow
+// (no runtime self-heal, no server spawn) — same as `xai video`.
+// Output is JSON on stdout by default (agent-friendly); errors go to stderr.
+const HEADLESS_DOMAINS = new Set([
+  "status", "providers", "nodes", "keys", "combos", "models",
+  "usage", "settings", "network", "tools", "media", "chat",
+]);
+if (args.length > 0 && HEADLESS_DOMAINS.has(args[0])) {
+  const { runHeadless } = require("./src/cli/headless/index");
+  runHeadless(args)
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      console.error(`error: ${err?.message || err}`);
+      process.exit(1);
+    });
+  return;
+}
+
 // Self-heal SQLite runtime deps (sql.js + better-sqlite3) into ~/.afrouter/runtime
 // so the server can resolve them via NODE_PATH. Best-effort — sql.js is required,
 // better-sqlite3 is optional. Logs to stderr only on failure.
@@ -157,6 +176,11 @@ Commands:
   xai video --prompt "..." --output video.mp4
                       Generate a Grok Imagine video via the running gateway
                       (see: ${APP_NAME} xai video --help)
+
+Headless (no TUI — JSON on stdout, for scripts & AI agents):
+  ${APP_NAME} status | providers|nodes|keys|combos|models|usage|settings|network|tools|media|chat <action> [flags]
+                      Run against the gateway on --port/--host (no server spawn)
+                      (see: ${APP_NAME} providers --help, ${APP_NAME} chat --help, ...)
 `);
     process.exit(0);
   } else if (args[i] === "--version" || args[i] === "-v") {

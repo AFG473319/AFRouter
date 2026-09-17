@@ -81,6 +81,46 @@ afrouter --help             # Show all options
 
 ---
 
+## 🤖 Headless Mode (scripts & AI agents)
+
+Every dashboard operation is also available non-interactively — no TUI, no browser.
+Headless commands talk to the **already-running** gateway and bypass the launcher:
+
+```bash
+afrouter <domain> <action> [flags]
+afrouter status
+afrouter providers list
+afrouter models list --filter claude
+afrouter chat --model cc/claude-sonnet-5 --prompt "say hi"
+echo "summarize: ..." | afrouter chat --model ag/gemini-3-flash
+```
+
+Conventions:
+
+- **JSON on stdout by default** (agent-friendly); `--human` prints tables instead.
+- **Errors go to stderr** with exit codes: `0` ok, `1` error, `2` usage error.
+- **Target gateway**: `--port/-p` (default `20128`, or `AFROUTER_PORT`), `--host/-H`
+  (default `127.0.0.1`, or `AFROUTER_HOST`).
+- **Auth**: automatic via the local machine token — no login needed on the same machine.
+- **Full reference**: `afrouter <domain> --help` (per-domain help is the source of truth).
+
+| Domain | Examples |
+|---|---|
+| `status` | `afrouter status` — health + version |
+| `providers` | `list`, `test <id>`, `test-batch --mode all`, `enable/disable <id>`, `add --provider openai --name Main --api-key sk-...` |
+| `nodes` | `list`, `add --name X --prefix x --base-url https://... --type openai-compatible` |
+| `keys` | `list`, `create --name ci`, `delete <id>` |
+| `combos` | `list`, `create --name route --models cc/claude-sonnet-5,cx/gpt-5.2`, `presets --source claude` |
+| `models` | `list --filter <q>`, `ping --model <m>`, `alias-set --alias a --model <m>`, `pricing` |
+| `usage` | `stats --period 7d`, `requests --provider cline --page-size 50`, `connection <id>` |
+| `settings` | `get`, `set --key rtkEnabled --value false`, `db-export --file backup.json`, `shutdown` |
+| `network` | `endpoint`, `tunnel-on/tunnel-off`, `pools`, `pxpipe-stats`, `tailscale-enable` |
+| `tools` | `statuses`, `setup --tool kilo --model cc/claude-sonnet-5`, `reset --tool cline` |
+| `media` | `voices --provider edge-tts --lang en` |
+| `chat` | `chat --model <m> --prompt <text>` (or piped stdin; `--system`, `--max-tokens`, `--temperature`) |
+
+---
+
 ## 🛠️ Supported CLI Tools
 
 Claude-Code • OpenClaw • Codex • OpenCode • Cursor • Antigravity • Cline • Continue • Droid • Roo • Copilot • Kilo Code • Gemini CLI • Qwen Code • iFlow • Crush • Crusher • Aider

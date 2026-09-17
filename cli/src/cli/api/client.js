@@ -11,6 +11,7 @@ const DEFAULT_CONFIG = {
   host: "localhost",
   port: 20128,
   protocol: "http:",
+  timeoutMs: 30000,
 };
 
 const CLI_TOKEN_HEADER = "x-afr-cli-token";
@@ -83,7 +84,7 @@ function configure(options = {}) {
  * @param {Object} body - Request body (optional)
  * @returns {Promise<Object>} Response with { success, data/error }
  */
-function makeRequest(method, path, body = null) {
+function makeRequest(method, path, body = null, extraHeaders = {}) {
   return new Promise((resolve) => {
     const httpModule = config.protocol === "https:" ? https : http;
     
@@ -95,6 +96,7 @@ function makeRequest(method, path, body = null) {
       headers: {
         "Content-Type": "application/json",
         [CLI_TOKEN_HEADER]: getCliToken(),
+        ...extraHeaders,
       },
     };
 
@@ -153,8 +155,8 @@ function makeRequest(method, path, body = null) {
       });
     });
 
-    // Set timeout (30 seconds)
-    req.setTimeout(30000);
+    // Set timeout (configurable; long generations need more than the default)
+    req.setTimeout(config.timeoutMs || 30000);
 
     // Write body if present
     if (body && (method === "POST" || method === "PUT" || method === "PATCH")) {
@@ -491,11 +493,339 @@ async function disableTunnel() {
 }
 
 // ============================================================================
+// GENERIC PASSTHROUGH (powers new TUI menus without per-endpoint boilerplate)
+// ============================================================================
+
+/**
+ * Generic request helper — thin wrapper over makeRequest.
+ * @param {string} method
+ * @param {string} path
+ * @param {Object|null} body
+ */
+async function req(method, path, body = null, bearer = null) {
+  return makeRequest(method, path, body, bearer ? { Authorization: `Bearer ${bearer}` } : {});
+}
+
+// ============================================================================
+// PROVIDERS++ (batch test, validate, suggested models, per-model test)
+// ============================================================================
+
+async function testProvidersBatch(mode, providerId) {
+  return makeRequest("POST", "/api/providers/test-batch", providerId ? { mode, providerId } : { mode });
+}
+
+async function validateProvider(data) {
+  return makeRequest("POST", "/api/providers/validate", data);
+}
+
+async function getSuggestedModels(query) {
+  return makeRequest("GET", `/api/providers/suggested-models${query ? `?${query}` : ""}`);
+}
+
+async function testProviderModels(id, models) {
+  return makeRequest("POST", `/api/providers/${id}/test-models`, { models });
+}
+
+async function addProviderModel(id, model) {
+  return makeRequest("POST", `/api/providers/${id}/models`, model);
+}
+
+// OAuth bulk/token imports (server accepts pasted token payloads)
+async function oauthImport(provider, action, data) {
+  return makeRequest("POST", `/api/oauth/${provider}/${action}`, data);
+}
+
+// ============================================================================
+// MODELS DOMAIN (catalog, ping, availability, alias, custom, disabled, pricing)
+// ============================================================================
+
+async function testModel(data) {
+  return makeRequest("POST", "/api/models/test", data);
+}
+
+async function getModelAvailability(query) {
+  return makeRequest("GET", `/api/models/availability${query ? `?${query}` : ""}`);
+}
+
+async function getModelAliases() {
+  return makeRequest("GET", "/api/models/alias");
+}
+
+async function setModelAlias(alias, model) {
+  return makeRequest("PUT", "/api/models/alias", { alias, model });
+}
+
+async function deleteModelAlias(alias) {
+  return makeRequest("DELETE", `/api/models/alias?alias=${encodeURIComponent(alias)}`);
+}
+
+async function getCustomModels() {
+  return makeRequest("GET", "/api/models/custom");
+}
+
+async function addCustomModel(data) {
+  return makeRequest("POST", "/api/models/custom", data);
+}
+
+async function deleteCustomModel(id) {
+  return makeRequest("DELETE", `/api/models/custom?id=${encodeURIComponent(id)}`);
+}
+
+async function getDisabledModels(providerAlias) {
+  return makeRequest("GET", `/api/models/disabled${providerAlias ? `?providerAlias=${encodeURIComponent(providerAlias)}` : ""}`);
+}
+
+async function setDisabledModels(providerAlias, ids) {
+  return makeRequest("POST", "/api/models/disabled", { providerAlias, ids });
+}
+
+async function syncModelCatalog() {
+  return makeRequest("POST", "/api/models/catalog-sync", {});
+}
+
+async function getPricing() {
+  return makeRequest("GET", "/api/pricing");
+}
+
+async function getTags() {
+  return makeRequest("GET", "/api/tags");
+}
+
+// ============================================================================
+// COMBOS++ (presets)
+// ============================================================================
+
+async function getComboPresets(source) {
+  return makeRequest("GET", `/api/combos/presets?source=${encodeURIComponent(source)}`);
+}
+
+async function createComboPresets(source) {
+  return makeRequest("POST", "/api/combos/presets", { source });
+}
+
+// ============================================================================
+// USAGE & QUOTA
+// ============================================================================
+
+async function getUsageStats(period = "7d") {
+  return makeRequest("GET", `/api/usage/stats?period=${encodeURIComponent(period)}`);
+}
+
+async function getUsageChart(period = "7d") {
+  return makeRequest("GET", `/api/usage/chart?period=${encodeURIComponent(period)}`);
+}
+
+async function getUsageHistory(query) {
+  return makeRequest("GET", `/api/usage/history${query ? `?${query}` : ""}`);
+}
+
+async function getUsageLogs() {
+  return makeRequest("GET", "/api/usage/logs");
+}
+
+async function getRequestLogs(query) {
+  return makeRequest("GET", `/api/usage/request-logs${query ? `?${query}` : ""}`);
+}
+
+async function getRequestDetails(query) {
+  // Paginated table: page, pageSize, provider, model, connectionId, status, startDate, endDate
+  return makeRequest("GET", `/api/usage/request-details${query ? `?${query}` : ""}`);
+}
+
+async function getUsageProviders() {
+  return makeRequest("GET", "/api/usage/providers");
+}
+
+async function getConnectionUsage(connectionId) {
+  return makeRequest("GET", `/api/usage/${encodeURIComponent(connectionId)}`);
+}
+
+async function resetCodexCredits(connectionId) {
+  return makeRequest("POST", `/api/usage/${encodeURIComponent(connectionId)}/codex-reset-credits`, {});
+}
+
+// ============================================================================
+// KEYS+
+// ============================================================================
+
+async function getApiKeyById(id) {
+  return makeRequest("GET", `/api/keys/${id}`);
+}
+
+async function updateApiKey(id, data) {
+  return makeRequest("PUT", `/api/keys/${id}`, data);
+}
+
+async function getRequireLogin() {
+  return makeRequest("GET", "/api/settings/require-login");
+}
+
+// ============================================================================
+// SETTINGS & SYSTEM++
+// ============================================================================
+
+async function testProxy(url) {
+  return makeRequest("POST", "/api/settings/proxy-test", { url });
+}
+
+async function exportDatabase() {
+  return makeRequest("GET", "/api/settings/database");
+}
+
+async function importDatabase(payload) {
+  return makeRequest("POST", "/api/settings/database", payload);
+}
+
+async function getVersion() {
+  return makeRequest("GET", "/api/version");
+}
+
+async function triggerVersionUpdate() {
+  return makeRequest("POST", "/api/version/update", {});
+}
+
+async function shutdownServer() {
+  return makeRequest("POST", "/api/shutdown", {});
+}
+
+// ============================================================================
+// PROXY POOLS
+// ============================================================================
+
+async function getProxyPools() {
+  return makeRequest("GET", "/api/proxy-pools");
+}
+
+async function createProxyPool(data) {
+  return makeRequest("POST", "/api/proxy-pools", data);
+}
+
+async function getProxyPoolById(id) {
+  return makeRequest("GET", `/api/proxy-pools/${id}`);
+}
+
+async function updateProxyPool(id, data) {
+  return makeRequest("PUT", `/api/proxy-pools/${id}`, data);
+}
+
+async function deleteProxyPool(id) {
+  return makeRequest("DELETE", `/api/proxy-pools/${id}`);
+}
+
+async function testProxyPool(id) {
+  return makeRequest("POST", `/api/proxy-pools/${id}/test`, {});
+}
+
+// ============================================================================
+// HEADROOM / PXPIPE
+// ============================================================================
+
+async function getHeadroomStatus() {
+  return makeRequest("GET", "/api/headroom/status");
+}
+
+async function startHeadroom() {
+  return makeRequest("POST", "/api/headroom/start", {});
+}
+
+async function stopHeadroom() {
+  return makeRequest("POST", "/api/headroom/stop", {});
+}
+
+async function restartHeadroom() {
+  return makeRequest("POST", "/api/headroom/restart", {});
+}
+
+async function getPxpipeStatus() {
+  return makeRequest("GET", "/api/pxpipe/status");
+}
+
+async function getPxpipeStats(period) {
+  return makeRequest("GET", `/api/pxpipe/stats${period ? `?period=${encodeURIComponent(period)}` : ""}`);
+}
+
+async function getPxpipeLogs() {
+  return makeRequest("GET", "/api/pxpipe/logs");
+}
+
+async function startPxpipe() {
+  return makeRequest("POST", "/api/pxpipe/start", {});
+}
+
+async function stopPxpipe() {
+  return makeRequest("POST", "/api/pxpipe/stop", {});
+}
+
+async function restartPxpipe() {
+  return makeRequest("POST", "/api/pxpipe/restart", {});
+}
+
+async function installPxpipe() {
+  return makeRequest("POST", "/api/pxpipe/install", {});
+}
+
+async function getPxpipeHealth() {
+  return makeRequest("GET", "/api/pxpipe/health");
+}
+
+async function getTailscaleCheck() {
+  return makeRequest("GET", "/api/tunnel/tailscale-check");
+}
+
+async function installTailscale() {
+  return makeRequest("POST", "/api/tunnel/tailscale-install", {});
+}
+
+async function enableTailscale() {
+  return makeRequest("POST", "/api/tunnel/tailscale-enable", {});
+}
+
+async function disableTailscale() {
+  return makeRequest("POST", "/api/tunnel/tailscale-disable", {});
+}
+
+async function getHeadroomExtras() {
+  return makeRequest("GET", "/api/headroom/extras");
+}
+
+// ============================================================================
+// CLI-TOOLS+ (batch statuses; per-tool GET/POST/DELETE reuse existing fns)
+// ============================================================================
+
+async function getAllCliToolStatuses() {
+  return makeRequest("GET", "/api/cli-tools/all-statuses");
+}
+
+// ============================================================================
+// MITM & MEDIA
+// ============================================================================
+
+async function getMitmStatus(tool) {
+  return makeRequest("GET", `/api/cli-tools/${tool}-mitm`);
+}
+
+async function getMitmAlias(tool) {
+  return makeRequest("GET", `/api/cli-tools/${tool}-mitm/alias`);
+}
+
+async function updateMitmAlias(tool, data) {
+  return makeRequest("PUT", `/api/cli-tools/${tool}-mitm/alias`, data);
+}
+
+async function getTtsVoices(provider, lang) {
+  const q = [`provider=${encodeURIComponent(provider || "edge-tts")}`];
+  if (lang) q.push(`lang=${encodeURIComponent(lang)}`);
+  return makeRequest("GET", `/api/media-providers/tts/voices?${q.join("&")}`);
+}
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
 module.exports = {
   configure,
+  makeRequest,
+  req,
   
   // Providers
   getProviders,
@@ -553,4 +883,91 @@ module.exports = {
   updateProviderNode,
   deleteProviderNode,
   validateProviderNode,
+
+  // Providers++
+  testProvidersBatch,
+  validateProvider,
+  getSuggestedModels,
+  testProviderModels,
+  addProviderModel,
+  oauthImport,
+
+  // Models domain
+  testModel,
+  getModelAvailability,
+  getModelAliases,
+  setModelAlias,
+  deleteModelAlias,
+  getCustomModels,
+  addCustomModel,
+  deleteCustomModel,
+  getDisabledModels,
+  setDisabledModels,
+  syncModelCatalog,
+  getPricing,
+  getTags,
+
+  // Combos++
+  getComboPresets,
+  createComboPresets,
+
+  // Usage & quota
+  getUsageStats,
+  getUsageChart,
+  getUsageHistory,
+  getUsageLogs,
+  getRequestLogs,
+  getRequestDetails,
+  getUsageProviders,
+  getConnectionUsage,
+  resetCodexCredits,
+
+  // Keys+
+  getApiKeyById,
+  updateApiKey,
+  getRequireLogin,
+
+  // Settings & system++
+  testProxy,
+  exportDatabase,
+  importDatabase,
+  getVersion,
+  triggerVersionUpdate,
+  shutdownServer,
+
+  // Proxy pools
+  getProxyPools,
+  createProxyPool,
+  getProxyPoolById,
+  updateProxyPool,
+  deleteProxyPool,
+  testProxyPool,
+
+  // Headroom / PxPipe
+  getHeadroomStatus,
+  startHeadroom,
+  stopHeadroom,
+  restartHeadroom,
+  getPxpipeStatus,
+  getPxpipeStats,
+  getPxpipeLogs,
+  startPxpipe,
+  stopPxpipe,
+  restartPxpipe,
+  installPxpipe,
+  getPxpipeHealth,
+  getTailscaleCheck,
+  installTailscale,
+  enableTailscale,
+  disableTailscale,
+  getHeadroomExtras,
+
+  // CLI-tools+
+  getAllCliToolStatuses,
+
+  // MITM & media
+  getMitmStatus,
+  getMitmAlias,
+  updateMitmAlias,
+  getTtsVoices,
 };
