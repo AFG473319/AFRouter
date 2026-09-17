@@ -1,5 +1,5 @@
 const api = require("../../api/client");
-const { required, csv } = require("../args");
+const { requiredId, required, csv } = require("../args");
 
 const HELP = `combos <action> [flags]
   list                                   List all combos
@@ -27,7 +27,7 @@ async function run(action, pos, opts) {
       };
     }
     case "get": {
-      const r = await api.getComboById(pos[0]);
+      const r = await api.getComboById(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
@@ -46,12 +46,12 @@ async function run(action, pos, opts) {
       if (opts.models) updates.models = csv(opts.models);
       if (opts.kind) updates.kind = opts.kind;
       if (Object.keys(updates).length === 0) return { usage: "combos edit <id> needs at least one of --name/--models/--kind" };
-      const r = await api.updateCombo(pos[0], updates);
+      const r = await api.updateCombo(requiredId(pos), updates);
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "delete": {
-      const r = await api.deleteCombo(pos[0]);
+      const r = await api.deleteCombo(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }

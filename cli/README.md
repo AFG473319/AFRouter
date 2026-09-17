@@ -83,7 +83,8 @@ afrouter --help             # Show all options
 
 ## 🤖 Headless Mode (scripts & AI agents)
 
-Every dashboard operation is also available non-interactively — no TUI, no browser.
+Headless mode exposes many dashboard operations non-interactively, but parity is
+not yet complete. See `../CLI_AUDIT.md` for known gaps and the current repair scope.
 Headless commands talk to the **already-running** gateway and bypass the launcher:
 
 ```bash

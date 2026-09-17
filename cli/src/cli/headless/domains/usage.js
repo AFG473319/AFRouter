@@ -1,4 +1,5 @@
 const api = require("../../api/client");
+const { requiredId } = require("../args");
 
 const HELP = `usage <action> [flags]
   stats [--period <today|24h|7d|30d|60d|all>]   Aggregated stats (default 7d)
@@ -50,7 +51,7 @@ async function run(action, pos, opts) {
       return { data: r.data };
     }
     case "connection": {
-      const r = await api.getConnectionUsage(pos[0]);
+      const r = await api.getConnectionUsage(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }

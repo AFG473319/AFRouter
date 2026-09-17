@@ -9,8 +9,8 @@ const HELP = `models <action> [flags]
   alias-set --alias <a> --model <m>      Set alias
   alias-del --alias <a>                  Delete alias
   custom                                 List custom models
-  custom-add --provider <alias> --id <mid> [--name <n>]
-  custom-del --id <mid>                  Delete custom model
+  custom-add --provider <alias> --id <mid> [--name <n>] [--type <type>]
+  custom-del --provider <alias> --id <mid> [--type <type>]  Delete custom model (default type: llm)
   disabled [--provider <alias>]          Disabled sets
   disable --provider <alias> --ids <a,b> Replace disabled set (empty = enable all)
   sync                                   Trigger catalog sync
@@ -69,12 +69,13 @@ async function run(action, pos, opts) {
     case "custom-add": {
       const body = { providerAlias: required(opts, "provider"), id: required(opts, "id") };
       if (opts.name) body.name = opts.name;
+      if (opts.type) body.type = required(opts, "type");
       const r = await api.addCustomModel(body);
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "custom-del": {
-      const r = await api.deleteCustomModel(required(opts, "id"));
+      const r = await api.deleteCustomModel(required(opts, "id"), required(opts, "provider"), opts.type === undefined ? "llm" : required(opts, "type"));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }

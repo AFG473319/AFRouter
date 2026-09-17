@@ -27,7 +27,7 @@ async function run(action, pos, opts) {
     }
     case "set": {
       const key = required(opts, "key");
-      if (opts.value === undefined) return { usage: "settings set needs --key and --value" };
+      if (opts.value === undefined || opts.value === true) return { usage: "settings set needs --key and --value" };
       const r = await api.updateSettings({ [key]: jsonOrString(opts.value) });
       if (!r.success) return { error: r.error };
       return { data: r.data };
@@ -37,8 +37,9 @@ async function run(action, pos, opts) {
       try {
         body = JSON.parse(required(opts, "json"));
       } catch {
-        return { error: "--json must be a valid JSON object" };
+        return { usage: "--json must be a valid JSON object" };
       }
+      if (!body || Array.isArray(body) || typeof body !== "object") return { usage: "--json must be a valid JSON object" };
       const r = await api.updateSettings(body);
       if (!r.success) return { error: r.error };
       return { data: r.data };

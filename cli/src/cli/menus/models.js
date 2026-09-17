@@ -185,7 +185,7 @@ async function showCustomModelsMenu(breadcrumb = []) {
       const id = typeof m === "string" ? m : (m.id || m.model);
       const ok = await confirm(`Delete custom model "${id}"?`);
       if (ok) {
-        const res = await api.deleteCustomModel(id);
+        const res = await api.deleteCustomModel(id, m.providerAlias, m.type || "llm");
         showStatus(res.success ? "Deleted!" : `Failed: ${res.error}`, res.success ? "success" : "error");
         await pause();
       }

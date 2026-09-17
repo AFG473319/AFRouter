@@ -6,14 +6,14 @@ const HELP = `tools <action> [flags]
   status --tool <t>                    Single tool status
   setup --tool <t> [--model <m>] [--models <a,b>] [--api-key <k>]
     Configures tool against this gateway (endpoint + first key by default).
-    Single-model tools: cline, kilo, deepseek-tui.
+    Single-model tools: cline, kilo, deepseek-tui, codex.
     Multi-model tools: cowork, deepseek-harness, jcode, grok-build, zcode,
-      claude, codex, droid, openclaw, opencode, hermes.
+      claude, droid, openclaw, opencode, hermes.
   reset --tool <t>                     Reset tool to default
   mitm-status                          Antigravity MITM status
   mitm-alias [--alias <a> --model <m>] View mapping, or set one entry`;
 
-const SINGLE = new Set(["cline", "kilo", "deepseek-tui"]);
+const SINGLE = new Set(["cline", "kilo", "deepseek-tui", "codex"]);
 
 async function firstKey(explicit) {
   if (explicit) return explicit;
@@ -23,13 +23,14 @@ async function firstKey(explicit) {
   return keys[0].key;
 }
 
-async function endpointFor(port) {
+async function endpointFor(port, host = "127.0.0.1") {
   try {
     const t = await api.getTunnelStatus();
     const pub = t.success && (t.data.tunnel?.publicUrl || t.data.publicUrl);
     if (pub) return `${pub}/v1`;
   } catch {}
-  return `http://localhost:${port}/v1`;
+  const hostname = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return `http://${hostname}:${port}/v1`;
 }
 
 async function run(action, pos, opts, ctx) {
@@ -47,7 +48,7 @@ async function run(action, pos, opts, ctx) {
     }
     case "setup": {
       const tool = required(opts, "tool");
-      const endpoint = await endpointFor(ctx.port);
+      const endpoint = await endpointFor(ctx.port, ctx.host);
       const apiKey = await firstKey(opts["api-key"] || opts.apiKey);
       let body;
       if (tool === "claude") {
@@ -60,6 +61,7 @@ async function run(action, pos, opts, ctx) {
         };
       } else if (SINGLE.has(tool)) {
         body = { baseUrl: endpoint, apiKey, model: required(opts, "model") };
+        if (tool === "codex") body.subagentModel = opts["subagent-model"] || opts.subagentModel || body.model;
       } else {
         const models = csv(opts.models);
         const single = opts.model && !opts.models ? [opts.model] : models;

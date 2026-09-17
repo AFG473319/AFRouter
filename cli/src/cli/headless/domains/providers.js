@@ -1,5 +1,5 @@
 const api = require("../../api/client");
-const { required, csv } = require("../args");
+const { requiredId, required, csv } = require("../args");
 
 const HELP = `providers <action> [flags]
   list                                   List all connections
@@ -32,12 +32,12 @@ async function run(action, pos, opts) {
       };
     }
     case "get": {
-      const r = await api.getProviderById(pos[0]);
+      const r = await api.getProviderById(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "test": {
-      const r = await api.testProvider(pos[0]);
+      const r = await api.testProvider(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
@@ -49,25 +49,25 @@ async function run(action, pos, opts) {
     }
     case "test-models": {
       const models = csv(required(opts, "models"));
-      const r = await api.testProviderModels(pos[0], models);
+      const r = await api.testProviderModels(requiredId(pos), models);
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "enable":
     case "disable": {
-      const r = await api.updateConnection(pos[0], { isActive: action === "enable" });
+      const r = await api.updateConnection(requiredId(pos), { isActive: action === "enable" });
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "rename": {
       const name = required(opts, "name");
-      const r = await api.updateConnection(pos[0], { name });
+      const r = await api.updateConnection(requiredId(pos), { name });
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "assign-pool": {
       const pool = required(opts, "pool");
-      const r = await api.updateConnection(pos[0], { proxyPoolId: pool });
+      const r = await api.updateConnection(requiredId(pos), { proxyPoolId: pool });
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
@@ -75,7 +75,7 @@ async function run(action, pos, opts) {
       const model = required(opts, "model");
       const body = { id: model };
       if (opts.name) body.name = opts.name;
-      const r = await api.addProviderModel(pos[0], body);
+      const r = await api.addProviderModel(requiredId(pos), body);
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
@@ -89,7 +89,7 @@ async function run(action, pos, opts) {
       return { data: r.data };
     }
     case "delete": {
-      const r = await api.deleteProvider(pos[0]);
+      const r = await api.deleteProvider(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
@@ -99,7 +99,7 @@ async function run(action, pos, opts) {
       return { data: r.data };
     }
     case "usage": {
-      const r = await api.getConnectionUsage(pos[0]);
+      const r = await api.getConnectionUsage(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }

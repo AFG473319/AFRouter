@@ -1,5 +1,5 @@
 const api = require("../../api/client");
-const { required } = require("../args");
+const { requiredId, required } = require("../args");
 
 const HELP = `network <action> [flags]
   endpoint                             Active endpoint URLs + gates
@@ -92,25 +92,25 @@ async function run(action, pos, opts) {
       if (opts.name) updates.name = opts.name;
       if (opts.url) updates.proxyUrl = opts.url;
       if (Object.keys(updates).length === 0) return { usage: "network pool-edit <id> needs --name and/or --url" };
-      const r = await api.updateProxyPool(pos[0], updates);
+      const r = await api.updateProxyPool(requiredId(pos), updates);
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "pool-test": {
-      const r = await api.testProxyPool(pos[0]);
+      const r = await api.testProxyPool(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "pool-toggle": {
-      const cur = await api.getProxyPoolById(pos[0]);
+      const cur = await api.getProxyPoolById(requiredId(pos));
       if (!cur.success) return { error: cur.error };
       const pool = cur.data.pool || cur.data;
-      const r = await api.updateProxyPool(pos[0], { isActive: pool.isActive === false });
+      const r = await api.updateProxyPool(requiredId(pos), { isActive: pool.isActive === false });
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
     case "pool-del": {
-      const r = await api.deleteProxyPool(pos[0]);
+      const r = await api.deleteProxyPool(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }

@@ -567,8 +567,9 @@ async function addCustomModel(data) {
   return makeRequest("POST", "/api/models/custom", data);
 }
 
-async function deleteCustomModel(id) {
-  return makeRequest("DELETE", `/api/models/custom?id=${encodeURIComponent(id)}`);
+async function deleteCustomModel(id, providerAlias, type = "llm") {
+  if (!id || !providerAlias) return { success: false, error: "id and providerAlias are required" };
+  return makeRequest("DELETE", `/api/models/custom?id=${encodeURIComponent(id)}&providerAlias=${encodeURIComponent(providerAlias)}&type=${encodeURIComponent(type)}`);
 }
 
 async function getDisabledModels(providerAlias) {

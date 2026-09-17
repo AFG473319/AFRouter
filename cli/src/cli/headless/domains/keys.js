@@ -1,5 +1,5 @@
 const api = require("../../api/client");
-const { required } = require("../args");
+const { requiredId, required } = require("../args");
 const { maskKey } = require("../../utils/format");
 
 const HELP = `keys <action> [flags]
@@ -15,7 +15,7 @@ async function run(action, pos, opts) {
       if (!r.success) return { error: r.error };
       const keys = r.data.keys || [];
       return {
-        data: { keys },
+        data: { keys: keys.map(key => ({ ...key, key: maskKey(key.key) })) },
         table: {
           headers: ["ID", "Name", "Key", "Created"],
           rows: keys.map(k => [k.id, k.name, maskKey(k.key), k.createdAt || "-"]),
@@ -24,7 +24,7 @@ async function run(action, pos, opts) {
       };
     }
     case "get": {
-      const r = await api.getApiKeyById(pos[0]);
+      const r = await api.getApiKeyById(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }
@@ -34,7 +34,7 @@ async function run(action, pos, opts) {
       return { data: r.data };
     }
     case "delete": {
-      const r = await api.deleteApiKey(pos[0]);
+      const r = await api.deleteApiKey(requiredId(pos));
       if (!r.success) return { error: r.error };
       return { data: r.data };
     }

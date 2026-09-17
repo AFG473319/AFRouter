@@ -7,6 +7,8 @@
 function parseArgs(argv) {
   const positionals = [];
   const opts = {};
+  const booleanFlags = new Set(["human", "help", "h", "j"]);
+  const isValue = (value) => value !== undefined && (!value.startsWith("-") || /^-\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value));
   let i = 0;
   while (i < argv.length) {
     const tok = argv[i];
@@ -23,7 +25,8 @@ function parseArgs(argv) {
       }
       const key = tok.slice(2);
       const next = argv[i + 1];
-      if (next === undefined || next.startsWith("-")) {
+      const jsonOutput = key === "json" && !(positionals[0] === "settings" && positionals[1] === "patch");
+      if (booleanFlags.has(key) || jsonOutput || !isValue(next)) {
         opts[key] = true;
       } else {
         opts[key] = next;
@@ -35,7 +38,7 @@ function parseArgs(argv) {
     if (tok.startsWith("-") && tok.length === 2) {
       const key = tok[1];
       const next = argv[i + 1];
-      if (next === undefined || next.startsWith("-")) {
+      if (booleanFlags.has(key) || !isValue(next)) {
         opts[key] = true;
       } else {
         opts[key] = next;
@@ -55,11 +58,16 @@ function parseArgs(argv) {
  * Precedence: explicit flag > env > default.
  */
 function globals(opts) {
-  const portRaw = opts.port || opts.p || process.env.AFROUTER_PORT || "20128";
-  const port = parseInt(portRaw, 10);
+  const portRaw = opts.port ?? opts.p ?? process.env.AFROUTER_PORT ?? "20128";
+  const port = Number(portRaw);
+  if (!/^\d+$/.test(String(portRaw)) || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw usageError("port must be an integer between 1 and 65535");
+  }
+  const host = opts.host ?? opts.H ?? process.env.AFROUTER_HOST ?? "127.0.0.1";
+  if (typeof host !== "string" || !host.trim()) throw usageError("host must be a non-empty hostname");
   return {
-    host: opts.host || opts.H || process.env.AFROUTER_HOST || "127.0.0.1",
-    port: isNaN(port) ? 20128 : port,
+    host,
+    port,
     json: opts.json !== undefined ? opts.json === true || opts.json === "1" || opts.json === "true" : undefined,
     human: opts.human === true || opts.human === "1" || opts.human === "true",
     help: opts.help === true || opts.h === true,
@@ -71,9 +79,14 @@ function globals(opts) {
  */
 function required(opts, ...names) {
   for (const n of names) {
-    if (opts[n] !== undefined && opts[n] !== true) return opts[n];
+    if (typeof opts[n] === "string" && opts[n].trim()) return opts[n];
   }
   throw usageError(`Missing required flag: ${names.map(n => `--${n}`).join(" or ")}`);
+}
+
+function requiredId(positionals) {
+  if (typeof positionals[0] !== "string" || !positionals[0].trim()) throw usageError("Missing required resource ID");
+  return positionals[0];
 }
 
 function usageError(message) {
@@ -103,4 +116,4 @@ function jsonOrString(value) {
   }
 }
 
-module.exports = { parseArgs, globals, required, usageError, csv, jsonOrString };
+module.exports = { parseArgs, globals, required, requiredId, usageError, csv, jsonOrString };

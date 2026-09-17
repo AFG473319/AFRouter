@@ -46,6 +46,9 @@ async function statusRun() {
     api.req("GET", "/api/health"),
     api.getVersion(),
   ]);
+  if (!health.success || !version.success) {
+    return { error: [health.success ? null : health.error, version.success ? null : version.error].filter(Boolean).join("; ") || "Gateway status unavailable" };
+  }
   return {
     data: {
       health: health.success ? health.data : { error: health.error },
@@ -60,7 +63,12 @@ async function statusRun() {
  */
 async function runHeadless(argv) {
   const { positionals, opts } = parseArgs(argv);
-  const g = globals(opts);
+  let g;
+  try {
+    g = globals(opts);
+  } catch (err) {
+    return failUsage(err.message);
+  }
   api.configure({ host: g.host, port: g.port, timeoutMs: 300000 });
 
   const [domain, action, ...rest] = positionals;
@@ -77,6 +85,7 @@ async function runHeadless(argv) {
     }
     try {
       const out = await statusRun();
+      if (out.error) return fail(out.error);
       return emit(out.data, g);
     } catch (err) {
       return fail(err.message);
@@ -97,8 +106,7 @@ async function runHeadless(argv) {
     // Domain run() receives (action, positionals-after-action, opts, ctx).
     const out = await mod.run(action, rest, opts, { port: g.port, host: g.host });
     if (out.usage) {
-      console.log(typeof out.usage === "string" ? out.usage : mod.HELP);
-      return 0;
+      return failUsage(typeof out.usage === "string" ? out.usage : mod.HELP);
     }
     if (out.error) return fail(out.error);
     return emit(out.data, g, out.table);

@@ -1,3 +1,10 @@
+# Unreleased
+
+## Fixes
+- **CLI/headless**: validate ports and resource IDs, preserve boolean flags and negative numeric values, reject blank required values and invalid settings patches, and return error exit codes for unknown commands and failed gateway status checks.
+- **CLI/headless**: default compatible nodes to Chat Completions, preserve custom-model provider/type on deletion in both interfaces, send Codex's single-model payload, honor the selected endpoint host, and mask JSON key listings.
+- **CLI audit**: document remaining dashboard parity gaps in `CLI_AUDIT.md`; add isolated contract, subprocess transport, terminal-menu, and Codex config-merge regression tests.
+
 # v0.5.81 (2026-09-16)
 
 ## Features
