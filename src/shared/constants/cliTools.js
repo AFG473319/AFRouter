@@ -445,6 +445,33 @@ amp --model "{{model}}"
       },
     ],
   },
+  workbuddy: {
+    id: "workbuddy",
+    name: "WorkBuddy",
+    image: "/providers/workbuddy.png",
+    color: "#00C2FF",
+    description: "Tencent WorkBuddy AI assistant (models.json)",
+    configType: "custom",
+    docsUrl: "https://www.codebuddy.ai/docs/cli/models",
+    notes: [
+      {
+        type: "info",
+        text: "AFRouter merges entries into ~/.workbuddy/models.json with vendor \"AFRouter\" so the WorkBuddy model picker offers AFRouter models. Same format as CodeBuddy.",
+      },
+      {
+        type: "info",
+        text: "Only OpenAI-compatible endpoints are supported — url must end with /chat/completions. File hot-reloads (~1s debounce), no restart needed.",
+      },
+      {
+        type: "warning",
+        text: "Config path: Linux/macOS ~/.workbuddy/models.json • Windows %USERPROFILE%\\.workbuddy\\models.json",
+      },
+      {
+        type: "warning",
+        text: "Reset removes only vendor \"AFRouter\" models — your other models are kept.",
+      },
+    ],
+  },
   devin: {
     id: "devin",
     name: "Devin CLI",

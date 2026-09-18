@@ -15,6 +15,7 @@ export { default as DeepSeekHarnessToolCard } from "./DeepSeekHarnessToolCard";
 export { default as JcodeToolCard } from "./JcodeToolCard";
 export { default as GrokBuildToolCard } from "./GrokBuildToolCard";
 export { default as ZCodeToolCard } from "./ZCodeToolCard";
+export { default as WorkBuddyToolCard } from "./WorkBuddyToolCard";
 export { default as MitmServerCard } from "./MitmServerCard";
 export { default as MitmToolCard } from "./MitmToolCard";
 export { default as MitmLinkCard } from "./MitmLinkCard";
