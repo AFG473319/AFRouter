@@ -1,136 +1,66 @@
-# OpenAI Codex CLI Integration
+# Codex CLI / App Integration
 
-Integrate AFRouter with OpenAI Codex CLI to route your OpenAI API requests through AFRouter's intelligent routing system.
+AFRouter connects Codex to multiple upstream models using one custom provider and a separate model catalog. The generated catalog was checked with Codex CLI 0.154.0. Older clients may require an upgrade.
 
-## Prerequisites
+## Dashboard setup
 
-- OpenAI Codex CLI installed
-- AFRouter running locally or cloud endpoint configured
-- API key from AFRouter dashboard
+1. Start AFRouter and open **Dashboard > CLI Tools > OpenAI Codex CLI / App**.
+2. Choose the endpoint and an AFRouter API key.
+3. Use **Add Model** to select multiple models. You can also enter a routed model ID or combo explicitly.
+4. Click a model chip or use **Default Model** to choose the startup model. Optionally select a subagent model; leaving it blank uses Codex's normal inheritance.
+5. Click **Apply**, then fully quit and reopen Codex. Select the published models from Codex's model picker or use `codex --model provider/model-id`.
 
-## Setup
+Selection changes are staged until Apply. Previously managed models are retained unless explicitly removed. Reset disconnects this integration and restores the values it replaced, provided those values have not since been edited by the user.
 
-### 1. Configure Environment Variables
+## Files and provider structure
 
-Set the following environment variables in your shell configuration file (`~/.bashrc`, `~/.zshrc`, or `~/.bash_profile`):
+The gateway uses its `CODEX_HOME` environment variable, defaulting to `~/.codex`. Apply writes files on the gateway's machine, not the browser's machine. For remote installations, use **Manual Config** and update the catalog path for the machine running Codex.
 
-```bash
-# Base URL for AFRouter
-export OPENAI_BASE_URL="http://localhost:20128/v1"
+- `config.toml`: selected model, the AFRouter provider, and `model_catalog_json`.
+- `afrouter-models.json`: Codex model entries with context windows, compaction thresholds, input modalities, and supported reasoning efforts.
+- `afrouter-integration.json`: ownership and previous values used for safe Reset. Keep this file with the configuration; it contains private settings and must not be shared.
 
-# API Key from AFRouter dashboard
-export OPENAI_API_KEY="your-afrouter-api-key"
+Codex does not support `[model_providers.afrouter.models]`. The provider defines transport and authentication; model specifications belong in the separate JSON catalog. The dashboard groups these models under AFRouter, but Codex controls its own picker layout.
+
+For manual configuration, merge the generated snippets instead of overwriting your configuration. A minimal provider configuration using the recommended environment-based authentication is:
+
+```toml
+model = "provider/model-id"
+model_provider = "afrouter"
+model_catalog_json = "/absolute/path/to/.codex/afrouter-models.json"
+
+[model_providers.afrouter]
+name = "AFRouter"
+base_url = "http://127.0.0.1:20128/v1"
+wire_api = "responses"
+supports_websockets = false
+env_key = "AFROUTER_API_KEY"
 ```
 
-### 2. Reload Shell Configuration
+Set `AFROUTER_API_KEY` in the environment that launches Codex. Automatic Apply instead writes the dashboard-selected key as a provider-scoped Authorization header, so no shell setup is required. It never edits Codex's `auth.json` or logs out your OpenAI account.
 
-```bash
-source ~/.zshrc  # or ~/.bashrc
-```
+## Model specs and limitations
 
-### 3. Verify Configuration
+The integration resolves exact model IDs and aliases from AFRouter's catalog, including stored custom-model capabilities. It uses the gateway's thinking-level resolver, restricted to the compatible Codex effort vocabulary. It does not invent an effort ladder for models without declared reasoning support.
 
-Check that the environment variables are set correctly:
+Every entry includes its default in a nonempty selectable effort list. When no compatible effort ladder is known, the catalog exposes only the existing default: `medium` for reasoning models, `none` otherwise. Codex can select single-option models directly without showing another reasoning popup. This compatibility default is not proof of upstream support for adjustable effort levels.
 
-```bash
-echo $OPENAI_BASE_URL
-echo $OPENAI_API_KEY
-```
+Unknown models and combos receive an explicitly reported fallback: 128K context and text input only. This fallback is not a verified upstream limit. Register accurate custom-model metadata before using models with different limits. Output limits remain gateway/upstream concerns; they are not published as an unsupported Codex config field.
 
-## Available Models
+Global context-window, compaction, and reasoning-effort overrides would mask per-model metadata, so Apply temporarily removes them and Reset restores owned values. Explicit profiles, project settings, command-line overrides, and resumed sessions may still override user-level defaults.
 
-AFRouter provides the following Codex models:
+The catalog does not advertise unverified search, parallel-tool, freeform-patch, WebSocket, or paid-tier capabilities. Publishing metadata does not make an upstream implement a missing capability.
 
-| Model ID | Description |
-|----------|-------------|
-| `cx/gpt-5.2-codex` | GPT-5.2 Codex - Latest version |
-| `cx/gpt-5.1-codex-max` | GPT-5.1 Codex Max - Extended context |
+## Safety and recovery
 
-## Usage Examples
+Apply and Reset back up existing files as `.bak-*`, replace files atomically, and roll back completed writes if a later write fails. TOML values are preserved, but serialization can normalize formatting and remove comments; backups retain the original text. Backups may contain credentials, so keep them private.
 
-### Basic Usage
+An existing user-owned `model_catalog_json` or an externally edited AFRouter catalog blocks Apply rather than being overwritten. Restore a damaged file from its backup before retrying. Reset leaves externally edited catalog contents and subsequent user edits intact. It never removes unrelated credentials or custom agent roles.
 
-```bash
-# Use GPT-5.2 Codex
-codex --model cx/gpt-5.2-codex "Write a function to sort an array"
+Only the selected AFRouter model catalog is active while this provider is selected. This does not merge native OpenAI models into the AFRouter route. Reset restores the prior provider settings when still owned.
 
-# Use GPT-5.1 Codex Max
-codex --model cx/gpt-5.1-codex-max "Explain this complex algorithm"
-```
+## References
 
-### Code Generation
-
-```bash
-codex --model cx/gpt-5.2-codex "Create a REST API endpoint for user authentication"
-```
-
-### Code Explanation
-
-```bash
-codex --model cx/gpt-5.1-codex-max "Explain what this code does: $(cat myfile.js)"
-```
-
-## Configuration File
-
-You can also configure Codex CLI using a configuration file. Create or edit `~/.codex/config.json`:
-
-```json
-{
-  "baseUrl": "http://localhost:20128/v1",
-  "apiKey": "your-afrouter-api-key",
-  "defaultModel": "cx/gpt-5.2-codex"
-}
-```
-
-## Troubleshooting
-
-### Authentication Errors
-
-If you encounter authentication errors:
-
-1. Verify your API key is correct in AFRouter dashboard
-2. Check that `OPENAI_API_KEY` environment variable is set
-3. Ensure the API key has not expired
-
-### Connection Issues
-
-If you encounter connection errors:
-
-1. Verify AFRouter is running: `curl http://localhost:20128/health`
-2. Check environment variables are set correctly
-3. Ensure no firewall is blocking port 20128
-
-### Model Not Available
-
-If you get "model not available" errors:
-
-1. Verify the model name matches your AFRouter configuration
-2. Check that the OpenAI provider connection is active in AFRouter dashboard
-3. Ensure the model is available in your connected providers
-
-## Cloud Endpoint
-
-To use AFRouter cloud endpoint instead of localhost:
-
-```bash
-export OPENAI_BASE_URL="https://9router.com"
-```
-
-Make sure you have configured your API key in the AFRouter cloud dashboard.
-
-## Advanced Configuration
-
-### Custom Timeout
-
-```bash
-export OPENAI_TIMEOUT=60  # seconds
-```
-
-### Debug Mode
-
-Enable debug mode to see detailed request/response logs:
-
-```bash
-export CODEX_DEBUG=true
-codex --model cx/gpt-5.2-codex "Your prompt"
-```
+- [Official Codex configuration reference](https://developers.openai.com/codex/config-reference)
+- [Official Codex advanced configuration](https://developers.openai.com/codex/config-advanced)
+- [codex-router catalog implementation](https://github.com/duolahypercho/codex-router/blob/08dc3b6b2c30f2fa11dd433a6db3f40f761b51d4/src/catalog.mjs)

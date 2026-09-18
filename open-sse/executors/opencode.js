@@ -4,7 +4,6 @@ import { PROVIDERS } from "../config/providers.js";
 import { getThinkingLevels } from "../providers/thinkingLevels.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
-import { isMuseSparkModel } from "../providers/models/helpers.js";
 import {
   normalizeResponsesInput,
   clampResponsesCallId,
@@ -37,11 +36,12 @@ function hasValidOpencodeVersion(ua) {
   const minor = parseInt(m[2], 10);
   return major > 1 || (major === 1 && minor >= 17);
 }
-// Models served by /zen/v1/responses; every other model stays on /chat/completions.
-const RESPONSES_MODELS = new Set([
-  "muse-spark-1.2-contributor-free",
-  "muse-spark-1.3-contributor-free",
-]);
+import { getModelTargetFormat, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
+import { FORMATS } from "../translator/formats.js";
+import { ANTHROPIC_API_VERSION } from "../providers/shared.js";
+// Responses-only routing is derived from the model registry
+// (getModelTargetFormat), not a hardcoded set — the registry is the source
+// of truth (see fix(opencode): derive Responses-only routing).
 
 let lastTimestamp = 0;
 let counter = 0;
@@ -123,8 +123,7 @@ function baseModelId(model) {
 }
 
 function isResponsesModel(model) {
-  const base = baseModelId(model);
-  return RESPONSES_MODELS.has(base) || isMuseSparkModel(base);
+  return getModelTargetFormat(PROVIDER_ID_TO_ALIAS.opencode, baseModelId(model)) === FORMATS.OPENAI_RESPONSES;
 }
 
 function resolveOpencodeSession(body, credentials, providerSessionId, clientTool) {
@@ -353,12 +352,13 @@ export class OpenCodeExecutor extends BaseExecutor {
 
   buildUrl(model) {
     const base = this.config.baseUrl;
+    if (getModelTargetFormat(PROVIDER_ID_TO_ALIAS[this.provider], model) === FORMATS.CLAUDE) return `${base}/zen/v1/messages`;
     return isResponsesModel(model)
       ? `${base}/zen/v1/responses`
       : `${base}/zen/v1/chat/completions`;
   }
 
-  buildHeaders(credentials, stream = true) {
+  buildHeaders(credentials, stream = true, url, model) {
     const raw = credentials?.rawHeaders || {};
     const lower = {};
     for (const [k, v] of Object.entries(raw)) lower[k.toLowerCase()] = v;
@@ -370,7 +370,9 @@ export class OpenCodeExecutor extends BaseExecutor {
 
     return {
       "Content-Type": "application/json",
-      "Authorization": "Bearer public",
+      ...(getModelTargetFormat(PROVIDER_ID_TO_ALIAS[this.provider], model) === FORMATS.CLAUDE
+        ? { "x-api-key": "public", "anthropic-version": ANTHROPIC_API_VERSION }
+        : { "Authorization": "Bearer public" }),
       "User-Agent": isOpencodeDownstream ? downstreamUa : OPENCODE_UA,
       "x-opencode-client": lower["x-opencode-client"] || "desktop",
       "x-opencode-session": session,

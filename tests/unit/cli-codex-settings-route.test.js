@@ -5,16 +5,17 @@ import { afterEach, expect, it, vi } from "vitest";
 import { parseTOML } from "confbox";
 import { POST } from "../../src/app/api/cli-tools/codex-settings/route.js";
 
+vi.mock("../../src/app/api/models/route.js", () => ({ GET: async () => Response.json({ models: [] }) }));
+
 let temporaryHome;
 
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   if (temporaryHome) {
-    const codexHome = path.join(temporaryHome, ".codex");
-    await fs.unlink(path.join(codexHome, "config.toml"));
-    await fs.rmdir(codexHome);
-    await fs.rmdir(temporaryHome);
+    const resolved = path.resolve(temporaryHome);
+    if (!resolved.startsWith(path.resolve(os.tmpdir()) + path.sep) || !path.basename(resolved).startsWith("afrouter-cli-codex-")) throw new Error("Unsafe test cleanup path");
+    await fs.rm(resolved, { recursive: true, force: true });
     temporaryHome = undefined;
   }
 });
@@ -38,10 +39,12 @@ it("merges Codex settings without losing an existing TOML profile", async () => 
     profiles: { review: { model: "existing-model" } },
     model: "test/model",
     model_provider: "afrouter",
+    model_catalog_json: path.join(codexHome, "afrouter-models.json"),
     model_providers: { afrouter: {
       name: "AFRouter",
       base_url: "http://localhost:20128/v1",
       wire_api: "responses",
+      supports_websockets: false,
       http_headers: { Authorization: "Bearer test-only-key" },
     } },
     agents: { default_subagent_model: "test/model" },

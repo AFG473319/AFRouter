@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel } from "@/models";
+import { lookupCustomModelSpecs } from "@/lib/modelCatalog/customSpecs.js";
 import { CAPACITY_META } from "@/shared/constants/models";
 
 export const dynamic = "force-dynamic";
@@ -32,8 +33,10 @@ export async function POST(request) {
     if (!providerAlias || !id) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
-    const cleanCaps = sanitizeCaps(caps);
-    const added = await addCustomModel({ providerAlias, id, type: type || "llm", name, ...(cleanCaps ? { caps: cleanCaps } : {}) });
+    const catalog = (type || "llm") === "llm" ? await lookupCustomModelSpecs(providerAlias, id) : null;
+    const mergedCaps = { ...sanitizeCaps(caps), ...catalog?.caps };
+    const cleanCaps = Object.keys(mergedCaps).length ? mergedCaps : null;
+    const added = await addCustomModel({ providerAlias, id, type: type || "llm", name: name || catalog?.name, ...(cleanCaps ? { caps: cleanCaps } : {}) });
     return NextResponse.json({ success: true, added });
   } catch (error) {
     console.log("Error adding custom model:", error);

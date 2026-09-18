@@ -6,11 +6,110 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { resolveProviderAlias } from "open-sse/services/model.js";
 
 const execAsync = promisify(exec);
 
 const getConfigDir = () => path.join(os.homedir(), ".config", "opencode");
 const getConfigPath = () => path.join(getConfigDir(), "opencode.json");
+
+// Conservative fallback for ids resolvable from neither the live catalog nor the
+// static registry — flagged "unverified", never invented (mirrors ZCode/dsh).
+const FALLBACK_SPEC = { contextWindow: 200000, maxOutput: 64000, vision: false, pdf: false, audioInput: false, videoInput: false, reasoning: false, tools: true };
+
+// Self-fetch must target the port this instance actually listens on. The
+// request URL carries it; PORT is only a fallback because the Next server may
+// be started with --port and no PORT env.
+const resolveSelfOrigin = (request) => {
+  try {
+    const url = new URL(request?.url || "");
+    if (url.port) return `http://127.0.0.1:${url.port}`;
+  } catch {
+    // fall through
+  }
+  return `http://127.0.0.1:${process.env.PORT || 20128}`;
+};
+
+// Live catalog first: our own /v1/models, indexed by exact id and by the
+// alias-translated spelling (a config may use `oc/…` where the catalog says
+// `opencode/…`).
+const resolveLiveCatalog = async (origin) => {
+  try {
+    const res = await fetch(`${origin}/v1/models`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const models = Array.isArray(json?.data) ? json.data : [];
+    const byId = new Map();
+    const byAliasId = new Map();
+    for (const m of models) {
+      if (!m?.id || !m.capabilities) continue;
+      byId.set(m.id, m.capabilities);
+      const bare = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
+      const owner = m.owned_by || (m.id.includes("/") ? m.id.slice(0, m.id.indexOf("/")) : null);
+      if (bare && owner) byAliasId.set(`${owner}/${bare}`, m.capabilities);
+    }
+    return { byId, byAliasId };
+  } catch {
+    return null;
+  }
+};
+
+// Resolve model IDs -> full capability spec. Catalog first (exact id, then
+// alias-translated id), static registry second, conservative fallback last.
+const resolveModelSpecs = async (ids, catalog) => {
+  const specs = new Map();
+  const unverified = [];
+  for (const id of ids) {
+    const slash = id.indexOf("/");
+    const prefix = slash > 0 ? id.slice(0, slash) : null;
+    const bare = slash > 0 ? id.slice(slash + 1) : id;
+
+    let caps = catalog?.byId?.get(id) || null;
+    if (!caps && prefix) {
+      const translated = resolveProviderAlias(prefix);
+      caps =
+        catalog?.byAliasId?.get(`${translated}/${bare}`) ||
+        catalog?.byAliasId?.get(`${prefix}/${bare}`) ||
+        null;
+    }
+    if (!caps) {
+      const staticCaps = getCapabilitiesForModel(prefix, bare);
+      if (staticCaps && Number.isFinite(staticCaps.contextWindow)) caps = staticCaps;
+    }
+    if (caps && Number.isFinite(caps.contextWindow) && Number.isFinite(caps.maxOutput)) {
+      specs.set(id, caps);
+    } else {
+      specs.set(id, { ...FALLBACK_SPEC });
+      unverified.push(id);
+    }
+  }
+  return { specs, unverified };
+};
+
+// OpenCode model-entry shape (ConfigProviderV1.Model): limits, reasoning,
+// tool_call and the per-modality input list all come from capabilities. The old
+// shape hardcoded ["text","image"] for every model, which lied about vision and
+// left context/output at OpenCode's 0 default (breaking compaction).
+const buildModelEntry = (id, caps) => {
+  const input = ["text"];
+  if (caps.vision) input.push("image");
+  if (caps.pdf) input.push("pdf");
+  if (caps.audioInput) input.push("audio");
+  if (caps.videoInput) input.push("video");
+  const attachment = Boolean(caps.vision || caps.pdf || caps.audioInput || caps.videoInput);
+  return {
+    name: id,
+    limit: {
+      context: Math.floor(caps.contextWindow),
+      output: Math.floor(caps.maxOutput),
+    },
+    reasoning: caps.reasoning === true,
+    tool_call: caps.tools !== false,
+    attachment,
+    modalities: { input, output: ["text"] },
+  };
+};
 
 // Check if opencode CLI is installed (via which/where or config file exists)
 const checkOpenCodeInstalled = async () => {
@@ -32,25 +131,56 @@ const checkOpenCodeInstalled = async () => {
   }
 };
 
-const readConfig = async () => {
+// Read + parse the config, distinguishing the three outcomes the handlers need:
+//   { missing: true }              -> no file yet (fresh install)
+//   { corrupt: true }              -> exists but unparseable (never overwrite)
+//   { data }                       -> parsed config
+// opencode config files may use JSONC (comments/trailing commas); strip trailing
+// commas before parsing so valid JSONC does not read as corrupt.
+const readConfigResult = async () => {
+  let content;
   try {
-    const content = await fs.readFile(getConfigPath(), "utf-8");
-    // opencode config files may use JSONC format (trailing commas, comments).
-    // Strip trailing commas before parsing to avoid SyntaxError on valid JSONC.
-    const stripped = content.replace(/,(\s*[}\]])/g, "$1");
-    return JSON.parse(stripped);
+    content = await fs.readFile(getConfigPath(), "utf-8");
   } catch (error) {
-    if (error.code === "ENOENT") return null;
-    // If the config file exists but is unparseable (corrupted, exotic JSONC),
-    // treat it as "no config" rather than throwing a 500 that the UI
-    // misinterprets as "opencode not installed".
-    return null;
+    if (error.code === "ENOENT") return { missing: true };
+    return { corrupt: true };
   }
+  try {
+    const stripped = content.replace(/,(\s*[}\]])/g, "$1");
+    return { data: JSON.parse(stripped) };
+  } catch {
+    return { corrupt: true };
+  }
+};
+
+const readConfig = async () => {
+  const result = await readConfigResult();
+  return result.data ?? null;
 };
 
 const hasAFRouterConfig = (config) => {
   if (!config?.provider) return false;
   return !!config.provider["afrouter"];
+};
+
+// Write the config via a temp file + atomic rename. OpenCode rewrites this file
+// on config changes, so a torn write would drop the user's whole provider tree.
+const writeConfigAtomic = async (config) => {
+  const configPath = getConfigPath();
+  const tmpPath = `${configPath}.tmp`;
+  await fs.writeFile(tmpPath, JSON.stringify(config, null, 2));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rename(tmpPath, configPath);
+      break;
+    } catch (error) {
+      if ((error.code === "EPERM" || error.code === "EACCES") && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 150));
+        continue;
+      }
+      throw error;
+    }
+  }
 };
 
 // GET - Check opencode CLI and read current settings
@@ -104,12 +234,18 @@ export async function POST(request) {
 
     await fs.mkdir(configDir, { recursive: true });
 
-    // Read existing config or start fresh
-    let config = {};
-    try {
-      const existing = await fs.readFile(configPath, "utf-8");
-      config = JSON.parse(existing);
-    } catch { /* No existing config */ }
+    // Read existing config or start fresh. Reuse the JSONC-safe reader so a
+    // config with comments/trailing commas survives an Apply (plain JSON.parse
+    // would throw and we would silently overwrite the whole file). A corrupt
+    // file is never overwritten — the user is told to fix it first.
+    const existing = await readConfigResult();
+    if (existing.corrupt) {
+      return NextResponse.json(
+        { success: false, error: "OpenCode config is unreadable — fix or restore it before applying" },
+        { status: 409 },
+      );
+    }
+    const config = existing.data || {};
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
     const keyToUse = apiKey || "sk_afrouter";
@@ -131,10 +267,26 @@ export async function POST(request) {
     // Ensure models map exists
     existingProvider.models = existingProvider.models || {};
 
-    // Add or update entries for all requested models
+    // Resolve each requested model's specs from the live catalog, the static
+    // capability tables, or the conservative fallback. Unknown ids are still
+    // written (with fallback specs) so the user's selection is never dropped.
+    const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
+    const { specs, unverified } = await resolveModelSpecs(modelsArray, catalog);
+
+    // Add or update entries for all requested models. `onlyIds` semantics:
+    // every requested id is refreshed so a re-Apply after a capability update
+    // propagates the new limits. Entries the user hand-edited keep their `name`
+    // only when it differs from the id (preserve display names), but the
+    // machine-readable spec fields are always refreshed.
     for (const m of modelsArray) {
       if (!m || typeof m !== "string") continue;
-      existingProvider.models[m] = { name: m, modalities: { input: ["text", "image"], output: ["text"] } };
+      const caps = specs.get(m) || FALLBACK_SPEC;
+      const entry = buildModelEntry(m, caps);
+      const existingEntry = existingProvider.models[m];
+      if (existingEntry && typeof existingEntry === "object" && typeof existingEntry.name === "string" && existingEntry.name !== m) {
+        entry.name = existingEntry.name;
+      }
+      existingProvider.models[m] = entry;
     }
 
     // Save merged provider back
@@ -159,12 +311,14 @@ export async function POST(request) {
       model: `afrouter/${effectiveSubagentModel}`,
     };
 
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+    await writeConfigAtomic(config);
 
     return NextResponse.json({
       success: true,
       message: "OpenCode settings applied successfully!",
       configPath,
+      written: modelsArray,
+      unverified,
     });
   } catch (error) {
     console.log("Error applying opencode settings:", error);
@@ -176,18 +330,18 @@ export async function POST(request) {
 export async function PATCH(request) {
   try {
     const { clearActiveModel } = await request.json();
-    const configPath = getConfigPath();
 
-    let config = {};
-    try {
-      const existing = await fs.readFile(configPath, "utf-8");
-      config = JSON.parse(existing);
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        return NextResponse.json({ success: true, message: "No config file found" });
-      }
-      throw error;
+    const existing = await readConfigResult();
+    if (existing.missing) {
+      return NextResponse.json({ success: true, message: "No config file found" });
     }
+    if (existing.corrupt) {
+      return NextResponse.json(
+        { success: false, error: "OpenCode config is unreadable — fix or restore it first" },
+        { status: 409 },
+      );
+    }
+    const config = existing.data;
 
     if (clearActiveModel === true) {
       // Clear active model but keep models in the list
@@ -196,7 +350,7 @@ export async function PATCH(request) {
       }
     }
 
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+    await writeConfigAtomic(config);
 
     return NextResponse.json({
       success: true,
@@ -213,18 +367,18 @@ export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const modelToRemove = searchParams.get("model");
-    const configPath = getConfigPath();
 
-    let config = {};
-    try {
-      const existing = await fs.readFile(configPath, "utf-8");
-      config = JSON.parse(existing);
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        return NextResponse.json({ success: true, message: "No config file to reset" });
-      }
-      throw error;
+    const existing = await readConfigResult();
+    if (existing.missing) {
+      return NextResponse.json({ success: true, message: "No config file to reset" });
     }
+    if (existing.corrupt) {
+      return NextResponse.json(
+        { success: false, error: "OpenCode config is unreadable — fix or restore it first" },
+        { status: 409 },
+      );
+    }
+    const config = existing.data;
 
     // If specific model provided, remove just that model
     if (modelToRemove && config.provider?.["afrouter"]?.models) {
@@ -252,7 +406,7 @@ export async function DELETE(request) {
       if (Object.keys(config.agent).length === 0) delete config.agent;
     }
 
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+    await writeConfigAtomic(config);
 
     return NextResponse.json({
       success: true,

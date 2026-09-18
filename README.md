@@ -121,6 +121,35 @@ Default URLs:
 - Dashboard: `http://localhost:20128/dashboard`
 - OpenAI-compatible API: `http://localhost:20128/v1`
 
+The source commands above use POSIX shell syntax. In PowerShell, run `npm run dev` (port **20128** is already pinned), and set environment variables with `$env:NAME="value"` when needed. Before exposing the server, replace the default `INITIAL_PASSWORD=123456`, configure your secrets in `.env`, and enable API-key enforcement.
+
+### Recent project updates
+
+See [CHANGELOG.md](./CHANGELOG.md) for release history. Recent changes include:
+
+- **ZCode and DeepSeek Harness (`dsh`) integration:** multi-model setup from Dashboard → CLI Tools, catalog-derived model specs, and backup + atomic config writes. ZCode keeps a durable ownership ledger so Reset protects hand-added models.
+- **OpenCode Go routing:** Responses-only models, including `gpt-5.6-luna` thinking variants, use the Responses API based on model-registry metadata.
+- **Usage and reliability:** all-time usage statistics, bounded stream-content capture, and SQLite startup integrity checks that refuse to silently wipe corrupt state.
+- **Dashboard localization (source checkout, after v0.5.81):** RTL layout for Persian, Arabic, Hebrew, and Urdu; Vazirmatn typography; improved Persian translations; and LTR isolation for code, paths, keys, and model IDs.
+
+### Terminal and headless management (work in progress)
+
+The current working tree expands the terminal menus with model, usage/quota, network, and media management, and adds non-interactive commands for scripts and agents. These CLI changes are not yet part of the v0.5.81 release.
+
+Start the gateway separately, then run from the repository root:
+
+```bash
+node cli/cli.js status
+node cli/cli.js providers list
+node cli/cli.js models list --filter claude
+node cli/cli.js usage stats --period 7d
+node cli/cli.js providers --help
+```
+
+Headless commands bypass the launcher: they do not start the server or repair runtime dependencies. Output defaults to JSON; `--human` enables human-readable output, errors use stderr, and exit codes are `0` (success), `1` (error), or `2` (usage error). Use `--port/-p` and `--host/-H` to select the gateway (defaults: `20128` and `127.0.0.1`; environment overrides: `AFROUTER_PORT`, `AFROUTER_HOST`). Automatic local authentication requires access to the gateway's shared data directory; a host override alone does not grant remote access.
+
+Available domains: `providers`, `nodes`, `keys`, `combos`, `models`, `usage`, `settings`, `network`, `tools`, `media`, and `chat`, plus `status`. Use `node cli/cli.js <domain> --help` for current actions and [cli/README.md](./cli/README.md) for launcher details.
+
 ---
 
 ## Video Guides
@@ -1192,6 +1221,18 @@ Dashboard → CLI Tools → OpenClaw → Select Model → Apply
 ```
 
 > **Note:** OpenClaw only works with local AFRouter. Use `127.0.0.1` instead of `localhost` to avoid IPv6 resolution issues.
+
+### ZCode
+
+Dashboard → CLI Tools → ZCode → select models → Apply. AFRouter updates the custom **AFRouter** provider entry in `~/.zcode/v2/config.json`, preserving unrelated configuration and backing up the file before replacement.
+
+The card shows both managed and hand-added models. Reset removes only models AFRouter owns; use **Adopt as mine** explicitly to take ownership of eligible existing models. Ownership survives ZCode restarts in `<DATA_DIR>/zcode-model-ownership.json`; retain that ledger with your AFRouter data.
+
+### DeepSeek Harness (`dsh`)
+
+Dashboard → CLI Tools → DeepSeek Harness → select models → Apply. The integration writes `llm-pi-ai.providers.afrouter` in `$DSH_HOME/settings.yaml` and stores `refs.AFROUTER_API_KEY` separately in `$DSH_HOME/.credentials.yaml`. `DSH_HOME` defaults to `~/.dsh`; set it in the gateway's environment to target a different location. Model specs include context/output limits, supported inputs, and reasoning efforts.
+
+Use the card's Manual Config snippets for manual setup or an optional default-model pin. Reset removes the AFRouter route without replacing other providers; unreadable settings are not overwritten. DeepSeek Harness and DeepSeek TUI are separate integrations.
 
 ### Cline / Continue / RooCode
 

@@ -1,226 +1,108 @@
 "use server";
 
 import { NextResponse } from "next/server";
-import { exec } from "child_process";
-import { promisify } from "util";
-import fs from "fs/promises";
-import path from "path";
-import os from "os";
-import { parseTOML, stringifyTOML } from "confbox";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import { GET as getModels } from "../../models/route.js";
+import { applyCodexSettings, getCodexPaths, readCodexFiles, resetCodexSettings, withCodexLock } from "@/lib/codexConfig.js";
+import { normalizeCodexBaseUrl } from "@/shared/codexCatalog.js";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
+import { resolveProviderAlias } from "open-sse/services/model.js";
 
 const execAsync = promisify(exec);
+const validModel = (value) => typeof value === "string" && value.length > 0 && value.length <= 300 && !/[\s\x00-\x1f]/.test(value);
 
-const getCodexDir = () => path.join(os.homedir(), ".codex");
-const getCodexConfigPath = () => path.join(getCodexDir(), "config.toml");
-const getCodexAuthPath = () => path.join(getCodexDir(), "auth.json");
-
-// Flatten confbox-parsed TOML into a writable object, preserving nested tables
-const parsedToWritable = (obj) => obj ?? {};
-
-// Set a nested key from a flat dotted path, creating intermediate objects as needed
-const setNestedSection = (obj, dottedKey, value) => {
-  const keys = dottedKey.split(".");
-  let cur = obj;
-  for (let i = 0; i < keys.length - 1; i++) {
-    if (cur[keys[i]] == null || typeof cur[keys[i]] !== "object") {
-      cur[keys[i]] = {};
-    }
-    cur = cur[keys[i]];
-  }
-  cur[keys[keys.length - 1]] = value;
-};
-
-// Delete a nested key from a flat dotted path
-const deleteNestedSection = (obj, dottedKey) => {
-  const keys = dottedKey.split(".");
-  let cur = obj;
-  for (let i = 0; i < keys.length - 1; i++) {
-    cur = cur?.[keys[i]];
-    if (cur == null) return;
-  }
-  delete cur[keys[keys.length - 1]];
-};
-
-// Check if codex CLI is installed (via which/where or config file exists)
-const checkCodexInstalled = async () => {
-  try {
-    const isWindows = os.platform() === "win32";
-    const command = isWindows ? "where codex" : "which codex";
-    const env = isWindows
-      ? { ...process.env, PATH: `${process.env.APPDATA}\\npm;${process.env.PATH}` }
-      : process.env;
-    await execAsync(command, { windowsHide: true, env });
-    return true;
-  } catch {
-    try {
-      await fs.access(getCodexConfigPath());
-      return true;
-    } catch {
-      return false;
+async function resolveSpecs(ids) {
+  const response = await getModels();
+  if (!response.ok) throw new Error("Could not load the AFRouter model catalog; no settings were changed");
+  const { models } = await response.json();
+  const specs = Object.create(null);
+  const unverified = [];
+  for (const id of ids) {
+    const match = models.find((model) => model.fullModel === id || model.routedModel === id || model.alias === id);
+    const caps = match?.caps;
+    if (!caps || !Number.isSafeInteger(caps.contextWindow) || caps.contextWindow <= 0) {
+      unverified.push(id);
+      specs[id] = { contextWindow: 128000, source: "fallback", name: id };
+    } else {
+      const fullId = match.fullModel || id;
+      const separator = fullId.indexOf("/");
+      const provider = separator > 0 ? resolveProviderAlias(fullId.slice(0, separator)) : null;
+      const model = separator > 0 ? fullId.slice(separator + 1) : fullId;
+      const reasoningEfforts = caps.reasoning ? caps.reasoningEfforts || getThinkingLevels(provider, model) || [] : [];
+      specs[id] = { ...caps, reasoningEfforts, name: match.name || id, source: "afrouter-catalog" };
     }
   }
-};
+  return { specs, unverified };
+}
 
-// Read current config.toml
-const readConfig = async () => {
-  try {
-    const configPath = getCodexConfigPath();
-    const content = await fs.readFile(configPath, "utf-8");
-    return content;
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  }
-};
-
-// Check if config has AFRouter settings
-const hasAFRouterConfig = (config) => {
-  if (!config) return false;
-  return config.includes("model_provider = \"afrouter\"") || config.includes("[model_providers.afrouter]");
-};
-
-// GET - Check codex CLI and read current settings
 export async function GET() {
-  try {
-    const isInstalled = await checkCodexInstalled();
-    
-    if (!isInstalled) {
+  return withCodexLock(async () => {
+    try {
+      const { paths, config, state, raw } = await readCodexFiles();
+      let installed = raw !== null;
+      if (!installed) {
+        try {
+          await execAsync(process.platform === "win32" ? "where codex" : "which codex", { windowsHide: true, timeout: 3000 });
+          installed = true;
+        } catch {}
+      }
+      const activeModel = config.model_provider === "afrouter" ? config.model || "" : "";
       return NextResponse.json({
-        installed: false,
-        config: null,
-        message: "Codex CLI is not installed",
+        installed,
+        hasAFRouter: !!config.model_providers?.afrouter,
+        configPath: paths.config,
+        catalogPath: paths.catalog,
+        codex: {
+          models: state?.models || (activeModel ? [activeModel] : []),
+          activeModel,
+          subagentModel: config.model_provider === "afrouter" ? config.agents?.default_subagent_model || "" : "",
+          baseUrl: config.model_providers?.afrouter?.base_url || "",
+          specs: state?.specs || {},
+        },
       });
+    } catch {
+      return NextResponse.json({ installed: true, corrupt: true, error: "Could not read Codex settings or ownership data. Restore the damaged file from backup; Apply and Reset are disabled.", configPath: getCodexPaths().config }, { status: 409 });
     }
-
-    const config = await readConfig();
-
-    return NextResponse.json({
-      installed: true,
-      config,
-      hasAFRouter: hasAFRouterConfig(config),
-      configPath: getCodexConfigPath(),
-    });
-  } catch (error) {
-    console.log("Error checking codex settings:", error);
-    return NextResponse.json({ error: "Failed to check codex settings" }, { status: 500 });
-  }
+  });
 }
 
-// POST - Update AFRouter settings (merge with existing config)
 export async function POST(request) {
+  let input;
   try {
-    const { baseUrl, apiKey, model, subagentModel } = await request.json();
-    
-    if (!baseUrl || !apiKey || !model) {
-      return NextResponse.json({ error: "baseUrl, apiKey and model are required" }, { status: 400 });
+    input = await request.json();
+    if (!input || typeof input !== "object") throw new Error("Expected a settings object");
+    input.models = input.models ?? (input.model ? [input.model] : []);
+    input.removeModels ||= [];
+    input.activeModel = input.activeModel || input.model || input.models[0];
+    input.subagentModel ??= input.model || "";
+    if (!Array.isArray(input.models) || !input.models.length || input.models.length > 200 || !input.models.every(validModel) ||
+        !Array.isArray(input.removeModels) || !input.removeModels.every(validModel) || !validModel(input.activeModel) ||
+        (input.subagentModel && !validModel(input.subagentModel)) || typeof input.apiKey !== "string" || !input.apiKey.trim() || /[\r\n]/.test(input.apiKey)) {
+      throw new Error("A base URL, API key, valid models, and a default model are required");
     }
-
-    const codexDir = getCodexDir();
-    const configPath = getCodexConfigPath();
-
-    // Ensure directory exists
-    await fs.mkdir(codexDir, { recursive: true });
-
-    // Read and parse existing config
-    let parsed = {};
-    try {
-      const existingConfig = await fs.readFile(configPath, "utf-8");
-      parsed = parsedToWritable(parseTOML(existingConfig));
-    } catch { /* No existing config */ }
-
-    // Update only AFRouter related fields (api_key goes to auth.json, not config.toml)
-    parsed.model = model;
-    parsed.model_provider = "afrouter";
-
-    // Update or create afrouter provider section (no api_key - Codex reads from auth.json)
-    // Ensure /v1 suffix is added only once
-    const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    // Custom providers ignore auth.json - the key must travel as a static header
-    setNestedSection(parsed, "model_providers.afrouter", {
-      name: "AFRouter",
-      base_url: normalizedBaseUrl,
-      wire_api: "responses",
-      http_headers: { Authorization: `Bearer ${apiKey}` },
-    });
-
-    // Subagent model is a scalar under [agents]; agents.<role> now means a custom role
-    deleteNestedSection(parsed, "agents.subagent");
-    setNestedSection(parsed, "agents.default_subagent_model", subagentModel || model);
-
-    // Write merged config
-    const configContent = stringifyTOML(parsed);
-    await fs.writeFile(configPath, configContent);
-
-    return NextResponse.json({
-      success: true,
-      message: "Codex settings applied successfully!",
-      configPath,
-    });
+    input.baseUrl = normalizeCodexBaseUrl(input.baseUrl);
   } catch (error) {
-    console.log("Error updating codex settings:", error);
-    return NextResponse.json({ error: "Failed to update codex settings" }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: 400 });
   }
+  return withCodexLock(async () => {
+    try {
+      const { specs, unverified } = await resolveSpecs([...new Set([...input.models, ...(input.subagentModel ? [input.subagentModel] : [])])]);
+      const result = await applyCodexSettings({ ...input, specs });
+      return NextResponse.json({ success: true, ...result, unverified, message: "Settings applied. Fully quit and reopen Codex to reload its model picker." });
+    } catch (error) {
+      return NextResponse.json({ error: error.code ? "Unable to write Codex settings; check permissions and backups" : error.message }, { status: 409 });
+    }
+  });
 }
 
-// DELETE - Remove AFRouter settings only (keep other settings)
 export async function DELETE() {
-  try {
-    const configPath = getCodexConfigPath();
-
-    // Read and parse existing config
-    let parsed = {};
+  return withCodexLock(async () => {
     try {
-      const existingConfig = await fs.readFile(configPath, "utf-8");
-      parsed = parsedToWritable(parseTOML(existingConfig));
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        return NextResponse.json({
-          success: true,
-          message: "No config file to reset",
-        });
-      }
-      throw error;
+      await resetCodexSettings();
+      return NextResponse.json({ success: true });
+    } catch {
+      return NextResponse.json({ error: "Unable to reset Codex settings; check file integrity and backups" }, { status: 409 });
     }
-
-    // Remove AFRouter related root fields only if they point to afrouter
-    if (parsed.model_provider === "afrouter") {
-      delete parsed.model;
-      delete parsed.model_provider;
-    }
-
-    // Remove afrouter provider section
-    deleteNestedSection(parsed, "model_providers.afrouter");
-
-    // Remove subagent configuration (both the current key and the legacy role form)
-    deleteNestedSection(parsed, "agents.default_subagent_model");
-    deleteNestedSection(parsed, "agents.subagent");
-
-    // Write updated config
-    const configContent = stringifyTOML(parsed);
-    await fs.writeFile(configPath, configContent);
-
-    // Remove OPENAI_API_KEY from auth.json
-    const authPath = getCodexAuthPath();
-    try {
-      const existingAuth = await fs.readFile(authPath, "utf-8");
-      const authData = JSON.parse(existingAuth);
-      delete authData.OPENAI_API_KEY;
-      delete authData.auth_mode;
-
-      // Write back or delete if empty
-      if (Object.keys(authData).length === 0) {
-        await fs.unlink(authPath);
-      } else {
-        await fs.writeFile(authPath, JSON.stringify(authData, null, 2));
-      }
-    } catch { /* No auth file */ }
-
-    return NextResponse.json({
-      success: true,
-      message: "AFRouter settings removed successfully",
-    });
-  } catch (error) {
-    console.log("Error resetting codex settings:", error);
-    return NextResponse.json({ error: "Failed to reset codex settings" }, { status: 500 });
-  }
+  });
 }

@@ -1,6 +1,12 @@
 # Unreleased
 
+## Features
+- **OpenCode**: registry-driven Anthropic Messages routing — endpoint and auth follow the model registry when no source-matched transport exists.
+- **Codex integration**: OpenCode-style multi-model selection backed by one AFRouter provider and a generated Codex model catalog; includes per-model context, vision and reasoning metadata, default/subagent selection, CODEX_HOME support, secret-free status, manual snippets, backups, rollback, and ownership-aware Reset that preserves credentials and user edits.
+
 ## Fixes
+- **Custom models**: fetch exact model specs from Nous Portal and OpenRouter catalogs when adding or re-adding a model; persist catalog capabilities and token limits, with existing defaults retained when lookup fails or fields are missing.
+- **Codex model picker**: keep the default reasoning effort in a nonempty selectable list, including custom reasoning models such as `nous/stealth/union-alpha` whose effort ladder is unavailable. Preserve declared effort choices without inventing extra levels.
 - **CLI/headless**: validate ports and resource IDs, preserve boolean flags and negative numeric values, reject blank required values and invalid settings patches, and return error exit codes for unknown commands and failed gateway status checks.
 - **CLI/headless**: default compatible nodes to Chat Completions, preserve custom-model provider/type on deletion in both interfaces, send Codex's single-model payload, honor the selected endpoint host, and mask JSON key listings.
 - **CLI audit**: document remaining dashboard parity gaps in `CLI_AUDIT.md`; add isolated contract, subprocess transport, terminal-menu, and Codex config-merge regression tests.

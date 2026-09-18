@@ -78,6 +78,7 @@ export default {
     { id: "meta/muse-spark-1.3", name: "Muse Spark 1.3" },
     { id: "thinkingmachines/inkling", name: "Inkling" },
   ],
+  modelSpecs: { format: "openrouter", auth: "bearer" },
   modelsFetcher: { url: "https://inference-api.nousresearch.com/v1/models", type: "nous" },
   passthroughModels: true,
 };

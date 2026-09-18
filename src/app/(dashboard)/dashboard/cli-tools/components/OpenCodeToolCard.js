@@ -7,6 +7,29 @@ import BaseUrlSelect from "./BaseUrlSelect";
 import { rememberEndpoint } from "./cliEndpointPresets";
 import ApiKeySelect from "./ApiKeySelect";
 import { matchKnownEndpoint } from "./cliEndpointMatch";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+
+// Mirror the server's model-entry shape (see opencode-settings route) so the
+// Manual Config preview shows the same limits/modalities the Apply writes.
+const buildModelEntry = (id) => {
+  const slash = id.indexOf("/");
+  const provider = slash > 0 ? id.slice(0, slash) : null;
+  const bare = slash > 0 ? id.slice(slash + 1) : id;
+  const caps = getCapabilitiesForModel(provider, bare);
+  const input = ["text"];
+  if (caps.vision) input.push("image");
+  if (caps.pdf) input.push("pdf");
+  if (caps.audioInput) input.push("audio");
+  if (caps.videoInput) input.push("video");
+  return {
+    name: id,
+    limit: { context: Math.floor(caps.contextWindow), output: Math.floor(caps.maxOutput) },
+    reasoning: caps.reasoning === true,
+    tool_call: caps.tools !== false,
+    attachment: Boolean(caps.vision || caps.pdf || caps.audioInput || caps.videoInput),
+    modalities: { input, output: ["text"] },
+  };
+};
 
 export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
   const [status, setStatus] = useState(initialStatus || null);
@@ -196,7 +219,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
 
     const modelsObj = {};
     modelsToShow.forEach(m => {
-      modelsObj[m] = { name: m, modalities: { input: ["text", "image"], output: ["text"] } };
+      modelsObj[m] = buildModelEntry(m);
     });
 
     return [{

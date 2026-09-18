@@ -5,8 +5,10 @@ import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/comp
 import Image from "next/image";
 import BaseUrlSelect from "./BaseUrlSelect";
 import ApiKeySelect from "./ApiKeySelect";
-import { matchKnownEndpoint } from "./cliEndpointMatch";
 import { rememberEndpoint } from "./cliEndpointPresets";
+import { buildCodexCatalog, codexProvider, normalizeCodexBaseUrl, stringifyCodexConfig } from "@/shared/codexCatalog";
+import { useModelCaps } from "@/shared/hooks/useModelCaps";
+import { fetchCodexStatus } from "@/shared/codexStatus";
 
 export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
   const [codexStatus, setCodexStatus] = useState(initialStatus || null);
@@ -15,85 +17,64 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
   const [restoring, setRestoring] = useState(false);
   const [message, setMessage] = useState(null);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
-  const [selectedApiKey, setSelectedApiKey] = useState("");
+  const [apiKeyChoice, setSelectedApiKey] = useState(null);
+  const selectedApiKey = apiKeyChoice ?? apiKeys?.[0]?.key ?? "";
   const [selectedModel, setSelectedModel] = useState("");
+  const [selectedModels, setSelectedModels] = useState([]);
+  const [removedModels, setRemovedModels] = useState([]);
+  const [customModel, setCustomModel] = useState("");
+  const { getCaps } = useModelCaps();
   const [subagentModel, setSubagentModel] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [subagentModalOpen, setSubagentModalOpen] = useState(false);
   const [modelAliases, setModelAliases] = useState({});
   const [showManualConfigModal, setShowManualConfigModal] = useState(false);
   const [customBaseUrl, setCustomBaseUrl] = useState("");
+  const [draftDirty, setDraftDirty] = useState(false);
 
   useEffect(() => {
-    if (apiKeys?.length > 0 && !selectedApiKey) {
-      setSelectedApiKey(apiKeys[0].key);
-    }
-  }, [apiKeys, selectedApiKey]);
-
-  useEffect(() => {
-    if (initialStatus) setCodexStatus(initialStatus);
-  }, [initialStatus]);
-
-  useEffect(() => {
-    if (isExpanded) {
-      if (!codexStatus) checkCodexStatus();
-      fetchModelAliases();
-    }
+    if (!isExpanded) return;
+    let cancelled = false;
+    fetchCodexStatus().then((status) => {
+      if (!cancelled) setCodexStatus(status);
+    });
+    fetch("/api/models/alias").then((response) => response.json()).then((data) => {
+      if (!cancelled) setModelAliases(data.aliases || {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [isExpanded]);
 
-  const fetchModelAliases = async () => {
-    try {
-      const res = await fetch("/api/models/alias");
-      const data = await res.json();
-      if (res.ok) setModelAliases(data.aliases || {});
-    } catch (error) {
-      console.log("Error fetching model aliases:", error);
+  const [hydratedStatus, setHydratedStatus] = useState(null);
+  if (codexStatus !== hydratedStatus) {
+    setHydratedStatus(codexStatus);
+    if (codexStatus?.codex && !draftDirty) {
+      setSelectedModels(codexStatus.codex.models || []);
+      setSelectedModel(codexStatus.codex.activeModel || "");
+      setSubagentModel(codexStatus.codex.subagentModel || "");
+      setRemovedModels([]);
     }
-  };
+  }
 
-  // Parse model and subagent settings from config content
-  useEffect(() => {
-    if (codexStatus?.config) {
-      const modelMatch = codexStatus.config.match(/^model\s*=\s*"([^"]+)"/m);
-      if (modelMatch) setSelectedModel(modelMatch[1]);
-
-      // Parse subagent settings
-      const subagentModelMatch = codexStatus.config.match(/^default_subagent_model\s*=\s*"([^"]+)"/m);
-      if (subagentModelMatch) setSubagentModel(subagentModelMatch[1]);
-    }
-  }, [codexStatus]);
-
-  const getCurrentBaseUrl = () => {
-    const parsed = codexStatus?.config?.match(/base_url\s*=\s*"([^"]+)"/);
-    return parsed ? parsed[1] : "";
-  };
-
-  const currentBaseUrl = getCurrentBaseUrl();
+  const currentBaseUrl = codexStatus?.codex?.baseUrl || "";
 
   const getConfigStatus = () => {
     if (!codexStatus?.installed) return null;
-    if (!codexStatus.config) return "not_configured";
-    return matchKnownEndpoint(currentBaseUrl, { tunnelPublicUrl, tailscaleUrl }) ? "configured" : "other";
+    if (!codexStatus.hasAFRouter) return "not_configured";
+    return codexStatus.codex?.activeModel ? "configured" : "other";
   };
 
   const configStatus = getConfigStatus();
 
   const getEffectiveBaseUrl = () => {
-    const url = customBaseUrl || `${baseUrl}/v1`;
-    // Ensure URL ends with /v1
-    return url.endsWith("/v1") ? url : `${url}/v1`;
+    return normalizeCodexBaseUrl(customBaseUrl || baseUrl);
   };
 
-  const getDisplayUrl = () => customBaseUrl || `${baseUrl}/v1`;
+  const getDisplayUrl = () => customBaseUrl || baseUrl;
 
   const checkCodexStatus = async () => {
     setCheckingCodex(true);
     try {
-      const res = await fetch("/api/cli-tools/codex-settings");
-      const data = await res.json();
-      setCodexStatus(data);
-    } catch (error) {
-      setCodexStatus({ installed: false, error: error.message });
+      setCodexStatus(await fetchCodexStatus());
     } finally {
       setCheckingCodex(false);
     }
@@ -114,16 +95,19 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
         body: JSON.stringify({
           baseUrl: getEffectiveBaseUrl(),
           apiKey: keyToUse,
-          model: selectedModel,
-          subagentModel: subagentModel || selectedModel
+          models: selectedModels,
+          activeModel: selectedModel,
+          removeModels: removedModels,
+          subagentModel
         }),
       });
       const data = await res.json();
       if (res.ok) {
         // Remember the endpoint so it stays selectable next time
         rememberEndpoint(getEffectiveBaseUrl(), { tunnelPublicUrl, tailscaleUrl });
-        setMessage({ type: "success", text: "Settings applied successfully!" });
-        checkCodexStatus();
+        setMessage({ type: "success", text: `${data.message}${data.unverified?.length ? ` Unverified models use conservative defaults: ${data.unverified.join(", ")}.` : ""}` });
+        setDraftDirty(false);
+        await checkCodexStatus();
       } else {
         setMessage({ type: "error", text: data.error || "Failed to apply settings" });
       }
@@ -143,8 +127,11 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
       if (res.ok) {
         setMessage({ type: "success", text: "Settings reset successfully!" });
         setSelectedModel("");
+        setSelectedModels([]);
+        setRemovedModels([]);
         setSubagentModel("");
-        checkCodexStatus();
+        setDraftDirty(false);
+        await checkCodexStatus();
       } else {
         setMessage({ type: "error", text: data.error || "Failed to reset settings" });
       }
@@ -156,12 +143,22 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
   };
 
   const handleModelSelect = (model) => {
-    setSelectedModel(model.value);
-    // Auto-set subagent model if not set
-    if (!subagentModel) {
-      setSubagentModel(model.value);
-    }
-    setModalOpen(false);
+    const id = model.value.trim();
+    if (!id || /\s/.test(id)) return;
+    setDraftDirty(true);
+    setSelectedModels((previous) => [...new Set([...previous, id])]);
+    setRemovedModels((previous) => previous.filter((value) => value !== id));
+    setSelectedModel((previous) => previous || id);
+    setCustomModel("");
+  };
+
+  const removeModel = (id) => {
+    setDraftDirty(true);
+    const remaining = selectedModels.filter((value) => value !== id);
+    setSelectedModels(remaining);
+    setRemovedModels((previous) => [...new Set([...previous, id])]);
+    if (selectedModel === id) setSelectedModel(remaining[0] || "");
+    if (subagentModel === id) setSubagentModel("");
   };
 
   const getManualConfigs = () => {
@@ -169,29 +166,24 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
       ? selectedApiKey
       : (!cloudEnabled ? "sk_afrouter" : "<API_KEY_FROM_DASHBOARD>");
 
-    const effectiveSubagentModel = subagentModel || selectedModel;
-
-    const configContent = `# AFRouter Configuration for Codex CLI
-model = "${selectedModel}"
-model_provider = "afrouter"
-
-[model_providers.afrouter]
-name = "AFRouter"
-base_url = "${getEffectiveBaseUrl()}"
-wire_api = "responses"
-
-[model_providers.afrouter.http_headers]
-Authorization = "Bearer ${keyToUse}"
-
-[agents]
-default_subagent_model = "${effectiveSubagentModel}"
-`;
-
+    let provider;
+    try { provider = codexProvider(getEffectiveBaseUrl(), keyToUse); }
+    catch { return [{ filename: "Endpoint", content: "Select a valid HTTP(S) endpoint first." }]; }
+    const catalogPath = codexStatus?.catalogPath || "/absolute/path/to/.codex/afrouter-models.json";
+    const allModels = [...new Set([...selectedModels, ...(subagentModel ? [subagentModel] : [])])];
+    const specs = Object.fromEntries(allModels.map((id) => [id, codexStatus?.codex?.specs?.[id] || getCaps(id) || {}]));
+    const configContent = stringifyCodexConfig({
+      model: selectedModel || allModels[0] || "provider/model-id",
+      catalogPath,
+      provider,
+      subagentModel,
+    });
     return [
       {
-        filename: "~/.codex/config.toml",
-        content: configContent,
+        filename: codexStatus?.configPath || "$CODEX_HOME/config.toml (default ~/.codex/config.toml)",
+        content: `# Merge into your config; do not replace unrelated settings.\n# Remove global context/compaction/reasoning overrides to use per-model metadata.\n# On another machine, update model_catalog_json to its absolute catalog path.\n${configContent}`,
       },
+      { filename: catalogPath, content: JSON.stringify(buildCodexCatalog(allModels, specs), null, 2) },
     ];
   };
 
@@ -224,7 +216,7 @@ default_subagent_model = "${effectiveSubagentModel}"
             </div>
           )}
 
-          {!checkingCodex && codexStatus && !codexStatus.installed && (
+          {!checkingCodex && codexStatus?.installed === false && !codexStatus?.error && (
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-3 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                 <div className="flex items-start gap-3">
@@ -266,9 +258,16 @@ default_subagent_model = "${effectiveSubagentModel}"
             </div>
           )}
 
-          {!checkingCodex && codexStatus?.installed && (
+          {codexStatus?.configPath && <p className="text-xs text-text-muted">Config path: <span className="bidi-ltr" data-i18n-skip>{codexStatus.configPath}</span></p>}
+          {codexStatus?.error && (
+            <div role="alert" className="flex flex-col gap-2 text-sm text-red-500">
+              <p>{codexStatus.error}</p>
+              <Button variant="outline" size="sm" onClick={checkCodexStatus} disabled={checkingCodex} loading={checkingCodex}>Retry check</Button>
+            </div>
+          )}
+          {!checkingCodex && !codexStatus?.corrupt && (
             <>
-              <div className="flex flex-col gap-2">
+              <fieldset disabled={applying || restoring} className="flex flex-col gap-2">
                 {/* Endpoint (selector) */}
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr] sm:items-center sm:gap-2">
                   <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Select Endpoint</span>
@@ -286,7 +285,7 @@ default_subagent_model = "${effectiveSubagentModel}"
                 </div>
 
                 {/* Current configured */}
-                {codexStatus?.config && (() => {
+                {codexStatus?.hasAFRouter && (() => {
                   return currentBaseUrl ? (
                     <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
                       <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Current</span>
@@ -305,13 +304,34 @@ default_subagent_model = "${effectiveSubagentModel}"
                   <ApiKeySelect value={selectedApiKey} onChange={setSelectedApiKey} apiKeys={apiKeys} cloudEnabled={cloudEnabled} />
                 </div>
 
-                {/* Model */}
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold text-text-main">AFRouter Models</span>
+                  <div className="flex flex-wrap gap-2 rounded border border-border p-2">
+                    {selectedModels.length === 0 && <span className="text-xs text-text-muted">No models selected</span>}
+                    {selectedModels.map((id) => (
+                      <span key={id} className={`inline-flex max-w-full items-center gap-1 rounded border px-2 py-1 text-xs ${id === selectedModel ? "border-primary text-primary" : "border-border text-text-muted"}`}>
+                        <button type="button" onClick={() => { setDraftDirty(true); setSelectedModel(id); }} title="Set as default" aria-pressed={id === selectedModel} className="bidi-ltr truncate" data-i18n-skip>{id === selectedModel ? "\u2605 " : ""}{id}</button>
+                        <button type="button" onClick={() => removeModel(id)} aria-label={`Remove ${id}`} className="ms-1 hover:text-red-500">{"\u00d7"}</button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input aria-label="Custom model ID" value={customModel} onChange={(event) => setCustomModel(event.target.value)} placeholder="provider/model-id or combo" className="bidi-ltr min-w-0 flex-1 rounded border border-border bg-surface px-2 text-xs" />
+                    <Button size="sm" variant="outline" disabled={!customModel.trim()} onClick={() => handleModelSelect({ value: customModel })}>Add</Button>
+                    <Button size="sm" variant="outline" disabled={!activeProviders?.length} onClick={() => setModalOpen(true)}>Add Model</Button>
+                  </div>
+                  <p className="text-xs text-text-muted">Click a model to make it the default. Changes are saved with Apply. Fully quit and reopen Codex to refresh its model picker.</p>
+                  <p className="text-xs text-text-muted">Specs come from the AFRouter catalog. Unknown models and combos use a 128K text-only fallback. Output limits stay enforced by the gateway; unsupported Codex capabilities are not advertised.</p>
+                </div>
+
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
-                  <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Model</span>
+                  <span className="text-xs font-semibold text-text-main sm:text-end sm:text-sm">Default Model</span>
                   <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
                   <div className="relative w-full min-w-0">
-                    <input type="text" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} placeholder="provider/model-id" className="w-full min-w-0 pl-2 pr-7 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5" />
-                    {selectedModel && <button onClick={() => setSelectedModel("")} className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-red-500 rounded transition-colors" title="Clear"><span className="material-symbols-outlined text-[14px]">close</span></button>}
+                    <select aria-label="Default Model" value={selectedModel} onChange={(event) => { setDraftDirty(true); setSelectedModel(event.target.value); }} className="bidi-ltr w-full rounded border border-border bg-surface px-2 py-2 text-xs" data-i18n-skip>
+                      <option value="" disabled>Select a model</option>
+                      {selectedModels.map((id) => <option key={id} value={id}>{id}</option>)}
+                    </select>
                   </div>
                   <button onClick={() => setModalOpen(true)} disabled={!activeProviders?.length} className={`w-full sm:w-auto rounded border px-2 py-2 text-xs transition-colors sm:py-1.5 whitespace-nowrap sm:shrink-0 ${activeProviders?.length ? "bg-surface border-border text-text-main hover:border-primary cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}>Select Model</button>
                 </div>
@@ -324,13 +344,13 @@ default_subagent_model = "${effectiveSubagentModel}"
                     <input
                       type="text"
                       value={subagentModel}
-                      onChange={(e) => setSubagentModel(e.target.value)}
+                      onChange={(event) => { setDraftDirty(true); setSubagentModel(event.target.value); }}
                       placeholder={selectedModel || "provider/model-id (defaults to main model)"}
                       className="w-full min-w-0 pl-2 pr-7 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
                     />
                     {subagentModel && (
                       <button
-                        onClick={() => setSubagentModel("")}
+                        onClick={() => { setDraftDirty(true); setSubagentModel(""); }}
                         className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-red-500 rounded transition-colors"
                         title="Clear (will use main model)"
                       >
@@ -346,7 +366,7 @@ default_subagent_model = "${effectiveSubagentModel}"
                     Select Model
                   </button>
                 </div>
-              </div>
+              </fieldset>
 
               {message && (
                 <div className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${message.type === "success" ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600"}`}>
@@ -356,10 +376,10 @@ default_subagent_model = "${effectiveSubagentModel}"
               )}
 
               <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
-                <Button variant="primary" size="sm" onClick={handleApplySettings} disabled={(!selectedApiKey && (cloudEnabled && apiKeys.length > 0)) || !selectedModel} loading={applying}>
+                <Button variant="primary" size="sm" onClick={handleApplySettings} disabled={(!selectedApiKey && cloudEnabled) || !selectedModels.includes(selectedModel) || restoring || !codexStatus?.installed} loading={applying}>
                   <span className="material-symbols-outlined text-[14px] mr-1">save</span>Apply
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleResetSettings} disabled={restoring} loading={restoring}>
+                <Button variant="outline" size="sm" onClick={handleResetSettings} disabled={restoring || applying || !codexStatus?.hasAFRouter} loading={restoring}>
                   <span className="material-symbols-outlined text-[14px] mr-1">restore</span>Reset
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setShowManualConfigModal(true)}>
@@ -376,10 +396,13 @@ default_subagent_model = "${effectiveSubagentModel}"
           isOpen={modalOpen}
           onClose={() => setModalOpen(false)}
           onSelect={handleModelSelect}
-          selectedModel={selectedModel}
+          onDeselect={(model) => removeModel(model.value)}
+          selectedModel={null}
+          addedModelValues={selectedModels}
+          closeOnSelect={false}
           activeProviders={activeProviders}
           modelAliases={modelAliases}
-          title="Select Model for Codex"
+          title="Add AFRouter Models for Codex"
         />
       )}
 
@@ -387,7 +410,7 @@ default_subagent_model = "${effectiveSubagentModel}"
         <ModelSelectModal
           isOpen={subagentModalOpen}
           onClose={() => setSubagentModalOpen(false)}
-          onSelect={(model) => { setSubagentModel(model.value); setSubagentModalOpen(false); }}
+          onSelect={(model) => { setDraftDirty(true); setSubagentModel(model.value); setSubagentModalOpen(false); }}
           selectedModel={subagentModel}
           activeProviders={activeProviders}
           modelAliases={modelAliases}
