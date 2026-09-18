@@ -150,6 +150,32 @@ export const CLI_TOOLS = {
     description: "OpenCode AI Terminal Assistant",
     configType: "custom",
   },
+  mimocode: {
+    id: "mimocode",
+    name: "MiMo Code / Desktop",
+    image: "/providers/mimocode.png",
+    color: "#00A1FF",
+    description: "MiMo Code CLI + MiMo Desktop app (shared config)",
+    configType: "custom",
+    notes: [
+      {
+        type: "info",
+        text: "MiMo Desktop uses MiMo Code as its core engine and both share the same config file (~/.config/mimocode/mimocode.jsonc, or %LOCALAPPDATA%\\mimocode\\mimocode.jsonc on Windows).",
+      },
+      {
+        type: "info",
+        text: "AFRouter writes an `afrouter` provider entry so MiMo's model picker offers AFRouter models. MiMoCode splits provider/model on the first '/' only, so ids like afrouter/9router/... or afrouter/cc/... work.",
+      },
+      {
+        type: "warning",
+        text: "Config path: Linux/macOS ~/.config/mimocode/mimocode.jsonc • Windows %LOCALAPPDATA%\\mimocode\\mimocode.jsonc (or $MIMOCODE_HOME when set).",
+      },
+      {
+        type: "warning",
+        text: "Do NOT edit Desktop's preferences.json or model-catalog.json under %APPDATA%\\Xiaomi MiMo AI\\ — those are Xiaomi/Mify catalog only. Custom AFRouter models go in mimocode.jsonc.",
+      },
+    ],
+  },
   cowork: {
     id: "cowork",
     name: "Claude Cowork",

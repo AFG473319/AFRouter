@@ -573,6 +573,83 @@ async function showHermesMenu(port, breadcrumb = []) {
   });
 }
 
+// ─── MiMo Code / Desktop ──────────────────────────────────────────────────────
+
+async function buildMiMoCodeHeader() {
+  const result = await api.getCliToolSettings("mimocode");
+  if (!result.success) return `  ${COLORS.red}Failed to load settings${COLORS.reset}`;
+
+  const { installed, hasAFRouter, mimocode } = result.data;
+  if (!installed) return `Status:   ${COLORS.red}✗ MiMo Code / Desktop not installed${COLORS.reset}`;
+
+  if (!hasAFRouter) {
+    return [
+      `Status:   ${COLORS.red}✗ Not configured${COLORS.reset}`,
+      `${COLORS.dim}Run "Quick Setup" to configure${COLORS.reset}`
+    ].join("\n");
+  }
+
+  const lines = [`Status:   ${COLORS.green}✓ Configured${COLORS.reset}`];
+  if (mimocode?.baseURL) lines.push(`Endpoint: ${COLORS.cyan}${mimocode.baseURL}${COLORS.reset}`);
+  if (mimocode?.activeModel) lines.push(`Active:   ${COLORS.dim}${mimocode.activeModel}${COLORS.reset}`);
+  if (Array.isArray(mimocode?.models) && mimocode.models.length > 0) {
+    lines.push(`Models:   ${COLORS.dim}${mimocode.models.join(", ")}${COLORS.reset}`);
+  }
+  return lines.join("\n");
+}
+
+async function mimoCodeQuickSetup(port) {
+  const { endpoint } = await getEndpoint(port);
+  const apiKey = await getFirstApiKey();
+
+  if (!apiKey) {
+    showStatus("No API keys found. Create one in API Keys menu first.", "error");
+    await pause();
+    return;
+  }
+
+  const firstModel = await selectModelFromList("Select Active Model (MiMo Code)", "", { excludeCombos: true });
+  if (!firstModel) return;
+
+  const models = [firstModel];
+
+  while (true) {
+    const more = await confirm(`Add another model? (current: ${models.length})`);
+    if (!more) break;
+    const next = await selectModelFromList(`Add Model #${models.length + 1}`, models.join(", "), { excludeCombos: true });
+    if (!next) break;
+    if (!models.includes(next)) models.push(next);
+  }
+
+  const result = await api.applyCliToolSettings("mimocode", {
+    baseUrl: endpoint,
+    apiKey,
+    models,
+    activeModel: firstModel,
+  });
+  showStatus(result.success ? "MiMo Code setup completed!" : `Failed: ${result.error}`, result.success ? "success" : "error");
+  await pause();
+}
+
+async function mimoCodeReset() {
+  const result = await api.resetCliToolSettings("mimocode");
+  showStatus(result.success ? "MiMo Code settings reset!" : `Failed: ${result.error}`, result.success ? "success" : "error");
+  await pause();
+}
+
+async function showMiMoCodeMenu(port, breadcrumb = []) {
+  await showMenuWithBack({
+    title: "🐣 MiMo Code / Desktop Settings",
+    breadcrumb,
+    headerContent: buildMiMoCodeHeader,
+    refresh: async () => ({}),
+    items: [
+      { label: "⚡ Quick Setup", action: async () => { await mimoCodeQuickSetup(port); return true; } },
+      { label: "Reset to Default", action: async () => { await mimoCodeReset(); return true; } }
+    ]
+  });
+}
+
 // ─── Main CLI Tools Menu ──────────────────────────────────────────────────────
 
 /**
@@ -653,6 +730,10 @@ async function showCliToolsMenu(port, breadcrumb = []) {
       {
         label: "Hermes",
         action: async () => { await showHermesMenu(port, [...breadcrumb, "Hermes"]); return true; }
+      },
+      {
+        label: "MiMo Code",
+        action: async () => { await showMiMoCodeMenu(port, [...breadcrumb, "MiMo Code"]); return true; }
       },
       ...managedItems,
       ...guideItems,
