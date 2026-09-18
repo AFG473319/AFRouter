@@ -15,6 +15,7 @@ import { GET as jcodeGet } from "../jcode-settings/route";
 import { GET as grokBuildGet } from "../grok-build-settings/route";
 import { GET as devinGet } from "../devin-settings/route";
 import { GET as zcodeGet } from "../zcode-settings/route";
+import { GET as workbuddyGet } from "../workbuddy-settings/route";
 import { GET as deepseekHarnessGet } from "../deepseek-harness-settings/route";
 import { GET as mimocodeGet } from "../mimocode-settings/route";
 
@@ -33,6 +34,7 @@ const STATUS_GETTERS = {
   "grok-build": grokBuildGet,
   devin: devinGet,
   zcode: zcodeGet,
+  workbuddy: workbuddyGet,
   "deepseek-harness": deepseekHarnessGet,
   mimocode: mimocodeGet,
 };
