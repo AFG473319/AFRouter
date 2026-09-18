@@ -1,3 +1,8 @@
+# v0.5.82 (2026-09-18)
+
+## Features
+- **CLI tools**: add MiMo Code / MiMo Desktop integration — a new card writes an `afrouter` provider entry (`npm: @ai-sdk/openai-compatible`, `only_configured_models`) into the shared `mimocode.jsonc` (honors `$MIMOCODE_HOME`, checks `~/.config/mimocode` and `%LOCALAPPDATA%\mimocode`). MiMo Desktop runs on the MiMoCode engine and both read the same config file, so one Apply configures the CLI, the Desktop app, and the TUI. The config is read as JSONC (BOM, comments, trailing commas, URLs in strings) so a hand-edited file is never clobbered on a blind parse; Apply merges additively — user-tuned fields on existing model entries (`name`, `tool_call`, `reasoning`, `limit`) and unrelated providers are preserved. Detection covers the `mimo` binary, the Desktop app dir (`%APPDATA%\Xiaomi MiMo AI` / `~/Library/Application Support`), or an existing config. Includes `GET`/`POST`/`PATCH`/`DELETE`, Manual Config snippet, installation guide, notes (shared config, first-`/` model-id split, do-not-edit `preferences.json`/`model-catalog.json`), unit tests, and CLI TUI menu entry.
+
 # v0.5.81 (2026-09-16)
 
 ## Features

@@ -16,6 +16,7 @@ import { GET as grokBuildGet } from "../grok-build-settings/route";
 import { GET as devinGet } from "../devin-settings/route";
 import { GET as zcodeGet } from "../zcode-settings/route";
 import { GET as deepseekHarnessGet } from "../deepseek-harness-settings/route";
+import { GET as mimocodeGet } from "../mimocode-settings/route";
 
 const STATUS_GETTERS = {
   claude: claudeGet,
@@ -33,6 +34,7 @@ const STATUS_GETTERS = {
   devin: devinGet,
   zcode: zcodeGet,
   "deepseek-harness": deepseekHarnessGet,
+  mimocode: mimocodeGet,
 };
 
 // Batch endpoint: gather all CLI tool statuses in one round-trip

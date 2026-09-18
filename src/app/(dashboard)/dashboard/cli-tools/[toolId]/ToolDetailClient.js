@@ -10,6 +10,7 @@ import {
   HermesToolCard, DefaultToolCard, OpenCodeToolCard, CoworkToolCard,
   ClineToolCard, KiloToolCard, DeepSeekTuiToolCard,
   JcodeToolCard, GrokBuildToolCard, ZCodeToolCard, DeepSeekHarnessToolCard,
+  MiMoCodeToolCard,
 } from "../components";
 
 const CLOUD_URL = process.env.NEXT_PUBLIC_CLOUD_URL;
@@ -148,6 +149,8 @@ export default function ToolDetailClient({ toolId, machineId }) {
         return <CodexToolCard {...commonProps} activeProviders={getActiveProviders()} cloudEnabled={cloudEnabled} />;
       case "opencode":
         return <OpenCodeToolCard {...commonProps} activeProviders={getActiveProviders()} cloudEnabled={cloudEnabled} />;
+      case "mimocode":
+        return <MiMoCodeToolCard {...commonProps} activeProviders={getActiveProviders()} cloudEnabled={cloudEnabled} />;
       case "cowork":
         return <CoworkToolCard {...commonProps} activeProviders={getActiveProviders()} hasActiveProviders={hasActiveProviders} cloudEnabled={cloudEnabled} cloudUrl={CLOUD_URL} tunnelEnabled={tunnelEnabled} tunnelPublicUrl={tunnelPublicUrl} tailscaleEnabled={tailscaleEnabled} tailscaleUrl={tailscaleUrl} />;
       case "droid":
