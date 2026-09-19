@@ -192,6 +192,7 @@ export default function WorkBuddyToolCard({ tool, isExpanded, onToggle, baseUrl,
           supportsToolCall: true,
           supportsImages: true,
         })),
+        availableModels: modelsToShow,
       }, null, 2),
     }];
   };

@@ -16,6 +16,8 @@ const VENDOR = "AFRouter";
 // { models: [{ id, name, vendor, apiKey, url (full path ending /chat/completions),
 //   supportsToolCall, supportsImages, ... }], availableModels?: [id] }.
 // Only OpenAI-format APIs are supported; the file hot-reloads (~1s debounce).
+// availableModels gates the picker: POST registers written ids additively (only
+// when the key already exists — absent means no gating), DELETE prunes removed ids.
 const getConfigPath = () => path.join(os.homedir(), ".workbuddy", "models.json");
 
 const checkInstalled = async () => {
@@ -197,6 +199,18 @@ export async function POST(request) {
       }
     }
     config.models = [...byId.values()];
+    // availableModels gates what WorkBuddy's picker actually offers: register
+    // every written (owned) id additively. Never remove here and never touch
+    // the key when absent (absent = no gating) so user-disabled or hand-added
+    // models are never enabled or hidden behind the user's back.
+    if (Array.isArray(config.availableModels)) {
+      const listed = new Set(config.availableModels.filter((id) => typeof id === "string"));
+      for (const id of modelsArray) {
+        const m = byId.get(id);
+        if (m && isOwned(m)) listed.add(id);
+      }
+      config.availableModels = [...listed];
+    }
     const { backupPath } = await writeConfigAtomic(config);
     const skipped = modelsArray.filter((id) => {
       const m = byId.get(id);
@@ -227,14 +241,22 @@ export async function DELETE(request) {
     const config = result.data;
     const existing = listModels(config);
     let removed = 0;
+    const removedIds = [];
     config.models = existing.filter((m) => {
       const matches = modelToRemove ? m.id === modelToRemove : true;
       if (matches && isOwned(m)) {
         removed++;
+        removedIds.push(m.id);
         return false;
       }
       return true;
     });
+    // Prune removed ids from availableModels so WorkBuddy stops offering them.
+    // Other entries are left untouched.
+    if (removed > 0 && Array.isArray(config.availableModels)) {
+      const gone = new Set(removedIds);
+      config.availableModels = config.availableModels.filter((id) => !gone.has(id));
+    }
     if (removed > 0) {
       const { backupPath } = await writeConfigAtomic(config);
       return NextResponse.json({
