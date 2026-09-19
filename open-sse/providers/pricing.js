@@ -130,6 +130,13 @@ export const MODEL_PRICING = {
   // === Grok ===
   "grok-code-fast-1":             { input: 0.50,  output: 2.00,  cached: 0.25,  reasoning: 3.00,   cache_creation: 0.50  },
 
+  // === AgnesAI (wiki.agnes-ai.com/en/docs/pricing) ===
+  // Flash models are currently $0; Pro / Pro-Beta are paid.
+  "agnes-3.0-flash":              { input: 0,     output: 0,     cached: 0,     reasoning: 0,      cache_creation: 0     },
+  "agnes-2.5-flash":              { input: 0,     output: 0,     cached: 0,     reasoning: 0,      cache_creation: 0     },
+  "agnes-2.5-pro":                { input: 0.45,  output: 0.90,  cached: 0.045, reasoning: 0.90,   cache_creation: 0.45  },
+  "agnes-2.5-pro-beta":           { input: 0.10,  output: 0.30,  cached: 0.01,  reasoning: 0.30,   cache_creation: 0.10  },
+
   // === OpenRouter fallback ===
   "auto":                         { input: 2.00,  output: 8.00,  cached: 1.00,  reasoning: 12.00,  cache_creation: 2.00  },
 

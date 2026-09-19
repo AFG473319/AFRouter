@@ -133,6 +133,14 @@ export const MODEL_CAPABILITIES = {
   // via OpenAI Responses input_image; reasoning supports up to xhigh.
   "muse-spark-1.2-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
   "muse-spark-1.3-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
+
+  // AgnesAI text models (wiki.agnes-ai.com) — OpenAI-compatible chat with
+  // image-URL input, tool calling and Thinking mode; 2.5-pro is the paid
+  // reasoning model (1M context), Flash models are currently $0 (512K).
+  "agnes-3.0-flash":    { vision: true, reasoning: true, contextWindow: 524288, maxOutput: 65536 },
+  "agnes-2.5-flash":    { vision: true, reasoning: true, contextWindow: 524288, maxOutput: 65500 },
+  "agnes-2.5-pro":      { vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 65536 },
+  "agnes-2.5-pro-beta": { vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 65536 },
 };
 
 const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
@@ -437,6 +445,12 @@ export const PATTERN_CAPABILITIES = [
   { pattern: "*mimo*v2.5*",     caps: { vision: true, audioInput: true, videoInput: true, contextWindow: 1048576, maxOutput: 131072 } },
   { pattern: "*mimo*omni*",     caps: { vision: true, audioInput: true, contextWindow: 262144, maxOutput: 131072 } },
   { pattern: "*mimo*",          caps: { vision: true, contextWindow: 262144, maxOutput: 131072 } },
+
+  // ── AgnesAI (OpenAI-compatible text + image-URL input, tool calling) ──
+  { pattern: "*agnes-2.5-pro*", caps: { vision: true, reasoning: true, contextWindow: 1048576, maxOutput: 65536 } },
+  { pattern: "*agnes-image*",   caps: { imageOutput: true } },
+  { pattern: "*agnes-video*",   caps: { videoInput: true } },
+  { pattern: "*agnes*",         caps: { vision: true, reasoning: true, contextWindow: 524288, maxOutput: 65536 } },
 
   // ── Llama (4 = vision/1M; 3.x = text-only/128K) ──────────────────
   { pattern: "*llama-4*",       caps: { vision: true, contextWindow: 1000000 } },
