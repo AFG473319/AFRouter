@@ -1,6 +1,6 @@
 {
   "name": "@afg473319/afrouter",
-  "version": "0.5.81",
+  "version": "0.5.82",
   "description": "AFRouter CLI - Start and manage AFRouter server",
   "bin": {
     "afrouter": "cli.js"
