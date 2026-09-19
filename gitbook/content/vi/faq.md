@@ -316,7 +316,7 @@ afrouter --version
 ```
 
 **Breaking changes:**
-- Xem [CHANGELOG.md](https://github.com/decolua/9router/blob/main/CHANGELOG.md)
+- Xem [CHANGELOG.md](https://github.com/AFG473319/AFRouter/blob/master/CHANGELOG.md)
 - Backup `~/.afrouter` trước khi update lớn
 - Xem hướng dẫn migration cho major version
 
@@ -333,7 +333,6 @@ afrouter --version
    - Bao gồm error logs, các bước reproduce
 
 2. **Request features:**
-   - [GitHub Discussions](https://github.com/decolua/9router/discussions)
    - Mô tả use case và lợi ích
 
 3. **Submit code:**
@@ -375,7 +374,7 @@ afrouter --version
 - Cập nhật tài liệu
 - Giữ commit nhỏ gọn và mô tả rõ ràng
 
-Xem [CONTRIBUTING.md](https://github.com/decolua/9router/blob/main/CONTRIBUTING.md) để biết chi tiết.
+Mở issue hoặc pull request tại [AFG473319/AFRouter](https://github.com/AFG473319/AFRouter).
 
 ---
 

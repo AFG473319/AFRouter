@@ -13,9 +13,9 @@
   
   [![npm](https://img.shields.io/npm/v/afrouter.svg)](https://www.npmjs.com/package/afrouter)
   [![Downloads](https://img.shields.io/npm/dm/afrouter.svg)](https://www.npmjs.com/package/afrouter)
-  [![License](https://img.shields.io/npm/l/afrouter.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
   
-  [🚀 Быстрый старт](#-quick-start) • [💡 Возможности](#-key-features) • [📖 Установка](#-setup-guide) • [🌐 Сайт](https://9router.com)
+  [🚀 Быстрый старт](#-quick-start) • [💡 Возможности](#-key-features) • [📖 Установка](#-setup-guide)
 </div>
 
 ---
@@ -949,7 +949,7 @@ Model: cc/claude-opus-4-6
 ```bash
 # Clone and install
 git clone https://github.com/AFG473319/AFRouter.git
-cd afrouter
+cd AFRouter
 npm install
 npm run build
 
@@ -1258,7 +1258,6 @@ OPENAI_API_KEY="your-cloud-key" bash tester/security/test-cloud-openai-compatibl
 
 ## 📧 Поддержка
 
-- **Сайт**: [9router.com](https://9router.com)
 - **GitHub**: [github.com/AFG473319/AFRouter](https://github.com/AFG473319/AFRouter)
 - **Issues**: [github.com/AFG473319/AFRouter/issues](https://github.com/AFG473319/AFRouter/issues)
 
@@ -1268,13 +1267,13 @@ OPENAI_API_KEY="your-cloud-key" bash tester/security/test-cloud-openai-compatibl
 
 Спасибо всем, кто помогает делать AFRouter лучше!
 
-[![Contributors](https://contrib.rocks/image?repo=decolua/9router&max=100&columns=20&anon=1)](https://github.com/decolua/9router/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=AFG473319/AFRouter&max=100&columns=20&anon=1)](https://github.com/AFG473319/AFRouter/graphs/contributors)
 
 ---
 
 ## 📊 Star Chart
 
-[![Star Chart](https://starchart.cc/decolua/9router.svg?variant=adaptive)](https://starchart.cc/decolua/9router)
+[![Star Chart](https://starchart.cc/AFG473319/AFRouter.svg?variant=adaptive)](https://starchart.cc/AFG473319/AFRouter)
 
 ### Как внести вклад
 
@@ -1284,7 +1283,7 @@ OPENAI_API_KEY="your-cloud-key" bash tester/security/test-cloud-openai-compatibl
 4. Запушьте в ветку (`git push origin feature/amazing-feature`)
 5. Откройте Pull Request
 
-См. [Pull Requests](https://github.com/decolua/9router/pulls) для подробных инструкций.
+См. [Pull Requests](https://github.com/AFG473319/AFRouter/pulls) для подробных инструкций.
 
 ---
 

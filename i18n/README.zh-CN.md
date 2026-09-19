@@ -13,9 +13,9 @@
   
   [![npm](https://img.shields.io/npm/v/afrouter.svg)](https://www.npmjs.com/package/afrouter)
   [![Downloads](https://img.shields.io/npm/dm/afrouter.svg)](https://www.npmjs.com/package/afrouter)
-  [![License](https://img.shields.io/npm/l/afrouter.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
   
-  [🚀 快速开始](#-quick-start) • [💡 特性](#-key-features) • [📖 设置](#-setup) • [🌐 网站](https://9router.com)
+  [🚀 快速开始](#-quick-start) • [💡 特性](#-key-features) • [📖 设置](#-setup)
 </div>
 
 ---
@@ -947,7 +947,7 @@ Model: cc/claudeus-4-6
 ```bash
 # Clone and install
 git clone https://github.com/AFG473319/AFRouter.git
-cd afrouter
+cd AFRouter
 npm install
 npm run build
 
@@ -1254,7 +1254,6 @@ OPENAI_API_KEY="your-cloud-key" bash tester/security/test-cloud-openai-compatibl
 
 ## 📧 支持
 
-- **网站**：[9router.com](https://9router.com)
 - **GitHub**：[github.com/AFG473319/AFRouter](https://github.com/AFG473319/AFRouter)
 - **问题**：[github.com/AFG473319/AFRouter/issues](https://github.com/AFG473319/AFRouter/issues)
 
@@ -1264,13 +1263,13 @@ OPENAI_API_KEY="your-cloud-key" bash tester/security/test-cloud-openai-compatibl
 
 感谢所有帮助让 AFRouter 变得更好的贡献者！
 
-[![Contributors](https://contrib.rocks/image?repo=decolua/9router&max=100&columns=20&anon=1)](https://github.com/decolua/9router/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=AFG473319/AFRouter&max=100&columns=20&anon=1)](https://github.com/AFG473319/AFRouter/graphs/contributors)
 
 ---
 
 ## 📊 Star 图表
 
-[![Star Chart](https://starchart.cc/decolua/9router.svg?variant=adaptive)](https://starchart.cc/decolua/9router)
+[![Star Chart](https://starchart.cc/AFG473319/AFRouter.svg?variant=adaptive)](https://starchart.cc/AFG473319/AFRouter)
 
 ### 如何贡献
 
@@ -1280,7 +1279,7 @@ OPENAI_API_KEY="your-cloud-key" bash tester/security/test-cloud-openai-compatibl
 4 推送到分支（`git push origin feature/amazing-feature`）
 5. 打开 Pull Request
 
-详细指南请参阅 [Pull Requests](https://github.com/decolua/9router/pulls)。
+详细指南请参阅 [Pull Requests](https://github.com/AFG473319/AFRouter/pulls)。
 
 ---
 

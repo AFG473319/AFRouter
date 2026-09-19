@@ -10,11 +10,10 @@
   
   [![npm](https://img.shields.io/npm/v/afrouter.svg)](https://www.npmjs.com/package/afrouter)
   [![Downloads](https://img.shields.io/npm/dm/afrouter.svg)](https://www.npmjs.com/package/afrouter)
-  [![License](https://img.shields.io/npm/l/afrouter.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-  <a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="decolua%2F9router | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
   
-  [🚀 快速开始](#-快速开始) • [💡 功能特点](#-主要功能) • [📖 设置指南](#-设置指南) • [🌐 网站](https://9router.com)
+  [🚀 快速开始](#-快速开始) • [💡 功能特点](#-主要功能) • [📖 设置指南](#-设置指南)
 
   [🇻🇳 Tiếng Việt](./i18n/README.vi.md) • [🇨🇳 中文](./i18n/README.zh-CN.md) • [🇯🇵 日本語](./i18n/README.ja-JP.md)
 </div>
@@ -173,7 +172,7 @@ PORT=20128 HOSTNAME=0.0.0.0 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run 
 
 </div>
 
-> 🎬 **制作了关于 AFRouter 的视频？** 提交 [Pull Request](https://github.com/decolua/9router/pulls)，将你的视频添加到此部分 — 我们会合并它！
+> 🎬 **制作了关于 AFRouter 的视频？** 提交 [Pull Request](https://github.com/AFG473319/AFRouter/pulls)，将你的视频添加到此部分 — 我们会合并它！
 
 ---
 
@@ -1022,8 +1021,8 @@ Model：cc/claude-opus-4-7
 
 ```bash
 # 克隆并安装
-git clone https://github.com/decolua/9router.git
-cd afrouter
+git clone https://github.com/AFG473319/AFRouter.git
+cd AFRouter
 npm install
 npm run build
 
@@ -1266,9 +1265,8 @@ Authorization: Bearer your-api-key
 
 ## 📧 支持
 
-- **网站**：[9router.com](https://9router.com)
-- **GitHub**：[github.com/decolua/9router](https://github.com/decolua/9router)
-- **问题**：[github.com/decolua/9router/issues](https://github.com/decolua/9router/issues)
+- **GitHub**：[github.com/AFG473319/AFRouter](https://github.com/AFG473319/AFRouter)
+- **问题**：[github.com/AFG473319/AFRouter/issues](https://github.com/AFG473319/AFRouter/issues)
 
 ---
 
@@ -1276,13 +1274,13 @@ Authorization: Bearer your-api-key
 
 感谢所有帮助改进 AFRouter 的贡献者！
 
-[![Contributors](https://contrib.rocks/image?repo=decolua/9router&max=150&columns=15&anon=1&v=20260309)](https://github.com/decolua/9router/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=AFG473319/AFRouter&max=150&columns=15&anon=1&v=20260309)](https://github.com/AFG473319/AFRouter/graphs/contributors)
 
 ---
 
 ## 📊 Star 图表
 
-[![Star Chart](https://starchart.cc/decolua/9router.svg?variant=adaptive)](https://starchart.cc/decolua/9router)
+[![Star Chart](https://starchart.cc/AFG473319/AFRouter.svg?variant=adaptive)](https://starchart.cc/AFG473319/AFRouter)
 
 
 

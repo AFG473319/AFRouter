@@ -15,9 +15,9 @@
   
   [![npm](https://img.shields.io/npm/v/afrouter.svg)](https://www.npmjs.com/package/afrouter)
   [![Downloads](https://img.shields.io/npm/dm/afrouter.svg)](https://www.npmjs.com/package/afrouter)
-  [![License](https://img.shields.io/npm/l/afrouter.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
   
-  [🚀 เริ่มต้นใช้งาน](#-quick-start) • [💡 ฟีเจอร์](#-key-features) • [📖 การตั้งค่า](#-setup-guide) • [🌐 เว็บไซต์](https://9router.com)
+  [🚀 เริ่มต้นใช้งาน](#-quick-start) • [💡 ฟีเจอร์](#-key-features) • [📖 การตั้งค่า](#-setup-guide)
 </div>
 
 ---
@@ -698,7 +698,6 @@ Authorization: Bearer your-api-key
 
 ## 📧 สนับสนุน
 
-- **เว็บไซต์**: [9router.com](https://9router.com)
 - **GitHub**: [github.com/AFG473319/AFRouter](https://github.com/AFG473319/AFRouter)
 - **Issues**: [github.com/AFG473319/AFRouter/issues](https://github.com/AFG473319/AFRouter/issues)
 
@@ -708,7 +707,7 @@ Authorization: Bearer your-api-key
 
 ขอขอบคุณผู้มีส่วนร่วมทุกคนที่ช่วยทำให้ AFRouter ดียิ่งขึ้น!
 
-[![Contributors](https://contrib.rocks/image?repo=decolua/9router&max=150&columns=15&anon=1)](https://github.com/decolua/9router/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=AFG473319/AFRouter&max=150&columns=15&anon=1)](https://github.com/AFG473319/AFRouter/graphs/contributors)
 
 ---
 

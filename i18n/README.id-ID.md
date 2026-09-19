@@ -9,9 +9,9 @@
 
   [![npm](https://img.shields.io/npm/v/afrouter.svg)](https://www.npmjs.com/package/afrouter)
   [![Downloads](https://img.shields.io/npm/dm/afrouter.svg)](https://www.npmjs.com/package/afrouter)
-  [![License](https://img.shields.io/npm/l/afrouter.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-  [🚀 Mulai Cepat](#-mulai-cepat) • [💡 Fitur](#-fitur-utama) • [📖 Setup](#-panduan-setup) • [🌐 Website](https://9router.com)
+  [🚀 Mulai Cepat](#-mulai-cepat) • [💡 Fitur](#-fitur-utama) • [📖 Setup](#-panduan-setup)
 
   [🇻🇳 Tiếng Việt](./README.vi.md) • [🇨🇳 中文](./README.zh-CN.md) • [🇯🇵 日本語](./README.ja-JP.md) • [🇮🇩 Bahasa Indonesia](./README.id-ID.md)
 </div>
@@ -870,13 +870,17 @@ Biaya bulanan: $0
 <summary><b>Docker</b></summary>
 
 ```bash
+git clone https://github.com/AFG473319/AFRouter.git
+cd AFRouter
+docker build -t afrouter .
+
 docker run -d \
   --name afrouter \
   -p 20128:20128 \
   -v afrouter-data:/app/data \
   -e PORT=20128 \
   -e BASE_URL=http://localhost:20128 \
-  ghcr.io/decolua/9router:latest
+  afrouter:latest
 ```
 
 Dashboard: `http://localhost:20128/dashboard`
@@ -938,13 +942,13 @@ Kontribusi sangat diterima!
 
 ## 📄 Lisensi
 
-MIT License — lihat [LICENSE](https://github.com/decolua/9router/blob/main/LICENSE) untuk detailnya.
+MIT License — lihat [LICENSE](../LICENSE) untuk detailnya.
 
 ---
 
 <div align="center">
 
-**Kalau AFRouter membantumu, kasih ⭐ di [GitHub](https://github.com/decolua/9router)!**
+**Kalau AFRouter membantumu, kasih ⭐ di [GitHub](https://github.com/AFG473319/AFRouter)!**
 
 [🌐 Website](https://9router.com) • [📦 npm](https://www.npmjs.com/package/afrouter) • [🐛 Laporkan Bug](https://github.com/AFG473319/AFRouter/issues)
 

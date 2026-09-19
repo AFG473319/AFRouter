@@ -11,13 +11,10 @@
   
   [![npm](https://img.shields.io/npm/v/@afg473319/afrouter.svg)](https://www.npmjs.com/package/@afg473319/afrouter)
   [![Downloads](https://img.shields.io/npm/dm/@afg473319/afrouter.svg)](https://www.npmjs.com/package/@afg473319/afrouter)
-  [![Docker Pulls](https://img.shields.io/docker/pulls/decolua/9router.svg?logo=docker&label=Docker%20pulls)](https://hub.docker.com/r/decolua/9router)
-  [![GHCR](https://img.shields.io/badge/GHCR-decolua%2F9router-blue?logo=github)](https://github.com/decolua/9router/pkgs/container/afrouter)
-  [![License](https://img.shields.io/npm/l/afrouter.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-<a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="decolua%2F9router | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
-[🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide) • [🌐 Website](https://9router.com)
+[🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide)
 
 [🇧🇷 Português (Brasil)](./i18n/README.pt-BR.md) • [🇻🇳 Tiếng Việt](./i18n/README.vi.md) • [🇨🇳 中文](./i18n/README.zh-CN.md) • [🇯🇵 日本語](./i18n/README.ja-JP.md) • [🇷🇺 Русский](./i18n/README.ru.md) • [🇹🇭 ไทย](./i18n/README.th.md) • [🇮🇷 فارسی](./i18n/README.fa_IR.md) • [🇮🇩 Indonesia](./i18n/README.id-ID.md) • [🇪🇸 Español](./i18n/README.es.md) • [🇫🇷 Français](./i18n/README.fr.md)
 
@@ -254,7 +251,7 @@ Available domains: `providers`, `nodes`, `keys`, `combos`, `models`, `usage`, `s
 
 </div>
 
-> 🎬 **Made a video about AFRouter?** Submit a [Pull Request](https://github.com/decolua/9router/pulls) adding your video to this section — we'll merge it!
+> 🎬 **Made a video about AFRouter?** Submit a [Pull Request](https://github.com/AFG473319/AFRouter/pulls) adding your video to this section — we'll merge it!
 
 ---
 
@@ -1252,8 +1249,8 @@ Model: cc/claude-opus-4-7
 
 ```bash
 # Clone and install
-git clone https://github.com/decolua/9router.git
-cd afrouter
+git clone https://github.com/AFG473319/AFRouter.git
+cd AFRouter
 npm install
 npm run build
 
@@ -1281,33 +1278,25 @@ pm2 startup
 
 ### Docker
 
-Published images (multi-platform `linux/amd64` + `linux/arm64`):
 
-- Docker Hub: [`decolua/9router`](https://hub.docker.com/r/decolua/9router)
-- GHCR: [`ghcr.io/decolua/9router`](https://github.com/decolua/9router/pkgs/container/afrouter)
 
-**Quick start (use published image):**
+**Quick start (build from source):**
 
 ```bash
+git clone https://github.com/AFG473319/AFRouter.git
+cd AFRouter
+docker build -t afrouter .
+
 docker run -d \
   --name afrouter \
   -p 20128:20128 \
   -v "$HOME/.afrouter:/app/data" \
   -e DATA_DIR=/app/data \
-  decolua/9router:latest
+  afrouter:latest
 ```
 
 → Open http://localhost:20128
 
-**Build from source (dev):**
-
-```bash
-git clone https://github.com/decolua/9router.git
-cd afrouter/app
-docker build -t afrouter .
-docker run -d --name afrouter -p 20128:20128 \
-  -v "$HOME/.afrouter:/app/data" -e DATA_DIR=/app/data afrouter
-```
 
 **Container defaults:**
 
@@ -1320,7 +1309,7 @@ docker run -d --name afrouter -p 20128:20128 \
 docker logs -f afrouter
 docker restart afrouter
 docker stop afrouter && docker rm afrouter
-docker pull decolua/9router:latest   # update to latest
+git pull && docker build -t afrouter .   # update to latest
 ```
 
 **Data persistence:** `$HOME/.afrouter/db/data.sqlite` on host ↔ `/app/data/db/data.sqlite` in container.
@@ -1521,9 +1510,8 @@ Authorization: Bearer your-api-key
 
 ## 📧 Support
 
-- **Website**: [9router.com](https://9router.com)
-- **GitHub**: [github.com/decolua/9router](https://github.com/decolua/9router)
-- **Issues**: [github.com/decolua/9router/issues](https://github.com/decolua/9router/issues)
+- **GitHub**: [github.com/AFG473319/AFRouter](https://github.com/AFG473319/AFRouter)
+- **Issues**: [github.com/AFG473319/AFRouter/issues](https://github.com/AFG473319/AFRouter/issues)
 
 ---
 
@@ -1531,13 +1519,13 @@ Authorization: Bearer your-api-key
 
 Thanks to all contributors who helped make AFRouter better!
 
-[![Contributors](https://contrib.rocks/image?repo=decolua/9router&max=150&columns=15&anon=1&v=20260309)](https://github.com/decolua/9router/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=AFG473319/AFRouter&max=150&columns=15&anon=1&v=20260309)](https://github.com/AFG473319/AFRouter/graphs/contributors)
 
 ---
 
 ## 📊 Star Chart
 
-[![Star Chart](https://starchart.cc/decolua/9router.svg?variant=adaptive)](https://starchart.cc/decolua/9router)
+[![Star Chart](https://starchart.cc/AFG473319/AFRouter.svg?variant=adaptive)](https://starchart.cc/AFG473319/AFRouter)
 
 ## 🔀 Forks
 

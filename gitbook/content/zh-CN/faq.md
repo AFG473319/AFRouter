@@ -316,7 +316,7 @@ afrouter --version
 ```
 
 **破坏性变更:**
-- 查看 [CHANGELOG.md](https://github.com/decolua/9router/blob/main/CHANGELOG.md)
+- 查看 [CHANGELOG.md](https://github.com/AFG473319/AFRouter/blob/master/CHANGELOG.md)
 - 大版本更新前备份 `~/.afrouter`
 - 阅读大版本的迁移指南
 
@@ -333,7 +333,6 @@ afrouter --version
    - 附上错误日志、复现步骤
 
 2. **功能请求:**
-   - [GitHub Discussions](https://github.com/decolua/9router/discussions)
    - 描述使用场景和价值
 
 3. **提交代码:**
@@ -375,7 +374,7 @@ afrouter --version
 - 更新文档
 - 提交保持原子化、描述清晰
 
-详情见 [CONTRIBUTING.md](https://github.com/decolua/9router/blob/main/CONTRIBUTING.md)。
+在 [AFG473319/AFRouter](https://github.com/AFG473319/AFRouter) 提交 issue 或 pull request。
 
 ---
 

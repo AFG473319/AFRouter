@@ -316,7 +316,7 @@ afrouter --version
 ```
 
 **破壊的変更:**
-- [CHANGELOG.md](https://github.com/decolua/9router/blob/main/CHANGELOG.md)を確認
+- [CHANGELOG.md](https://github.com/AFG473319/AFRouter/blob/master/CHANGELOG.md)を確認
 - メジャー更新前に`~/.afrouter`をバックアップ
 - メジャーバージョンの移行ガイドを確認
 
@@ -333,7 +333,6 @@ afrouter --version
    - エラーログ、再現手順を含める
 
 2. **機能をリクエスト:**
-   - [GitHub Discussions](https://github.com/decolua/9router/discussions)
    - ユースケースと利点を説明
 
 3. **コードを提出:**
@@ -375,7 +374,7 @@ afrouter --version
 - ドキュメントを更新
 - コミットは小さく、わかりやすく
 
-詳細は[CONTRIBUTING.md](https://github.com/decolua/9router/blob/main/CONTRIBUTING.md)を参照。
+[AFG473319/AFRouter](https://github.com/AFG473319/AFRouter) で issue または pull request をオープンしてください。
 
 ---
 

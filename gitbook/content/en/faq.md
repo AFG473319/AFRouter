@@ -316,7 +316,7 @@ afrouter --version
 ```
 
 **Breaking changes:**
-- Check [CHANGELOG.md](https://github.com/decolua/9router/blob/main/CHANGELOG.md)
+- Check [CHANGELOG.md](https://github.com/AFG473319/AFRouter/blob/master/CHANGELOG.md)
 - Backup `~/.afrouter` before major updates
 - Review migration guides for major versions
 
@@ -333,7 +333,6 @@ afrouter --version
    - Include error logs, steps to reproduce
 
 2. **Request features:**
-   - [GitHub Discussions](https://github.com/decolua/9router/discussions)
    - Describe use case and benefits
 
 3. **Submit code:**
@@ -375,7 +374,7 @@ afrouter --version
 - Update documentation
 - Keep commits atomic and descriptive
 
-See [CONTRIBUTING.md](https://github.com/decolua/9router/blob/main/CONTRIBUTING.md) for details.
+See [AFG473319/AFRouter](https://github.com/AFG473319/AFRouter) - open an issue or pull request.
 
 ---
 

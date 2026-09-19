@@ -1,6 +1,6 @@
 # Docker
 
-Run AFRouter in a container. Published image: [`decolua/9router`](https://hub.docker.com/r/decolua/9router) — multi-platform `linux/amd64` + `linux/arm64`.
+Run AFRouter in a container. No prebuilt images are published yet - build from source.
 
 ---
 
@@ -9,12 +9,16 @@ Run AFRouter in a container. Published image: [`decolua/9router`](https://hub.do
 ## Quick start
 
 ```bash
+git clone https://github.com/AFG473319/AFRouter.git
+cd AFRouter
+docker build -t afrouter .
+
 docker run -d \
   -p 20128:20128 \
   -v "$HOME/.afrouter:/app/data" \
   -e DATA_DIR=/app/data \
   --name afrouter \
-  decolua/9router:latest
+  afrouter:latest
 ```
 
 App listens on port `20128`. Open: http://localhost:20128
@@ -53,6 +57,10 @@ Container path: `/app/data/db/data.sqlite`
 ## Optional env vars
 
 ```bash
+git clone https://github.com/AFG473319/AFRouter.git
+cd AFRouter
+docker build -t afrouter .
+
 docker run -d \
   -p 20128:20128 \
   -v "$HOME/.afrouter:/app/data" \
@@ -61,7 +69,7 @@ docker run -d \
   -e HOSTNAME=0.0.0.0 \
   -e DEBUG=true \
   --name afrouter \
-  decolua/9router:latest
+  afrouter:latest
 ```
 
 ## Optional Headroom sidecar
@@ -71,7 +79,7 @@ The AFRouter image does not bundle Python or Headroom. To use Headroom in Docker
 ```yaml
 services:
   afrouter:
-    image: decolua/9router:latest
+    build: .
     ports:
       - "20128:20128"
     volumes:
@@ -95,7 +103,7 @@ If Headroom runs on the Docker host instead of as a sidecar, use `http://host.do
 ## Update to latest
 
 ```bash
-docker pull decolua/9router:latest
+git pull && docker build -t afrouter .
 docker rm -f afrouter
 # re-run the quick start command
 ```
@@ -107,7 +115,7 @@ docker rm -f afrouter
 ## Build image locally (test)
 
 ```bash
-cd app && docker build -t afrouter .
+docker build -t afrouter .
 
 docker run --rm -p 20128:20128 \
   -v "$HOME/.afrouter:/app/data" \
@@ -117,16 +125,10 @@ docker run --rm -p 20128:20128 \
 
 ## Publish (automatic via CI)
 
-Push a git tag `v*` → GitHub Actions builds multi-platform (amd64+arm64) and pushes to:
-- `ghcr.io/decolua/9router:v{version}` + `:latest`
-- `decolua/9router:v{version}` + `:latest`
+Push a git tag `v*` → GitHub Actions builds multi-platform (amd64+arm64) and pushes to `ghcr.io/afg473319/afrouter` (`:v{version}` + `:latest`). Docker Hub publishing additionally requires the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets.
 
 ```bash
-# Use scripts/release.js (recommended)
-node scripts/release.js "Release title" "Notes"
-
-# Or manually
-git tag v0.4.x && git push origin v0.4.x
+git tag v0.5.x && git push origin v0.5.x
 ```
 
-Workflow: `app/.github/workflows/docker-publish.yml`
+Workflow: `.github/workflows/docker-publish.yml`

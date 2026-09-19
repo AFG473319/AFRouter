@@ -316,7 +316,7 @@ afrouter --version
 ```
 
 **Cambios disruptivos:**
-- Revisa [CHANGELOG.md](https://github.com/decolua/9router/blob/main/CHANGELOG.md)
+- Revisa [CHANGELOG.md](https://github.com/AFG473319/AFRouter/blob/master/CHANGELOG.md)
 - Respalda `~/.afrouter` antes de actualizaciones mayores
 - Revisa las guías de migración para versiones mayores
 
@@ -333,7 +333,6 @@ afrouter --version
    - Incluye logs de error, pasos para reproducir
 
 2. **Solicitar características:**
-   - [GitHub Discussions](https://github.com/decolua/9router/discussions)
    - Describe el caso de uso y los beneficios
 
 3. **Enviar código:**
@@ -375,7 +374,7 @@ afrouter --version
 - Actualiza la documentación
 - Mantén los commits atómicos y descriptivos
 
-Consulta [CONTRIBUTING.md](https://github.com/decolua/9router/blob/main/CONTRIBUTING.md) para detalles.
+Abre un issue o pull request en [AFG473319/AFRouter](https://github.com/AFG473319/AFRouter).
 
 ---
 

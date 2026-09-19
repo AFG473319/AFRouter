@@ -9,13 +9,10 @@
   
   [![npm](https://img.shields.io/npm/v/afrouter.svg)](https://www.npmjs.com/package/afrouter)
   [![Downloads](https://img.shields.io/npm/dm/afrouter.svg)](https://www.npmjs.com/package/afrouter)
-  [![Docker Pulls](https://img.shields.io/docker/pulls/decolua/9router.svg?logo=docker&label=Docker%20pulls)](https://hub.docker.com/r/decolua/9router)
-  [![GHCR](https://img.shields.io/badge/GHCR-decolua%2F9router-blue?logo=github)](https://github.com/decolua/9router/pkgs/container/afrouter)
-  [![License](https://img.shields.io/npm/l/afrouter.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-<a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="decolua%2F9router | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
-[🚀 شروع سریع](#-شروع-سریع) • [💡 ویژگی‌ها](#-ویژگی‌های-کلیدی) • [📖 راه‌اندازی](#-راهنمای-راه‌اندازی) • [🌐 وب‌سایت](https://9router.com)
+[🚀 شروع سریع](#-شروع-سریع) • [💡 ویژگی‌ها](#-ویژگی‌های-کلیدی) • [📖 راه‌اندازی](#-راهنمای-راه‌اندازی)
 
 [🇻🇳 Tiếng Việt](./i18n/README.vi.md) • [🇨🇳 中文](./i18n/README.zh-CN.md) • [🇯🇵 日本語](./i18n/README.ja-JP.md) • [🇷🇺 Русский](./i18n/README.ru.md) • [🇮🇷 فارسی](./i18n/README.fa_IR.md)
 
@@ -213,7 +210,7 @@ PORT=20128 HOSTNAME=0.0.0.0 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run 
 
 </div>
 
-> 🎬 **درباره AFRouter ویدیو ساخته‌اید؟** یک [درخواست Pull](https://github.com/decolua/9router/pulls) برای افزودن ویدیوی خود به این بخش ارسال کنید — ما آن را ادغام خواهیم کرد!
+> 🎬 **درباره AFRouter ویدیو ساخته‌اید؟** یک [درخواست Pull](https://github.com/AFG473319/AFRouter/pulls) برای افزودن ویدیوی خود به این بخش ارسال کنید — ما آن را ادغام خواهیم کرد!
 
 ---
 
@@ -1126,7 +1123,7 @@ codex "your prompt"
 ```bash
 # کلون و نصب
 git clone https://github.com/AFG473319/AFRouter.git
-cd afrouter
+cd AFRouter
 npm install
 npm run build
 
@@ -1154,33 +1151,25 @@ pm2 startup
 
 ### داکر
 
-تصاویر منتشر شده (چند پلتفرم `linux/amd64` + `linux/arm64`):
 
-- Docker Hub: [`decolua/9router`](https://hub.docker.com/r/decolua/9router)
-- GHCR: [`ghcr.io/decolua/9router`](https://github.com/decolua/9router/pkgs/container/afrouter)
 
-**شروع سریع (استفاده از تصویر منتشر شده):**
+**شروع سریع (ساخت از سورس):**
 
 ```bash
+git clone https://github.com/AFG473319/AFRouter.git
+cd AFRouter
+docker build -t afrouter .
+
 docker run -d \
   --name afrouter \
   -p 20128:20128 \
   -v "$HOME/.afrouter:/app/data" \
   -e DATA_DIR=/app/data \
-  decolua/9router:latest
+  afrouter:latest
 ```
 
 → باز کردن http://localhost:20128
 
-**ساخت از سورس (توسعه):**
-
-```bash
-git clone https://github.com/AFG473319/AFRouter.git
-cd afrouter/app
-docker build -t afrouter .
-docker run -d --name afrouter -p 20128:20128 \
-  -v "$HOME/.afrouter:/app/data" -e DATA_DIR=/app/data afrouter
-```
 
 **پیش‌فرض‌های کانتینر:**
 
@@ -1193,7 +1182,7 @@ docker run -d --name afrouter -p 20128:20128 \
 docker logs -f afrouter
 docker restart afrouter
 docker stop afrouter && docker rm afrouter
-docker pull decolua/9router:latest   # به‌روزرسانی به آخرین نسخه
+git pull && docker build -t afrouter .   # به‌روزرسانی به آخرین نسخه
 ```
 
 **ماندگاری داده:** `$HOME/.afrouter/db/data.sqlite` در میزبان ↔ `/app/data/db/data.sqlite` در کانتینر.
@@ -1394,7 +1383,6 @@ Authorization: Bearer your-api-key
 
 ## 📧 پشتیبانی
 
-- **وب‌سایت**: [9router.com](https://9router.com)
 - **GitHub**: [github.com/AFG473319/AFRouter](https://github.com/AFG473319/AFRouter)
 - **مسائل**: [github.com/AFG473319/AFRouter/issues](https://github.com/AFG473319/AFRouter/issues)
 
@@ -1404,13 +1392,13 @@ Authorization: Bearer your-api-key
 
 با تشکر از همه مشارکت‌کنندگانی که به بهتر شدن AFRouter کمک کردند!
 
-[![Contributors](https://contrib.rocks/image?repo=decolua/9router&max=150&columns=15&anon=1&v=20260309)](https://github.com/decolua/9router/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=AFG473319/AFRouter&max=150&columns=15&anon=1&v=20260309)](https://github.com/AFG473319/AFRouter/graphs/contributors)
 
 ---
 
 ## 📊 نمودار ستاره
 
-[![Star Chart](https://starchart.cc/decolua/9router.svg?variant=adaptive)](https://starchart.cc/decolua/9router)
+[![Star Chart](https://starchart.cc/AFG473319/AFRouter.svg?variant=adaptive)](https://starchart.cc/AFG473319/AFRouter)
 
 ## 🔀 فورک‌ها
 
