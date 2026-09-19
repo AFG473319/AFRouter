@@ -125,6 +125,7 @@ import p121 from "./alitp-intl.js";
 import p122 from "./xquik.js";
 import p124 from "./nous-portal.js";
 import p125 from "./orcarouter.js";
+import p126 from "./agnesai.js";
 export default [
   p0,
   p1,
@@ -250,4 +251,5 @@ export default [
   p122,
   p124,
   p125,
+  p126,
 ];
