@@ -1,6 +1,6 @@
 services:
   afrouter:
-    image: decolua/9router:latest
+    build: .
     container_name: afrouter
     restart: always
     ports:
