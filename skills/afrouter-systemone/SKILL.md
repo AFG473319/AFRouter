@@ -1,21 +1,44 @@
 ---
 name: afrouter-systemone
-description: Structured decisions via TypeSafe Jev 1.13 Free through AFRouter — POST /v1/systemone with {model: oc/jev-1.13-free, state, questions} using noul/choice/score questions. Use when the user wants classification, routing, scoring, urgency detection, or any typed decision with probabilities instead of generated text.
+description: Typed decisions through AFRouter /v1/systemone (TypeSafe Jev 1.13 Free). Use when the user wants classification, routing, scoring or urgency detection with probabilities instead of generated text.
 ---
 
 # AFRouter — System One decisions (Jev 1.13 Free)
 
-Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup. No key is needed when the gateway runs with auth disabled.
+Auth: send `Authorization: Bearer $AFROUTER_KEY` (required unless the gateway has `requireApiKey` off). Setup: https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md
 
-Jev is a decisions-only model: it evaluates typed **questions** against a **state** and returns probabilities — it cannot generate chat text. Calling it via `/v1/chat/completions` returns `400` telling you to use `/v1/systemone` instead.
+```bash
+BASE="${AFROUTER_URL:-http://localhost:20128}"
+```
+
+Jev is a decisions-only model: it evaluates typed **questions** against a **state** and returns probabilities rather than generated text.
+
+## Discover
+
+System One models are served by the default catalog (BETA — expected soon to be filtered behind `/v1/models/systemone`), so list them there:
+
+```bash
+curl -s "$BASE/v1/models" -H "Authorization: Bearer $AFROUTER_KEY" | jq '.data[] | select(.id | test("jev")) | .id'
+```
+
+Two ids appear: **`oc/jev-1.13-free`** (fully served) and `opencode/jev-1.13` (listed, but its upstream Zen key has no balance, so requests fail). `oc` is the alias of the `opencode` provider, so `oc/jev-1.13-free` and `opencode/jev-1.13-free` are the same model — prefer the `oc/` form.
+
+`/v1/models/info` reports `endpoint: /v1/chat/completions` for Jev because it defaults to the LLM kind. Jev's real endpoint is `/v1/systemone`, as shown below.
 
 ## Endpoint
 
-- `POST $AFROUTER_URL/v1/systemone` — model id **`oc/jev-1.13-free`**
-  (`oc` is the alias of the `opencode` provider; `opencode/jev-1.13-free` works identically.
-  The catalog also lists `opencode/jev-1.13` (paid) — it needs a Zen key with balance, so prefer the free id.)
+`POST $BASE/v1/systemone` — model id **`oc/jev-1.13-free`**
 
-## Request
+## Examples
+
+```bash
+curl -X POST $BASE/v1/systemone \
+  -H "Authorization: Bearer $AFROUTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"oc/jev-1.13-free","state":"Hi, my payouts have been failing for 3 days. Please help ASAP.","questions":{"is_urgent":{"type":"noul","instructions":"Does this convey urgency?"}}}'
+```
+
+Full request with all three question types:
 
 ```json
 {
@@ -35,10 +58,20 @@ Jev is a decisions-only model: it evaluates typed **questions** against a **stat
 
 Rules (gateway validates before forwarding): `state` (string/object/array) and at least one question are required; `choice` needs a non-empty `criteria` map (max 255 options); `score` needs a `criteria` array of 2–10 ordered levels. All questions in one call are evaluated in parallel against the same state.
 
-```bash
-curl -X POST $AFROUTER_URL/v1/systemone \
-  -H "Content-Type: application/json" \
-  -d '{"model":"oc/jev-1.13-free","state":"Hi, my payouts have been failing for 3 days. Please help ASAP.","questions":{"is_urgent":{"type":"noul","instructions":"Does this convey urgency?"}}}'
+JS:
+
+```js
+const r = await fetch(`${process.env.AFROUTER_URL || "http://localhost:20128"}/v1/systemone`, {
+  method: "POST",
+  headers: { "Authorization": `Bearer ${process.env.AFROUTER_KEY}`, "Content-Type": "application/json" },
+  body: JSON.stringify({
+    model: "oc/jev-1.13-free",
+    state: "Hi, my payouts have been failing for 3 days. Please help ASAP.",
+    questions: { is_urgent: { type: "noul", instructions: "Does this convey urgency?" } },
+  }),
+});
+const { answers } = await r.json();
+console.log(answers.is_urgent.noul);  // 0..1 probability of yes
 ```
 
 ## Response shape
@@ -57,11 +90,21 @@ curl -X POST $AFROUTER_URL/v1/systemone \
 
 `choice`/`score` also return `confidence` (0–1, derived from the distribution); `noul` returns a 0 (no) → 1 (yes) probability. Free tier: `cost: "0"`.
 
+## Provider quirks
+
+| Provider | `model` format | Notes |
+|---|---|---|
+| `opencode` (`oc`) | `jev-1.13-free` | noAuth free tier; `targetFormat: "systemone"` |
+| `opencode` (`oc`) | `jev-1.13` | Listed in the catalog but unusable — its Zen key has no balance |
+
+Jev ids route to `https://opencode.ai/zen/v1/systemone`; the request body is passed through untouched (no chat translation).
+
 ## Errors
 
 - `400` validation text (missing `state`/`questions`, bad question type, bad `criteria`) — fix the body and retry.
 - `400 Model <x> is not a System One model` — you sent a chat model here; use `/v1/chat/completions` for it.
 - `400` on `/v1/chat/completions` naming a System One model — switch to `/v1/systemone` as shown above.
+- `401 Missing API key` — auth is on by default; send `Authorization: Bearer $AFROUTER_KEY`.
 - `503 All accounts unavailable` — upstream accounts exhausted; wait or add another provider account.
 
 Upstream reference: https://docs.typesafe.ai/api

@@ -29,16 +29,20 @@ Read this skill and use it: https://raw.githubusercontent.com/AFG473319/AFRouter
 
 Then ask normally — *"generate an image of a cat"*, *"transcribe this URL"*, etc.
 
-## Configure your shell once
+## Configure once
+
+`AFROUTER_URL` is **optional** — it is a convenience variable for these skills, not an AFRouter setting. If it is unset, skills use `http://localhost:20128` automatically.
+
+`AFROUTER_KEY` **is required by default** (`requireApiKey: true` is the ship default) — create one in Dashboard → Keys.
 
 ```bash
-export AFROUTER_URL="${AFROUTER_URL:-http://localhost:20128}"   # local default, or your VPS / tunnel URL
-export AFROUTER_KEY="sk-..."                                    # from Dashboard → Keys (only if requireApiKey=true)
+export AFROUTER_URL="http://localhost:20128"   # only needed for a remote VPS / tunnel gateway
+export AFROUTER_KEY="sk_afrouter..."           # from Dashboard → Keys
 ```
 
-No export needed for a default local gateway — every skill falls back to `http://localhost:20128` when `AFROUTER_URL` is unset.
+The CLI launcher targets the same gateway with `AFROUTER_HOST` (default `127.0.0.1`) and `AFROUTER_PORT` (default `20128`) instead.
 
-Verify: `curl $AFROUTER_URL/api/health` → `{"ok":true}`.
+Verify (no auth needed): `curl "${AFROUTER_URL:-http://localhost:20128}/api/health"` → `{"ok":true}`.
 
 ## Links
 

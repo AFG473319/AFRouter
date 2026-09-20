@@ -1,23 +1,27 @@
 ---
 name: afrouter-image
-description: Generate images via AFRouter /v1/images/generations using OpenAI / Gemini Imagen / DALL-E / FLUX / MiniMax / SDWebUI / ComfyUI / Codex models. Use when the user wants to create, generate, draw, or render an image, picture, or text-to-image (txt2img).
+description: Image generation through AFRouter /v1/images/generations. Use when the user wants an image created from a text prompt.
 ---
 
 # AFRouter — Image Generation
 
-Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Auth: send `Authorization: Bearer $AFROUTER_KEY` (required unless the gateway has `requireApiKey` off). Setup: https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md
+
+```bash
+BASE="${AFROUTER_URL:-http://localhost:20128}"
+```
 
 ## Discover
 
 ```bash
-curl $AFROUTER_URL/v1/models/image | jq '.data[].id'
+curl $BASE/v1/models/image | jq '.data[].id'
 # Per-model params/options (size enum, quality enum, capabilities like edit)
-curl "$AFROUTER_URL/v1/models/info?id=openai/dall-e-3"
+curl "$BASE/v1/models/info?id=openai/dall-e-3"
 ```
 
 ## Endpoint
 
-`POST $AFROUTER_URL/v1/images/generations`
+`POST $BASE/v1/images/generations`
 
 | Field | Required | Notes |
 |---|---|---|
@@ -35,7 +39,7 @@ Add query `?response_format=binary` to receive raw image bytes (handy for saving
 Save to file (binary):
 
 ```bash
-curl -X POST "$AFROUTER_URL/v1/images/generations?response_format=binary" \
+curl -X POST "$BASE/v1/images/generations?response_format=binary" \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gemini/gemini-3-pro-image-preview","prompt":"watercolor mountains at sunrise","size":"1024x1024"}' \
@@ -45,7 +49,7 @@ curl -X POST "$AFROUTER_URL/v1/images/generations?response_format=binary" \
 JS (URL response):
 
 ```js
-const r = await fetch(`${process.env.AFROUTER_URL}/v1/images/generations`, {
+const r = await fetch(`${process.env.AFROUTER_URL || "http://localhost:20128"}/v1/images/generations`, {
   method: "POST",
   headers: { "Authorization": `Bearer ${process.env.AFROUTER_KEY}`, "Content-Type": "application/json" },
   body: JSON.stringify({ model: "gemini/gemini-3-pro-image-preview", prompt: "neon city", size: "1024x1024" }),

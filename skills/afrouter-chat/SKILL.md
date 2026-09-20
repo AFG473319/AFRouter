@@ -1,23 +1,27 @@
 ---
 name: afrouter-chat
-description: Chat / code generation via AFRouter using OpenAI /v1/chat/completions or Anthropic /v1/messages format with streaming + auto-fallback combos. Use when the user wants to ask an LLM, generate code, summarize text, or run prompts through AFRouter.
+description: Chat and code generation through AFRouter (OpenAI /v1/chat/completions or Anthropic /v1/messages), with streaming and auto-fallback combos. Use when the user wants an LLM answer or generated code.
 ---
 
 # AFRouter — Chat
 
-Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Auth: send `Authorization: Bearer $AFROUTER_KEY` (required unless the gateway has `requireApiKey` off). Setup: https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md
+
+```bash
+BASE="${AFROUTER_URL:-http://localhost:20128}"
+```
 
 ## Endpoints
 
-- `POST $AFROUTER_URL/v1/chat/completions` — OpenAI format
-- `POST $AFROUTER_URL/v1/messages` — Anthropic format
+- `POST $BASE/v1/chat/completions` — OpenAI format
+- `POST $BASE/v1/messages` — Anthropic format
 
 ## Discover
 
 ```bash
-curl $AFROUTER_URL/v1/models | jq '.data[].id'
+curl $BASE/v1/models | jq '.data[].id'
 # Per-model metadata (contextWindow, params)
-curl "$AFROUTER_URL/v1/models/info?id=openai/gpt-4o"
+curl "$BASE/v1/models/info?id=openai/gpt-4o"
 ```
 
 Combos (e.g. `vip`, `mycodex`) auto-fallback through multiple providers.
@@ -25,7 +29,7 @@ Combos (e.g. `vip`, `mycodex`) auto-fallback through multiple providers.
 ## OpenAI format
 
 ```bash
-curl -X POST $AFROUTER_URL/v1/chat/completions \
+curl -X POST $BASE/v1/chat/completions \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"openai/gpt-5","messages":[{"role":"user","content":"Hi"}],"stream":false}'
@@ -35,7 +39,7 @@ JS (OpenAI SDK):
 
 ```js
 import OpenAI from "openai";
-const client = new OpenAI({ baseURL: `${process.env.AFROUTER_URL}/v1`, apiKey: process.env.AFROUTER_KEY });
+const client = new OpenAI({ baseURL: `${process.env.AFROUTER_URL || "http://localhost:20128"}/v1`, apiKey: process.env.AFROUTER_KEY });
 const res = await client.chat.completions.create({
   model: "openai/gpt-5",
   messages: [{ role: "user", content: "Hi" }],
@@ -47,7 +51,7 @@ for await (const chunk of res) process.stdout.write(chunk.choices[0]?.delta?.con
 ## Anthropic format
 
 ```bash
-curl -X POST $AFROUTER_URL/v1/messages \
+curl -X POST $BASE/v1/messages \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \

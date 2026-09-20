@@ -1,25 +1,29 @@
 ---
 name: afrouter-web-search
-description: Web and X search via AFRouter /v1/search using Tavily / Exa / Brave / Serper / SearXNG / Google PSE / Linkup / SearchAPI / You.com / Perplexity / Xquik. Use when the user wants to search the web, find articles, or search public X posts.
+description: Web and X search through AFRouter /v1/search. Use when the user wants to search the web or search public X posts.
 ---
 
 # AFRouter — Web Search
 
-Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Auth: send `Authorization: Bearer $AFROUTER_KEY` (required unless the gateway has `requireApiKey` off). Setup: https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md
+
+```bash
+BASE="${AFROUTER_URL:-http://localhost:20128}"
+```
 
 ## Discover
 
 ```bash
-curl $AFROUTER_URL/v1/models/web | jq '.data[] | select(.kind=="webSearch") | .id'
+curl $BASE/v1/models/web | jq '.data[] | select(.kind=="webSearch") | .id'
 # Per-provider params (searchTypes, maxResults, required options like cx for google-pse)
-curl "$AFROUTER_URL/v1/models/info?id=tavily/search"
+curl "$BASE/v1/models/info?id=tavily/search"
 ```
 
 IDs end in `/search` (e.g. `tavily/search`). Combos (`owned_by:"combo"`) chain providers with auto-fallback.
 
 ## Endpoint
 
-`POST $AFROUTER_URL/v1/search`
+`POST $BASE/v1/search`
 
 | Field | Required | Notes |
 |---|---|---|
@@ -32,7 +36,7 @@ IDs end in `/search` (e.g. `tavily/search`). Combos (`owned_by:"combo"`) chain p
 ## Examples
 
 ```bash
-curl -X POST $AFROUTER_URL/v1/search \
+curl -X POST $BASE/v1/search \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"tavily","query":"AFRouter open source","max_results":5}'
@@ -41,7 +45,7 @@ curl -X POST $AFROUTER_URL/v1/search \
 JS:
 
 ```js
-const r = await fetch(`${process.env.AFROUTER_URL}/v1/search`, {
+const r = await fetch(`${process.env.AFROUTER_URL || "http://localhost:20128"}/v1/search`, {
   method: "POST",
   headers: { "Authorization": `Bearer ${process.env.AFROUTER_KEY}`, "Content-Type": "application/json" },
   body: JSON.stringify({ model: "search-combo", query: "latest LLM benchmarks", max_results: 10 }),
@@ -52,7 +56,7 @@ console.log(await r.json());
 X search with Xquik:
 
 ```bash
-curl -X POST $AFROUTER_URL/v1/search \
+curl -X POST $BASE/v1/search \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"xquik","query":"from:github release","max_results":10,"provider_options":{"queryType":"Latest"}}'

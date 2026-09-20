@@ -1,23 +1,27 @@
 ---
 name: afrouter-embeddings
-description: Generate vector embeddings via AFRouter /v1/embeddings using OpenAI / Gemini / Mistral / Voyage / Nvidia / GitHub embedding models for RAG, semantic search, similarity. Use when the user wants embeddings, vectors, RAG, semantic search, or to embed text.
+description: Vector embeddings through AFRouter /v1/embeddings. Use when the user wants embeddings for RAG, semantic search, clustering or similarity.
 ---
 
 # AFRouter — Embeddings
 
-Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Auth: send `Authorization: Bearer $AFROUTER_KEY` (required unless the gateway has `requireApiKey` off). Setup: https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md
+
+```bash
+BASE="${AFROUTER_URL:-http://localhost:20128}"
+```
 
 ## Discover
 
 ```bash
-curl $AFROUTER_URL/v1/models/embedding | jq '.data[].id'
+curl $BASE/v1/models/embedding | jq '.data[].id'
 # Per-model dimensions
-curl "$AFROUTER_URL/v1/models/info?id=openai/text-embedding-3-small"
+curl "$BASE/v1/models/info?id=openai/text-embedding-3-small"
 ```
 
 ## Endpoint
 
-`POST $AFROUTER_URL/v1/embeddings`
+`POST $BASE/v1/embeddings`
 
 | Field | Required | Notes |
 |---|---|---|
@@ -29,7 +33,7 @@ curl "$AFROUTER_URL/v1/models/info?id=openai/text-embedding-3-small"
 ## Examples
 
 ```bash
-curl -X POST $AFROUTER_URL/v1/embeddings \
+curl -X POST $BASE/v1/embeddings \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"openai/text-embedding-3-small","input":["hello","world"]}'
@@ -38,7 +42,7 @@ curl -X POST $AFROUTER_URL/v1/embeddings \
 JS:
 
 ```js
-const r = await fetch(`${process.env.AFROUTER_URL}/v1/embeddings`, {
+const r = await fetch(`${process.env.AFROUTER_URL || "http://localhost:20128"}/v1/embeddings`, {
   method: "POST",
   headers: { "Authorization": `Bearer ${process.env.AFROUTER_KEY}`, "Content-Type": "application/json" },
   body: JSON.stringify({ model: "gemini/text-embedding-004", input: "RAG chunk text" }),

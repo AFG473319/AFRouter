@@ -1,25 +1,29 @@
 ---
 name: afrouter-stt
-description: Speech-to-text via AFRouter /v1/audio/transcriptions using OpenAI Whisper / Groq / Gemini / Deepgram / AssemblyAI / NVIDIA / HuggingFace models. Use when the user wants to transcribe audio, convert speech to text, or get subtitles from audio files.
+description: Speech-to-text through AFRouter /v1/audio/transcriptions. Use when the user wants audio transcribed or subtitles generated from an audio file.
 ---
 
 # AFRouter — Speech-to-Text
 
-Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Auth: send `Authorization: Bearer $AFROUTER_KEY` (required unless the gateway has `requireApiKey` off). Setup: https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md
+
+```bash
+BASE="${AFROUTER_URL:-http://localhost:20128}"
+```
 
 ## Discover
 
 ```bash
-curl $AFROUTER_URL/v1/models/stt | jq '.data[].id'
+curl $BASE/v1/models/stt | jq '.data[].id'
 # Per-model params (language, response_format, prompt, temperature support)
-curl "$AFROUTER_URL/v1/models/info?id=openai/whisper-1"
+curl "$BASE/v1/models/info?id=openai/whisper-1"
 ```
 
 `model` = STT model ID (e.g. `openai/whisper-1`, `groq/whisper-large-v3`, `deepgram/nova-3`, `gemini/gemini-2.5-flash`).
 
 ## Endpoint
 
-`POST $AFROUTER_URL/v1/audio/transcriptions` (OpenAI Whisper compatible, `multipart/form-data`)
+`POST $BASE/v1/audio/transcriptions` (OpenAI Whisper compatible, `multipart/form-data`)
 
 | Field | Required | Notes |
 |---|---|---|
@@ -33,7 +37,7 @@ curl "$AFROUTER_URL/v1/models/info?id=openai/whisper-1"
 ## Examples
 
 ```bash
-curl -X POST "$AFROUTER_URL/v1/audio/transcriptions" \
+curl -X POST "$BASE/v1/audio/transcriptions" \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -F "model=openai/whisper-1" \
   -F "file=@audio.mp3" \
@@ -47,7 +51,7 @@ import { createReadStream } from "node:fs";
 const form = new FormData();
 form.append("model", "groq/whisper-large-v3-turbo");
 form.append("file", new Blob([await (await import("node:fs/promises")).readFile("audio.mp3")]), "audio.mp3");
-const r = await fetch(`${process.env.AFROUTER_URL}/v1/audio/transcriptions`, {
+const r = await fetch(`${process.env.AFROUTER_URL || "http://localhost:20128"}/v1/audio/transcriptions`, {
   method: "POST",
   headers: { "Authorization": `Bearer ${process.env.AFROUTER_KEY}` },
   body: form,

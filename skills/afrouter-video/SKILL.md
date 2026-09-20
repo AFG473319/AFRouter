@@ -1,11 +1,15 @@
 ---
 name: afrouter-video
-description: Generate videos via AFRouter /v1/videos/generations using xAI Grok Imagine (grok-imagine-video). Async job flow - submit, poll request_id until done, download MP4. Use when the user wants to create, generate, or render a video, text-to-video (txt2vid), or image-to-video.
+description: Video generation through AFRouter /v1/videos (xAI Grok Imagine), async submit-then-poll. Use when the user wants text-to-video or image-to-video.
 ---
 
 # AFRouter — Video Generation (xAI Grok Imagine)
 
-Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Auth: send `Authorization: Bearer $AFROUTER_KEY` (required unless the gateway has `requireApiKey` off). Setup: https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md
+
+```bash
+BASE="${AFROUTER_URL:-http://localhost:20128}"
+```
 
 Requires a connected **xAI account** in the AFRouter dashboard — either **Grok Build OAuth** (SuperGrok / X Premium+ subscription sign-in) or a direct **xAI API key** from console.x.ai. The two are separate auth types with separate billing; the dashboard shows which one each connection uses.
 
@@ -37,7 +41,7 @@ Request fields (passed through to xAI unchanged — see https://docs.x.ai/develo
 Submit a job:
 
 ```bash
-curl -X POST "$AFROUTER_URL/v1/videos/generations" \
+curl -X POST "$BASE/v1/videos/generations" \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"xai/grok-imagine-video","prompt":"A cinematic tracking shot through a neon city at night","duration":8,"aspect_ratio":"16:9","resolution":"720p"}'
@@ -47,7 +51,7 @@ curl -X POST "$AFROUTER_URL/v1/videos/generations" \
 Poll until done (echo the connection header back so the same account polls the job):
 
 ```bash
-curl "$AFROUTER_URL/v1/videos/abc123" \
+curl "$BASE/v1/videos/abc123" \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "x-connection-id: <id from create response>"
 # → {"status":"pending","progress":42}

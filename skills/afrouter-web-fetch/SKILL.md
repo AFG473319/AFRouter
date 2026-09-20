@@ -1,25 +1,29 @@
 ---
 name: afrouter-web-fetch
-description: Fetch URL → markdown / text / HTML via AFRouter /v1/web/fetch using Ollama Cloud / Firecrawl / Jina Reader / Tavily Extract / Exa Contents. Use when the user wants to scrape a webpage, extract URL content, read article, or convert a URL to markdown.
+description: URL-to-markdown extraction through AFRouter /v1/web/fetch. Use when the user wants a page's content as markdown, text or HTML.
 ---
 
 # AFRouter — Web Fetch
 
-Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Auth: send `Authorization: Bearer $AFROUTER_KEY` (required unless the gateway has `requireApiKey` off). Setup: https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md
+
+```bash
+BASE="${AFROUTER_URL:-http://localhost:20128}"
+```
 
 ## Discover
 
 ```bash
-curl $AFROUTER_URL/v1/models/web | jq '.data[] | select(.kind=="webFetch") | .id'
+curl $BASE/v1/models/web | jq '.data[] | select(.kind=="webFetch") | .id'
 # Per-provider params
-curl "$AFROUTER_URL/v1/models/info?id=firecrawl/fetch"
+curl "$BASE/v1/models/info?id=firecrawl/fetch"
 ```
 
 IDs end in `/fetch` (e.g. `firecrawl/fetch`, `jina/fetch`). `fetch-combo` chains providers with auto-fallback.
 
 ## Endpoint
 
-`POST $AFROUTER_URL/v1/web/fetch`
+`POST $BASE/v1/web/fetch`
 
 | Field | Required | Notes |
 |---|---|---|
@@ -32,7 +36,7 @@ IDs end in `/fetch` (e.g. `firecrawl/fetch`, `jina/fetch`). `fetch-combo` chains
 
 ### Jina Reader
 ```bash
-curl -X POST $AFROUTER_URL/v1/web/fetch \
+curl -X POST $BASE/v1/web/fetch \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"jina-reader","url":"https://example.com","format":"markdown"}'
@@ -40,7 +44,7 @@ curl -X POST $AFROUTER_URL/v1/web/fetch \
 
 ### Exa
 ```bash
-curl -X POST $AFROUTER_URL/v1/web/fetch \
+curl -X POST $BASE/v1/web/fetch \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"exa","url":"https://example.com","format":"markdown","max_characters":0}'
@@ -48,7 +52,7 @@ curl -X POST $AFROUTER_URL/v1/web/fetch \
 
 ### Firecrawl
 ```bash
-curl -X POST $AFROUTER_URL/v1/web/fetch \
+curl -X POST $BASE/v1/web/fetch \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"firecrawl","url":"https://example.com","format":"markdown","max_characters":0}'
@@ -56,7 +60,7 @@ curl -X POST $AFROUTER_URL/v1/web/fetch \
 
 ### Tavily
 ```bash
-curl -X POST $AFROUTER_URL/v1/web/fetch \
+curl -X POST $BASE/v1/web/fetch \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"tavily","url":"https://example.com","format":"markdown","max_characters":0}'
@@ -67,7 +71,7 @@ curl -X POST $AFROUTER_URL/v1/web/fetch \
 Uses the API key from the existing `ollama` connection.
 
 ```bash
-curl -X POST $AFROUTER_URL/v1/web/fetch \
+curl -X POST $BASE/v1/web/fetch \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"ollama","url":"https://example.com","format":"markdown"}'
@@ -77,7 +81,7 @@ curl -X POST $AFROUTER_URL/v1/web/fetch \
 JS:
 
 ```js
-const r = await fetch(`${process.env.AFROUTER_URL}/v1/web/fetch`, {
+const r = await fetch(`${process.env.AFROUTER_URL || "http://localhost:20128"}/v1/web/fetch`, {
   method: "POST",
   headers: { "Authorization": `Bearer ${process.env.AFROUTER_KEY}`, "Content-Type": "application/json" },
   body: JSON.stringify({ model: "fetch-combo", url: "https://example.com", format: "markdown", max_characters: 5000 }),
