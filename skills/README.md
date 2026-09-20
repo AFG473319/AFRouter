@@ -17,6 +17,7 @@ Drop-in skills for any AI agent (Claude, Cursor, ChatGPT, custom SDK). Just **co
 | Embeddings | https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter-embeddings/SKILL.md |
 | Web search | https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter-web-search/SKILL.md |
 | Web fetch (URL → markdown) | https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter-web-fetch/SKILL.md |
+| System One decisions (Jev 1.13 Free) | https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter-systemone/SKILL.md |
 
 ## How to use
 
