@@ -67,6 +67,13 @@ export const SKILLS = [
     endpoint: "/v1/web/fetch",
     icon: "language",
   },
+  {
+    id: "afrouter-systemone",
+    name: "System One Decisions",
+    description: "Typed decisions via TypeSafe Jev 1.13 Free (noul / choice / score) with probabilities.",
+    endpoint: "/v1/systemone",
+    icon: "psychology",
+  },
 ];
 
 export function getSkillRawUrl(id) {
