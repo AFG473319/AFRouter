@@ -10,9 +10,11 @@ Local/remote AI gateway exposing OpenAI-compatible REST. One key, many providers
 ## Setup
 
 ```bash
-export AFROUTER_URL="http://localhost:20128"      # or VPS / tunnel URL
-export AFROUTER_KEY="sk-..."                      # from Dashboard → Keys (only if requireApiKey=true)
+export AFROUTER_URL="${AFROUTER_URL:-http://localhost:20128}"  # local default; or your VPS / tunnel URL
+export AFROUTER_KEY="sk-..."                                   # from Dashboard → Keys (only if requireApiKey=true)
 ```
+
+If `AFROUTER_URL` is unset, assume `http://localhost:20128` — never abort for a missing env var. `AFROUTER_KEY` is only needed when the gateway has auth enabled (local default: disabled, omit the header).
 
 All requests: `${AFROUTER_URL}/v1/...` with header `Authorization: Bearer ${AFROUTER_KEY}` (omit if auth disabled).
 

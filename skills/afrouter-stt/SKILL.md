@@ -5,7 +5,7 @@ description: Speech-to-text via AFRouter /v1/audio/transcriptions using OpenAI W
 
 # AFRouter — Speech-to-Text
 
-Requires `AFROUTER_URL` (and `AFROUTER_KEY` if auth enabled). See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
 
 ## Discover
 

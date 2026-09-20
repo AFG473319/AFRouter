@@ -5,7 +5,7 @@ description: Structured decisions via TypeSafe Jev 1.13 Free through AFRouter �
 
 # AFRouter — System One decisions (Jev 1.13 Free)
 
-Requires `AFROUTER_URL` (and `AFROUTER_KEY` if auth enabled). See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup. No key is needed when the gateway runs with auth disabled.
+Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup. No key is needed when the gateway runs with auth disabled.
 
 Jev is a decisions-only model: it evaluates typed **questions** against a **state** and returns probabilities — it cannot generate chat text. Calling it via `/v1/chat/completions` returns `400` telling you to use `/v1/systemone` instead.
 

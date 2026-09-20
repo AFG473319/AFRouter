@@ -5,7 +5,7 @@ description: Generate videos via AFRouter /v1/videos/generations using xAI Grok 
 
 # AFRouter — Video Generation (xAI Grok Imagine)
 
-Requires `AFROUTER_URL` (and `AFROUTER_KEY` if auth enabled). See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
+Requires `AFROUTER_URL` (defaults to `http://localhost:20128` when unset -- no export needed for a local gateway) and `AFROUTER_KEY` only if auth enabled. See https://raw.githubusercontent.com/AFG473319/AFRouter/refs/heads/master/skills/afrouter/SKILL.md for setup.
 
 Requires a connected **xAI account** in the AFRouter dashboard — either **Grok Build OAuth** (SuperGrok / X Premium+ subscription sign-in) or a direct **xAI API key** from console.x.ai. The two are separate auth types with separate billing; the dashboard shows which one each connection uses.
 

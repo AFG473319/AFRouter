@@ -32,9 +32,11 @@ Then ask normally — *"generate an image of a cat"*, *"transcribe this URL"*, e
 ## Configure your shell once
 
 ```bash
-export AFROUTER_URL="http://localhost:20128"   # local default, or your VPS / tunnel URL
-export AFROUTER_KEY="sk-..."                   # from Dashboard → Keys (only if requireApiKey=true)
+export AFROUTER_URL="${AFROUTER_URL:-http://localhost:20128}"   # local default, or your VPS / tunnel URL
+export AFROUTER_KEY="sk-..."                                    # from Dashboard → Keys (only if requireApiKey=true)
 ```
+
+No export needed for a default local gateway — every skill falls back to `http://localhost:20128` when `AFROUTER_URL` is unset.
 
 Verify: `curl $AFROUTER_URL/api/health` → `{"ok":true}`.
 
