@@ -78,7 +78,19 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (bypassResponse) return bypassResponse;
 
   const alias = PROVIDER_ID_TO_ALIAS[provider] || provider;
-  const modelTargetFormat = getModelTargetFormat(alias, model);
+  // Registry is keyed by alias ("oc", not "opencode"): alias first, raw id second.
+  const modelTargetFormat = getModelTargetFormat(alias, model) ?? getModelTargetFormat(provider, model);
+  // Jev (targetFormat "systemone") is a decisions-only System One model:
+  // upstream serves it on POST /zen/v1/systemone with {model, state, questions}
+  // and it never generates text. Fail fast with a clear 400 instead of sending
+  // a chat payload to a chat endpoint it cannot answer.
+  if (modelTargetFormat === "systemone") {
+    trackPendingRequest(model, provider, connectionId, false, true);
+    return createErrorResult(
+      HTTP_STATUS.BAD_REQUEST,
+      `Model ${provider}/${model} is a decisions-only System One model (TypeSafe Jev): it answers typed questions via POST /zen/v1/systemone with {model, state, questions} and cannot generate chat text. Use jev-1.13 (paid) or jev-1.13-free against the SystemOne endpoint instead of /v1/chat/completions.`
+    );
+  }
   // Multi-endpoint providers: pick transport matching sourceFormat → zero translation.
   // Per-model guard: only use the transport when the model declares support for that
   // sourceFormat — opencode-go models differ in endpoint support (kimi/glm only do

@@ -122,6 +122,12 @@ function baseModelId(model) {
   return String(model || "").replace(/\([^()]+\)\s*$/, "").trim();
 }
 
+function isSystemOneModel(model) {
+  // Registry is keyed by alias ("oc", not "opencode"): alias first, raw id second.
+  return (getModelTargetFormat(PROVIDER_ID_TO_ALIAS.opencode, baseModelId(model))
+    ?? getModelTargetFormat("opencode", baseModelId(model))) === "systemone";
+}
+
 function isResponsesModel(model) {
   return getModelTargetFormat(PROVIDER_ID_TO_ALIAS.opencode, baseModelId(model)) === FORMATS.OPENAI_RESPONSES;
 }
@@ -352,6 +358,7 @@ export class OpenCodeExecutor extends BaseExecutor {
 
   buildUrl(model) {
     const base = this.config.baseUrl;
+    if (isSystemOneModel(model)) return `${base}/zen/v1/systemone`;
     if (getModelTargetFormat(PROVIDER_ID_TO_ALIAS[this.provider], model) === FORMATS.CLAUDE) return `${base}/zen/v1/messages`;
     return isResponsesModel(model)
       ? `${base}/zen/v1/responses`
