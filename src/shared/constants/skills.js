@@ -74,6 +74,13 @@ export const SKILLS = [
     endpoint: "/v1/systemone",
     icon: "psychology",
   },
+  {
+    id: "afrouter-video",
+    name: "Video Generation",
+    description: "Text-to-video / image-to-video via xAI Grok Imagine (async job flow).",
+    endpoint: "/v1/videos/generations",
+    icon: "movie",
+  },
 ];
 
 export function getSkillRawUrl(id) {
