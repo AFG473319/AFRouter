@@ -32,7 +32,9 @@ export default {
     // POST /zen/v1/systemone with {model, state, questions} and returns typed
     // {answers} — there is no chat/completions or responses shape for it, so
     // chat requests are rejected with a clear 400 (see chatCore guard).
-    { id: "jev-1.13", name: "Jev 1.13", targetFormat: "systemone" },
+    // Only the free id lives here: this provider is noAuth (Bearer public),
+    // and the paid jev-1.13 needs a Zen API key with balance, so advertising
+    // it under "OpenCode Free" would only produce auth/billing failures.
     { id: "jev-1.13-free", name: "Jev 1.13 Free", targetFormat: "systemone" },
   ],
   modelsFetcher: { url: "https://opencode.ai/zen/v1/models", type: "opencode-free" },

@@ -1,3 +1,22 @@
+# v0.5.83 (2026-09-20)
+
+## Features
+- **Jev System One**: TypeSafe `jev-1.13-free` joins OpenCode Free as a decisions-only model (`targetFormat: systemone`, served upstream at `POST /zen/v1/systemone`). New gateway endpoint `POST /v1/systemone` forwards `{model, state, questions}` with the connection's credentials and returns typed `{answers}`; chat requests to Jev fail fast with a 400 pointing at it. The dashboard Test button sends a minimal `noul` decision probe and expects typed answers instead of chat choices. Only the free id is advertised — paid `jev-1.13` needs a Zen API key and is left out of the noAuth provider.
+- **Models**: `deepseek-v4.*` accepts low..max effort; flag `thinkingEffortSupported` and vision.
+- **Providers**: add DeepSeek-V4.1-Flash to CodeBuddy intl and Ollama Cloud; scope the synced model catalog to gateways.
+- **i18n**: Persian (fa) translation integration.
+- **OpenCode Go**: dashboard notice now quotes the current $10/mo subscription price.
+
+## Fixes
+- **Dev server**: remove a duplicated `getCommandCodeUsage` import (and duplicate handler key) in `open-sse/services/usage.js` that broke compilation with a 500 on every page.
+- **CommandCode**: retry on transient stream errors without emitting fake stop chunks; preserve images and `reasoning_effort` on `/alpha/generate`.
+- **Kiro**: preserve underscores in tool names and restore sanitized names in responses; neutral placeholder for tool-result-only user turns; keep tool-result images through translation.
+- **Antigravity**: scope cached thought signatures to the model family; sanitize the Hermes system identity; strip the Claude Code billing header from system prompts.
+- **Zed**: harden the OAuth lifecycle and live-model support; lower display priority in the OAuth list.
+- **Codex**: route bare `codex-auto-review` to the Codex provider (#4135).
+- **DeepSeek**: V4.1-Flash ids carry vision; improve credit-balance display.
+- **Stream**: report aborts after HTTP 200 in-band instead of closing silently.
+
 # v0.5.82 (2026-09-19)
 
 ## Features

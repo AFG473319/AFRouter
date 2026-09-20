@@ -88,7 +88,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     trackPendingRequest(model, provider, connectionId, false, true);
     return createErrorResult(
       HTTP_STATUS.BAD_REQUEST,
-      `Model ${provider}/${model} is a decisions-only System One model (TypeSafe Jev): it answers typed questions via POST /zen/v1/systemone with {model, state, questions} and cannot generate chat text. Use jev-1.13 (paid) or jev-1.13-free against the SystemOne endpoint instead of /v1/chat/completions.`
+      `Model ${provider}/${model} is a decisions-only System One model (TypeSafe Jev): it answers typed questions with {model, state, questions} and cannot generate chat text. Call POST /v1/systemone on this gateway (same auth) instead of /v1/chat/completions. Upstream docs: POST https://opencode.ai/zen/v1/systemone.`
     );
   }
   // Multi-endpoint providers: pick transport matching sourceFormat → zero translation.

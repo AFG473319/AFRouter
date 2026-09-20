@@ -319,6 +319,13 @@ export class OpenCodeExecutor extends BaseExecutor {
   }
 
   transformRequest(model, body, stream, credentials) {
+    // SystemOne bodies ({model, state, questions}) are not chat payloads:
+    // never inject chat fingerprint tools or force stream on them.
+    const sysModel = model || body?.model;
+    if (sysModel && isSystemOneModel(sysModel)) {
+      if (body && typeof body === "object" && model && !body.model) body.model = model;
+      return body;
+    }
     if (body && typeof body === "object" && model && !body.model) body.model = model;
     if (body && typeof body === "object") {
       // Upstream rejects non-streaming free-tier requests with 403 even when

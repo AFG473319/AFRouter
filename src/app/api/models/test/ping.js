@@ -3,6 +3,56 @@ import { resolveProviderId } from "@/shared/constants/providers.js";
 import { unwrapClineEnvelope } from "open-sse/shared/clineEnvelope.js";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { getModelTargetFormat } from "open-sse/config/providerModels.js";
+
+// Jev (TypeSafe System One) never generates text: it answers typed questions
+// via POST /zen/v1/systemone with {model, state, questions} and returns typed
+// {answers}. A chat-completions probe would always fail for these models, so
+// the dashboard test sends a minimal noul decision probe instead.
+const SYSTEMONE_PROBE = {
+  state: "connectivity check",
+  questions: {
+    ping: { type: "noul", instructions: "Is this a connectivity check?" },
+  },
+};
+
+/**
+ * True when a "provider/model" ref points at a decisions-only System One model.
+ * Exported for unit tests.
+ */
+export function isSystemOneModelRef(model) {
+  const raw = String(model || "");
+  const slash = raw.indexOf("/");
+  if (slash < 0) return false;
+  const alias = raw.slice(0, slash);
+  const id = raw.slice(slash + 1).replace(/\([^()]+\)\s*$/, "").trim();
+  if (!alias || !id) return false;
+  try {
+    return (
+      getModelTargetFormat(alias, id) === "systemone" ||
+      getModelTargetFormat(alias.toLowerCase(), id) === "systemone"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate a SystemOne probe response. Exported for unit tests.
+ * Success = HTTP 200 with at least one typed answer (noul number 0..1,
+ * choice string, or score number) under `answers`.
+ */
+export function validateSystemOneProbe(parsed) {
+  const answers = parsed?.answers;
+  if (!answers || typeof answers !== "object" || Array.isArray(answers)) return false;
+  return Object.values(answers).some((a) => {
+    if (!a || typeof a !== "object") return false;
+    if (typeof a.noul === "number" && a.noul >= 0 && a.noul <= 1) return true;
+    if (typeof a.choice === "string" && a.choice.length > 0) return true;
+    if (typeof a.score === "number" && Number.isFinite(a.score)) return true;
+    return false;
+  });
+}
 
 const CLI_TOKEN_SALT = "afr-cli-auth";
 
@@ -55,6 +105,37 @@ async function getInternalHeaders() {
 export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
   const headers = await getInternalHeaders();
   const start = Date.now();
+
+  // Decisions-only System One models (Jev) have no chat shape: probe the
+  // SystemOne endpoint and expect typed {answers}, not chat {choices}.
+  if (isSystemOneModelRef(model)) {
+    const [alias, ...rest] = String(model).split("/");
+    const upstreamId = rest.join("/").replace(/\([^()]+\)\s*$/, "").trim();
+    const res = await fetch(`${baseUrl}/api/v1/systemone`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model, state: SYSTEMONE_PROBE.state, questions: SYSTEMONE_PROBE.questions }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const latencyMs = Date.now() - start;
+    const rawText = await res.text().catch(() => "");
+    let parsed = null;
+    try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
+
+    if (!res.ok) {
+      const detail = parsed?.error?.message || parsed?.msg || parsed?.message || parsed?.error || rawText;
+      return { ok: false, latencyMs, error: `HTTP ${res.status}${detail ? `: ${String(detail).slice(0, 240)}` : ""}`, status: res.status };
+    }
+    if (!validateSystemOneProbe(parsed)) {
+      return {
+        ok: false,
+        latencyMs,
+        status: res.status,
+        error: `SystemOne probe for ${alias}/${upstreamId} returned no typed answers`,
+      };
+    }
+    return { ok: true, latencyMs, error: null, status: res.status, note: "systemone decision probe" };
+  }
 
   if (kind === "embedding") {
     const res = await fetch(`${baseUrl}/api/v1/embeddings`, {

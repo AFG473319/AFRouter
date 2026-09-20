@@ -118,3 +118,8 @@ AGENTS.md
 audit-tarball.mjs
 prs*.txt
 prs_raw.json
+
+# CLI gateway bundle build output + runtime junk (never commit)
+cli/app/
+.freebuff/
+
