@@ -55,7 +55,7 @@ curl -X POST $BASE/v1/messages \
   -H "Authorization: Bearer $AFROUTER_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
-  -d '{"model":"cc/claude-opus-4-7","max_tokens":1024,"messages":[{"role":"user","content":"Hi"}]}'
+  -d '{"model":"cc/claude-opus-5","max_tokens":1024,"messages":[{"role":"user","content":"Hi"}]}'
 ```
 
 ## Response shape
@@ -71,7 +71,7 @@ Streaming (`stream:true`) emits SSE: `data: {choices:[{delta:{content:"..."}}]}\
 
 Anthropic (`/v1/messages`):
 ```json
-{ "id": "msg_...", "type": "message", "role": "assistant", "model": "cc/claude-opus-4-7",
+{ "id": "msg_...", "type": "message", "role": "assistant", "model": "cc/claude-opus-5",
   "content": [{ "type": "text", "text": "Hello!" }],
   "stop_reason": "end_turn", "usage": { "input_tokens": 8, "output_tokens": 2 } }
 ```

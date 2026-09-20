@@ -19,7 +19,7 @@ curl $BASE/v1/models/web | jq '.data[] | select(.kind=="webFetch") | .id'
 curl "$BASE/v1/models/info?id=firecrawl/fetch"
 ```
 
-IDs end in `/fetch` (e.g. `firecrawl/fetch`, `jina/fetch`). `fetch-combo` chains providers with auto-fallback.
+IDs end in `/fetch` (e.g. `firecrawl/fetch`, `jina-reader/fetch`). `fetch-combo` chains providers with auto-fallback.
 
 ## Endpoint
 

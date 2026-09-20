@@ -50,6 +50,8 @@ curl -s "$BASE/v1/models/image-to-text" -H "Authorization: Bearer $AFROUTER_KEY"
 
 Use `data[].id` as the `model` field in requests. Combos appear with `owned_by:"combo"`.
 
+The catalog lists providers reachable through saved connections. Built-in no-auth providers (for example `opencode`, whose System One model is `oc/jev-1.13-free`) have no connection, so they are absent from this list and must be called by their exact id.
+
 Response shape:
 ```json
 { "object": "list", "data": [

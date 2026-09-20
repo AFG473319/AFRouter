@@ -15,15 +15,9 @@ Jev is a decisions-only model: it evaluates typed **questions** against a **stat
 
 ## Discover
 
-System One models come from the free `opencode` provider and appear in the default catalog (BETA — likely to move behind `/v1/models/systemone`):
+The model id is fixed: **`oc/jev-1.13-free`**. `oc` is the alias of the `opencode` provider, so `opencode/jev-1.13-free` is the same model. It runs on AFRouter's no-auth OpenCode provider, so it needs no OpenCode account and no credits.
 
-```bash
-curl -s "$BASE/v1/models" -H "Authorization: Bearer $AFROUTER_KEY" | jq '.data[] | select(.id | test("jev")) | .id'
-```
-
-`oc/jev-1.13-free` is the routable id (`oc` is the alias of `opencode`, so `opencode/jev-1.13-free` is the same model). It runs on AFRouter's no-auth OpenCode provider, so it needs no OpenCode account and no credits.
-
-The upstream catalog also lists `opencode/jev-1.13`, Zen's paid id. AFRouter answers it with `400 Model opencode/jev-1.13 is not a System One model` because only the free id is registered, and a funded Zen balance does not change that: `opencode` is a no-auth provider that always signs with `Bearer public`, so a Zen key has no field to go in and no billing path.
+Call that id directly. `GET /v1/models` groups by saved connections, and `opencode` is a no-auth provider with no connection, so the catalog omits it whenever the instance has any other provider connected.
 
 `/v1/models/info` reports `endpoint: /v1/chat/completions` for Jev because it defaults to the LLM kind. Jev's real endpoint is `/v1/systemone`, as shown below.
 
@@ -96,9 +90,8 @@ console.log(answers.is_urgent.noul);  // 0..1 probability of yes
 
 | Provider | `model` format | Notes |
 |---|---|---|
-| `opencode` (`oc`) | `jev-1.13-free` | Free, no-auth, decided by the AFRouter gateway — no OpenCode account needed |
-| `opencode` (`oc`) | `jev-1.13` | Not routed; see Discover above |
-| `opencode-go` (`ocg`) | — | Carries no System One model; Go's model list has no Jev |
+| `opencode` (`oc`) | `jev-1.13-free` | Free, no-auth, served by the AFRouter gateway — no OpenCode account needed |
+| `opencode-go` (`ocg`) | — | Carries no System One model |
 
 Jev ids route to `https://opencode.ai/zen/v1/systemone`; the request body is passed through untouched (no chat translation).
 
