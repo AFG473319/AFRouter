@@ -69,7 +69,10 @@ async function run(action, pos, opts, ctx) {
         body = { baseUrl: endpoint, apiKey, models: single };
         if (tool === "opencode") {
           body.activeModel = single[0];
-          body.subagentModel = opts["subagent-model"] || opts.subagentModel || single[0];
+          // Blank subagent = let OpenCode resolve it; only an explicit
+          // --subagent-model pins one. --format forces the V1/V2 config shape.
+          body.subagentModel = opts["subagent-model"] || opts.subagentModel || "";
+          if (opts.format) body.format = opts.format;
         }
       }
       const r = await api.applyCliToolSettings(tool, body);

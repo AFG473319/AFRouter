@@ -1,0 +1,229 @@
+name: Beta — branch build, test, smoke
+
+# Remote beta workflow for AI-generated changes.
+# Flow: push feature/beta branch (or open a PR) -> install/cache -> core tests
+# -> full suite (advisory, known-fails aware) -> webpack production build ->
+# ephemeral smoke test on port 20128 -> pass/fail report.
+#
+# Explicitly NOT here: npm publish, releases, auto-merge, version bumps.
+# Release paths (tags -> docker-publish.yml) are untouched.
+
+on:
+  push:
+    branches-ignore: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  beta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22 (matches Dockerfile node:22-alpine)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ensure npm cache dir exists
+        run: mkdir -p ~/.npm
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-root-${{ hashFiles('package-lock.json') }}-tests-${{ hashFiles('tests/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-root-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Install test deps (tests/ is an independent package)
+        run: npm ci --no-audit --no-fund
+        working-directory: tests
+
+      # ---- Gating tests: small, fast, verified green on a plain checkout ----
+      - name: Core tests (gate)
+        run: npx vitest run unit/standalone-assets.test.js unit/custom-server-peer-headers.test.js unit/capabilities.test.js unit/db-driver-chain.test.js
+        working-directory: tests
+
+      # ---- Full suite: advisory signal, tolerant of catalogued known-fails ----
+      # Live/credential-dependent files are excluded outright; remaining
+      # failures are diffed against tests/__baseline__/known-fails.txt so only
+      # NEW failures are regressions. Advisory (continue-on-error) because the
+      # baseline drifts over time — the uploaded JSON shows the full picture.
+      - name: Full test suite (advisory)
+        id: fullsuite
+        continue-on-error: true
+        run: npx vitest run --reporter=json --outputFile="$RUNNER_TEMP/vitest-results.json" --exclude='**/translator/real/**' --exclude='**/embeddings.cloud.test.js' --exclude='**/xai-oauth-service.test.js' --exclude='**/mimo-free.live.test.js'
+        working-directory: tests
+
+      - name: Check for regressions vs known-fails baseline (advisory)
+        if: always()
+        continue-on-error: true
+        run: node __baseline__/verify-no-regression.mjs "$RUNNER_TEMP/vitest-results.json"
+        working-directory: tests
+
+      - name: Summarize full suite counts
+        if: always()
+        run: |
+          node -e "try{const r=require(process.env.RUNNER_TEMP+'/vitest-results.json');console.log('### Full suite '+r.numPassedTests+' passed, '+r.numFailedTests+' failed, '+r.numTotalTests+' total')}catch(e){console.log('### Full suite - no results file, suite did not run')}" >> "$GITHUB_STEP_SUMMARY"
+        working-directory: tests
+
+      - name: Upload full test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-results-${{ github.sha }}
+          path: ${{ runner.temp }}/vitest-results.json
+          retention-days: 7
+
+      # ---- Production build: webpack is the required path (see probe job) ----
+      - name: Production build (webpack)
+        id: build
+        run: |
+          START=$(date +%s)
+          npm run build
+          END=$(date +%s)
+          echo "BUILD_SECONDS=$((END - START))" >> "$GITHUB_ENV"
+          echo "### Production build (webpack): $((END - START))s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify standalone layout
+        run: |
+          test -f .next/standalone/server.js || { echo "missing .next/standalone/server.js"; exit 1; }
+          test -f .next/standalone/custom-server.js || { echo "missing .next/standalone/custom-server.js (request sanitizer)"; exit 1; }
+          echo "standalone layout OK" >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- Guard: beta must never produce anything npm could install ----
+      # The root package is private:true (npm publish refuses it), the CLI
+      # package is never packed here, and no tarball may exist. If any of
+      # these checks fail, the job fails loudly instead of shipping a box
+      # someone could mistake for a release.
+      - name: Guard — nothing publishable may exist
+        run: |
+          test "$(npm pkg get private)" = "true" || { echo "root package is not private — refusing to continue"; exit 1; }
+          if compgen -G "*.tgz" > /dev/null || compgen -G "cli/*.tgz" > /dev/null; then
+            echo "found a packed tarball — beta must never pack; refusing to continue"; exit 1
+          fi
+          echo "guard OK: private root, no tarballs, no pack step in this workflow"
+
+      # ---- Ephemeral smoke test: built server on :20128, health only ----
+      # GET /api/health returns {ok:true} with no auth and no external calls
+      # (chosen over /api/version, which does a live npm lookup with timeout).
+      # Ephemeral DATA_DIR, no secrets/credentials. Server is killed afterwards;
+      # nothing public or permanent is created.
+      - name: Smoke test — start built server, poll /api/health
+        run: |
+          export DATA_DIR="$RUNNER_TEMP/afrouter-data"
+          mkdir -p "$DATA_DIR"
+          PORT=20128 node custom-server.js --port 20128 > "$RUNNER_TEMP/smoke.log" 2>&1 &
+          SERVER_PID=$!
+          OK=0
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS http://127.0.0.1:20128/api/health 2>/dev/null || true)
+            if [ "$BODY" = '{"ok":true}' ]; then OK=1; break; fi
+            sleep 2
+          done
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          if [ "$OK" = "1" ]; then
+            echo "smoke OK: /api/health returned {\"ok\":true} on port 20128" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "smoke FAILED — server log:"; tail -n 50 "$RUNNER_TEMP/smoke.log"
+            exit 1
+          fi
+
+      # ---- Download box: only the smoke-tested build is saved ----
+      # Plain folder of server files, NOT an npm package: no tarball, no
+      # registry name, nothing `npm install <name>` could ever resolve to.
+      # Runs after the smoke test, so a broken build never becomes a box.
+      - name: Create beta download box
+        run: |
+          BOX_MARKER=".next/standalone/BETA-DO-NOT-PUBLISH.txt"
+          {
+            echo "AFRouter UNSTABLE beta build — NOT a release, NOT an npm package."
+            echo "commit: ${{ github.sha }}"
+            echo "built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo ""
+            echo "You CANNOT install this with npm. 'npm install afrouter' always"
+            echo "fetches the official stable release from the npm registry;"
+            echo "beta builds are never published there, so a mix-up is impossible."
+            echo ""
+            echo "To test by hand: unzip, then run 'node custom-server.js' with"
+            echo "PORT=20128 in the environment (PowerShell: \$env:PORT=20128),"
+            echo "and open http://localhost:20128 (health: /api/health)."
+          } > "$BOX_MARKER"
+          echo "download box ready" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload beta download box
+        uses: actions/upload-artifact@v4
+        with:
+          name: afrouter-beta-UNSTABLE-${{ github.sha }}
+          path: .next/standalone
+          # The production build lives in the HIDDEN .next/ directory, which
+          # upload-artifact skips by default. Without this the box contains
+          # server.js but no build output and cannot boot.
+          include-hidden-files: true
+          retention-days: 5
+
+      - name: Report timings
+        if: always()
+        run: |
+          echo "### Beta timings" >> "$GITHUB_STEP_SUMMARY"
+          echo "- webpack production build: ${BUILD_SECONDS:-unknown}s" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---- Turbopack probe: experimental timing comparison, NEVER blocking ----
+  # next.config.mjs already carries a turbopack.root section, but `npm run build`
+  # pins `--webpack` (incl. a webpack-only resolve.fallback + the `open`
+  # import.meta.url externalization note). This job measures `next build
+  # --turbopack` on the same ubuntu-latest runner for comparison. If it fails,
+  # webpack stays the production path and the failure explains why.
+  turbopack-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ensure npm cache dir exists
+        run: mkdir -p ~/.npm
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-root-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-root-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Turbopack production build (experimental)
+        run: |
+          START=$(date +%s)
+          npx next build --turbopack
+          END=$(date +%s)
+          echo "### Turbopack probe build: $((END - START))s" >> "$GITHUB_STEP_SUMMARY"
