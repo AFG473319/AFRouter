@@ -8,8 +8,17 @@
  * from the capability tables and written in OpenCode's ConfigProviderV1.Model
  * shape (limit/reasoning/tool_call/attachment/modalities).
  *
+ * Two further regressions are pinned here:
+ * - The subagent model is optional. An explicit empty value must remove
+ *   AFRouter's `explorer` override so OpenCode resolves the subagent model
+ *   itself, while an omitted value leaves an existing override untouched.
+ * - OpenCode 2 reads V1 files but uses a different native shape (providers /
+ *   agents / package / settings / capabilities). Apply must write whichever
+ *   shape applies and never leave both shapes on one provider.
+ *
  * os.homedir is redirected to a per-test temp dir; global.fetch is rejected so
- * spec resolution takes the deterministic static-registry path.
+ * spec resolution takes the deterministic static-registry path; `opencode
+ * --version` fails, so format detection falls back to config shape/default.
  */
 
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
@@ -76,8 +85,8 @@ function readConfigFile() {
   return JSON.parse(fs.readFileSync(configPath(), "utf-8"));
 }
 
-function providerOf(config) {
-  return config.provider?.["afrouter"];
+function providerOf(config, mapKey = "provider") {
+  return config[mapKey]?.["afrouter"];
 }
 
 function post(body) {
@@ -246,5 +255,224 @@ describe("PATCH/DELETE /api/cli-tools/opencode-settings", () => {
     expect(cfg.model).toBeUndefined();
     expect(cfg.agent).toBeUndefined();
     expect(cfg.provider.anthropic).toEqual({});
+  });
+});
+
+describe("POST /api/cli-tools/opencode-settings — OpenCode 2 config shape", () => {
+  it("writes the native V2 shape when the config already uses providers/agents", async () => {
+    writeFixture({ $schema: "https://opencode.ai/config.json", providers: {} });
+    const res = await post({
+      baseUrl: "http://localhost:20128",
+      apiKey: "sk_x",
+      models: ["cl/z-ai/glm-5.3-flash"],
+      activeModel: "cl/z-ai/glm-5.3-flash",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.format).toBe("v2");
+    expect(res.body.formatSource).toBe("config");
+
+    const cfg = readConfigFile();
+    const provider = providerOf(cfg, "providers");
+    expect(provider.package).toBe("aisdk:@ai-sdk/openai-compatible");
+    expect(provider.settings).toEqual({ baseURL: "http://localhost:20128/v1", apiKey: "sk_x" });
+    // The V1 spelling must not survive next to the V2 one.
+    expect(cfg.provider).toBeUndefined();
+    expect(provider.npm).toBeUndefined();
+    expect(provider.options).toBeUndefined();
+
+    const entry = provider.models["cl/z-ai/glm-5.3-flash"];
+    expect(entry.limit).toEqual({ context: 200000, output: 128000 });
+    expect(entry.capabilities).toEqual({ tools: true, input: ["text"], output: ["text"] });
+    // V2 retired these V1 model fields — writing them only earns a warning.
+    expect(entry.modalities).toBeUndefined();
+    expect(entry.tool_call).toBeUndefined();
+    expect(entry.attachment).toBeUndefined();
+    expect(entry.reasoning).toBeUndefined();
+
+    expect(cfg.model).toBe("afrouter/cl/z-ai/glm-5.3-flash");
+  });
+
+  it("advertises V2 vision/pdf as capabilities.input", async () => {
+    writeFixture({ providers: {} });
+    await post({ baseUrl: "http://localhost:20128/v1", models: ["cl/vision-model"] });
+    const entry = providerOf(readConfigFile(), "providers").models["cl/vision-model"];
+    expect(entry.capabilities).toEqual({ tools: true, input: ["text", "image", "pdf"], output: ["text"] });
+  });
+
+  it("migrates a V1 config to V2 while keeping other providers and the subagent", async () => {
+    writeFixture({
+      provider: {
+        afrouter: {
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "http://old:20128/v1", apiKey: "sk_old" },
+          models: { "cl/z-ai/glm-5.3-flash": { name: "Keep me" } },
+        },
+        anthropic: { options: { apiKey: "a" } },
+      },
+      agent: { explorer: { model: "afrouter/cl/z-ai/glm-5.3-flash", mode: "subagent" } },
+    });
+    const res = await post({
+      baseUrl: "http://localhost:20128",
+      apiKey: "sk_x",
+      models: ["cl/z-ai/glm-5.3-flash"],
+      subagentModel: "cl/vision-model",
+      format: "v2",
+    });
+    expect(res.body.format).toBe("v2");
+    expect(res.body.formatSource).toBe("manual");
+
+    const cfg = readConfigFile();
+    expect(cfg.provider).toEqual({ anthropic: { options: { apiKey: "a" } } });
+    expect(providerOf(cfg, "providers").package).toBe("aisdk:@ai-sdk/openai-compatible");
+    expect(providerOf(cfg, "providers").settings.baseURL).toBe("http://localhost:20128/v1");
+    expect(providerOf(cfg, "providers").models["cl/z-ai/glm-5.3-flash"].name).toBe("Keep me");
+    expect(cfg.agent).toBeUndefined();
+    expect(cfg.agents.explorer.model).toBe("afrouter/cl/vision-model");
+    expect(cfg.agents.explorer.mode).toBe("subagent");
+  });
+
+  it("converts a V2 config back to V1 without losing untouched models", async () => {
+    writeFixture({
+      providers: {
+        afrouter: {
+          package: "aisdk:@ai-sdk/openai-compatible",
+          settings: { baseURL: "http://old:20128/v1", apiKey: "sk_old" },
+          models: {
+            "cl/vision-model": {
+              name: "v",
+              limit: { context: 1, output: 1 },
+              capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+            },
+            "legacy/kept": {
+              name: "Kept",
+              limit: { context: 5, output: 5 },
+              capabilities: { tools: false, input: ["text"], output: ["text"] },
+            },
+          },
+        },
+      },
+      agents: { explorer: { model: "afrouter/cl/vision-model", mode: "subagent" } },
+    });
+    await post({ baseUrl: "http://localhost:20128", models: ["cl/vision-model"], format: "v1" });
+
+    const cfg = readConfigFile();
+    expect(cfg.providers).toBeUndefined();
+    expect(providerOf(cfg).npm).toBe("@ai-sdk/openai-compatible");
+    expect(providerOf(cfg).options.baseURL).toBe("http://localhost:20128/v1");
+    expect(cfg.agents).toBeUndefined();
+    expect(cfg.agent.explorer.model).toBe("afrouter/cl/vision-model");
+
+    // A model the user did not re-select keeps its values, converted losslessly.
+    const kept = providerOf(cfg).models["legacy/kept"];
+    expect(kept.limit).toEqual({ context: 5, output: 5 });
+    expect(kept.capabilities).toBeUndefined();
+    expect(kept.modalities).toEqual({ input: ["text"], output: ["text"] });
+    expect(kept.tool_call).toBe(false);
+
+    const refreshed = providerOf(cfg).models["cl/vision-model"];
+    expect(refreshed.tool_call).toBe(true);
+    expect(refreshed.attachment).toBe(true);
+    expect(refreshed.modalities.input).toEqual(["text", "image", "pdf"]);
+  });
+
+  it("GET reports the detected format so the card can default its selector", async () => {
+    writeFixture({ providers: {} });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(res.body.opencode.format).toBe("v2");
+    expect(res.body.opencode.formatSource).toBe("config");
+  });
+});
+
+describe("POST /api/cli-tools/opencode-settings — subagent override", () => {
+  it("writes no agent entry at all when the subagent model is left blank", async () => {
+    writeFixture({ provider: {} });
+    const res = await post({ baseUrl: "http://localhost:20128", models: ["cl/z-ai/glm-5.3-flash"] });
+    expect(res.status).toBe(200);
+    const cfg = readConfigFile();
+    expect(cfg.agent).toBeUndefined();
+    expect(cfg.agents).toBeUndefined();
+  });
+
+  it("removes a stale AFRouter subagent when the field is cleared", async () => {
+    writeFixture({
+      provider: {},
+      agent: {
+        explorer: {
+          description: "Fast explorer subagent for codebase exploration",
+          mode: "subagent",
+          model: "afrouter/cl/z-ai/glm-5.3-flash",
+        },
+      },
+    });
+    await post({ baseUrl: "http://localhost:20128", models: ["cl/z-ai/glm-5.3-flash"], subagentModel: "   " });
+    expect(readConfigFile().agent).toBeUndefined();
+  });
+
+  it("leaves an existing override alone when the field is omitted entirely", async () => {
+    writeFixture({
+      provider: {},
+      agent: { explorer: { model: "afrouter/cl/vision-model", mode: "subagent" } },
+    });
+    await post({ baseUrl: "http://localhost:20128", models: ["cl/z-ai/glm-5.3-flash"] });
+    expect(readConfigFile().agent.explorer.model).toBe("afrouter/cl/vision-model");
+  });
+
+  it("never touches a user-owned explorer agent", async () => {
+    const mine = { prompt: "mine", model: "anthropic/claude-sonnet-4-5" };
+    writeFixture({ provider: {}, agent: { explorer: { ...mine } } });
+    await post({ baseUrl: "http://localhost:20128", models: ["cl/z-ai/glm-5.3-flash"] });
+    expect(readConfigFile().agent.explorer).toEqual(mine);
+  });
+
+  it("keeps other agents when clearing ours", async () => {
+    writeFixture({
+      provider: {},
+      agent: {
+        explorer: { model: "afrouter/cl/z-ai/glm-5.3-flash", mode: "subagent" },
+        reviewer: { model: "anthropic/claude-sonnet-4-5", mode: "subagent" },
+      },
+    });
+    await post({ baseUrl: "http://localhost:20128", models: ["cl/z-ai/glm-5.3-flash"], subagentModel: "" });
+    const cfg = readConfigFile();
+    expect(cfg.agent.explorer).toBeUndefined();
+    expect(cfg.agent.reviewer.model).toBe("anthropic/claude-sonnet-4-5");
+  });
+
+  it("DELETE clears the V2 subagent as well as the V2 provider", async () => {
+    writeFixture({
+      providers: { afrouter: { models: { a: {} } } },
+      agents: { explorer: { model: "afrouter/a", mode: "subagent" } },
+    });
+    const res = await del();
+    expect(res.status).toBe(200);
+    const cfg = readConfigFile();
+    expect(cfg.providers).toBeUndefined();
+    expect(cfg.agents).toBeUndefined();
+  });
+});
+
+describe("format resolution", () => {
+  it("prefers an explicit choice, then the config shape, then the CLI version", async () => {
+    const { resolveFormat } = await import("../../src/lib/opencodeConfig.js");
+    expect(resolveFormat({ requested: "v2", config: { provider: {} }, version: "1.4.0" })).toEqual({ format: "v2", source: "manual" });
+    expect(resolveFormat({ config: { providers: {} }, version: "1.4.0" })).toEqual({ format: "v2", source: "config" });
+    expect(resolveFormat({ config: {}, version: "2.1.0" })).toEqual({ format: "v2", source: "version" });
+    expect(resolveFormat({ config: {}, version: "1.4.0" })).toEqual({ format: "v1", source: "version" });
+    expect(resolveFormat({ config: {}, version: null })).toEqual({ format: "v1", source: "default" });
+    // Both shapes present is ambiguous, so the version probe decides.
+    expect(resolveFormat({ config: { provider: {}, providers: {} }, version: "2.1.0" })).toEqual({
+      format: "v2",
+      source: "version",
+    });
+  });
+
+  it("parses the major version out of `opencode --version` output", async () => {
+    const { parseVersionMajor } = await import("../../src/lib/opencodeConfig.js");
+    expect(parseVersionMajor("2.1.0")).toBe(2);
+    expect(parseVersionMajor("opencode 0.4.7")).toBe(0);
+    expect(parseVersionMajor("1.0.0-beta.3")).toBe(1);
+    expect(parseVersionMajor("")).toBeNull();
+    expect(parseVersionMajor(null)).toBeNull();
   });
 });

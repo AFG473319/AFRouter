@@ -8,27 +8,28 @@ import { rememberEndpoint } from "./cliEndpointPresets";
 import ApiKeySelect from "./ApiKeySelect";
 import { matchKnownEndpoint } from "./cliEndpointMatch";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import {
+  DEFAULT_FORMAT,
+  FALLBACK_SPEC,
+  SUBAGENT_DESCRIPTION,
+  SUBAGENT_NAME,
+  V1_PACKAGE,
+  V2_PACKAGE,
+  agentMapKey,
+  buildModelEntry,
+  isFormat,
+  providerCredentialKey,
+  providerMapKey,
+} from "@/lib/opencodeConfig.js";
 
-// Mirror the server's model-entry shape (see opencode-settings route) so the
-// Manual Config preview shows the same limits/modalities the Apply writes.
-const buildModelEntry = (id) => {
+// The card has no live catalog, so the Manual Config preview resolves specs from
+// the static capability tables and falls back exactly like the route does.
+const resolveCaps = (id) => {
   const slash = id.indexOf("/");
   const provider = slash > 0 ? id.slice(0, slash) : null;
   const bare = slash > 0 ? id.slice(slash + 1) : id;
   const caps = getCapabilitiesForModel(provider, bare);
-  const input = ["text"];
-  if (caps.vision) input.push("image");
-  if (caps.pdf) input.push("pdf");
-  if (caps.audioInput) input.push("audio");
-  if (caps.videoInput) input.push("video");
-  return {
-    name: id,
-    limit: { context: Math.floor(caps.contextWindow), output: Math.floor(caps.maxOutput) },
-    reasoning: caps.reasoning === true,
-    tool_call: caps.tools !== false,
-    attachment: Boolean(caps.vision || caps.pdf || caps.audioInput || caps.videoInput),
-    modalities: { input, output: ["text"] },
-  };
+  return Number.isFinite(caps?.contextWindow) && Number.isFinite(caps?.maxOutput) ? caps : FALLBACK_SPEC;
 };
 
 export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
@@ -48,6 +49,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [selectedModels, setSelectedModels] = useState([]);
   const [activeModel, setActiveModel] = useState("");
+  const [formatChoice, setFormatChoice] = useState("auto");
   const selectedModelsRef = useRef([]);
 
   useEffect(() => {
@@ -80,10 +82,10 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
       setActiveModel(status.opencode.activeModel);
     }
 
-    // Parse subagent settings from agent.explorer if exists
-    if (status?.config?.agent?.explorer?.model?.startsWith("afrouter/")) {
-      setSubagentModel(status.config.agent.explorer.model.replace("afrouter/", ""));
-    }
+    // Empty means no AFRouter-owned subagent override is present — the same
+    // state the field shows when the user clears it. The server reports it for
+    // both the V1 (`agent`) and V2 (`agents`) shapes.
+    setSubagentModel(status?.opencode?.subagentModel || "");
   }, [status]);
 
   const fetchModelAliases = async () => {
@@ -111,6 +113,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
           models,
           activeModel: validActiveModel,
           subagentModel,
+          format: formatChoice,
         }),
       });
     } catch (error) {
@@ -118,13 +121,13 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
     }
   };
 
-  const currentBaseUrl = status?.config?.provider?.["afrouter"]?.options?.baseURL || "";
+  const currentBaseUrl = status?.opencode?.baseURL || "";
 
   const getConfigStatus = () => {
     if (!status?.installed) return null;
     if (!status.config) return "not_configured";
     if (!status.hasAFRouter) return "not_configured";
-    const url = status.config?.provider?.["afrouter"]?.options?.baseURL || "";
+    const url = status?.opencode?.baseURL || "";
     return matchKnownEndpoint(url, { tunnelPublicUrl, tailscaleUrl }) ? "configured" : "other";
   };
 
@@ -136,6 +139,10 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
   };
 
   const getDisplayUrl = () => customBaseUrl || `${baseUrl}/v1`;
+
+  // Which shape Apply will write: the explicit choice, else whatever the server
+  // detected (config shape, then `opencode --version`), else the V1 default.
+  const effectiveFormat = isFormat(formatChoice) ? formatChoice : (status?.opencode?.format || DEFAULT_FORMAT);
 
   const checkStatus = async () => {
     setChecking(true);
@@ -166,7 +173,8 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
           apiKey: keyToUse,
           models: selectedModels,
           activeModel: activeModel === "" ? "" : (activeModel || selectedModels[0]),
-          subagentModel: subagentModel
+          subagentModel,
+          format: formatChoice,
         }),
       });
       const data = await res.json();
@@ -215,32 +223,39 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
 
     const modelsToShow = selectedModels.length > 0 ? selectedModels : ["provider/model-id"];
     const activeModelToShow = activeModel || selectedModels[0] || modelsToShow[0];
-    const effectiveSubagentModel = subagentModel || activeModelToShow;
 
     const modelsObj = {};
     modelsToShow.forEach(m => {
-      modelsObj[m] = buildModelEntry(m);
+      modelsObj[m] = buildModelEntry(m, resolveCaps(m), effectiveFormat);
     });
 
-    return [{
-      filename: "~/.config/opencode/opencode.json",
-      content: JSON.stringify({
-        provider: {
-          "afrouter": {
-            npm: "@ai-sdk/openai-compatible",
-            options: { baseURL: getEffectiveBaseUrl(), apiKey: keyToUse },
-            models: modelsObj,
-          },
+    const credential = { baseURL: getEffectiveBaseUrl(), apiKey: keyToUse };
+    const providerEntry = effectiveFormat === "v2"
+      ? { package: V2_PACKAGE, settings: credential, models: modelsObj }
+      : { npm: V1_PACKAGE, options: credential, models: modelsObj };
+
+    const config = {
+      [providerMapKey(effectiveFormat)]: { afrouter: providerEntry },
+      model: `afrouter/${activeModelToShow}`,
+    };
+
+    // An empty subagent leaves the model to OpenCode, so no agent override is
+    // written at all (we never pin the first selected model).
+    if (subagentModel.trim()) {
+      config[agentMapKey(effectiveFormat)] = {
+        [SUBAGENT_NAME]: {
+          description: SUBAGENT_DESCRIPTION,
+          mode: "subagent",
+          model: `afrouter/${subagentModel.trim()}`,
         },
-        model: `afrouter/${activeModelToShow}`,
-        agent: {
-          explorer: {
-            description: "Fast explorer subagent for codebase exploration",
-            mode: "subagent",
-            model: `afrouter/${effectiveSubagentModel}`
-          }
-        }
-      }, null, 2),
+      };
+    }
+
+    return [{
+      filename: effectiveFormat === "v2"
+        ? "~/.config/opencode/opencode.json  (OpenCode 2 — providers/agents)"
+        : "~/.config/opencode/opencode.json  (OpenCode 1 — provider/agent)",
+      content: JSON.stringify(config, null, 2),
     }];
   };
 
@@ -330,15 +345,34 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
                 </div>
 
                 {/* Current configured */}
-                {status?.config?.provider?.["afrouter"]?.options?.baseURL && (
+                {currentBaseUrl && (
                   <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
                     <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Current</span>
                     <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
                     <span className="min-w-0 truncate rounded bg-surface/40 px-2 py-2 text-xs text-text-muted sm:py-1.5">
-                      {status.config.provider["afrouter"].options.baseURL}
+                      {currentBaseUrl}
                     </span>
                   </div>
                 )}
+
+                {/* Config format — V1 vs the native V2 shape */}
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
+                  <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Config Format</span>
+                  <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
+                  <select
+                    aria-label="OpenCode config format"
+                    value={formatChoice}
+                    onChange={(e) => setFormatChoice(e.target.value)}
+                    className="w-full min-w-0 px-2 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
+                  >
+                    <option value="auto">Auto{status?.opencode?.version ? ` (OpenCode ${status.opencode.version})` : ""}</option>
+                    <option value="v1">OpenCode 1 — provider / agent</option>
+                    <option value="v2">OpenCode 2 — providers / agents</option>
+                  </select>
+                  <span className="text-[10px] text-text-muted sm:text-xs">
+                    Writing the <span className="text-primary">{effectiveFormat.toUpperCase()}</span> shape
+                  </span>
+                </div>
 
                 {/* API Key */}
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
@@ -435,7 +469,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
                     type="text"
                     value={subagentModel}
                     onChange={(e) => setSubagentModel(e.target.value)}
-                    placeholder={selectedModel || "provider/model-id (defaults to main model)"}
+                    placeholder="provider/model-id (empty = OpenCode decides)"
                     className="w-full min-w-0 px-2 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
                   />
                   <button
@@ -449,7 +483,7 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
                     <button
                       onClick={() => setSubagentModel("")}
                       className="p-1 text-text-muted hover:text-red-500 rounded transition-colors"
-                      title="Clear (will use main model)"
+                      title="Clear (OpenCode decides the subagent model)"
                     >
                       <span className="material-symbols-outlined text-[14px]">close</span>
                     </button>

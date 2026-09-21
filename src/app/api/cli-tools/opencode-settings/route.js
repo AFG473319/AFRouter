@@ -8,15 +8,32 @@ import path from "path";
 import os from "os";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
+import {
+  AFROUTER_PROVIDER_ID,
+  FALLBACK_SPEC,
+  SUBAGENT_NAME,
+  agentMapKey,
+  buildModelEntry,
+  buildProviderEntry,
+  buildSubagentEntry,
+  isOwnedSubagent,
+  otherFormat,
+  providerBaseUrl,
+  providerCredentialKey,
+  providerMapKey,
+  readAFRouterProvider,
+  readSubagentModel,
+  removeOwnedSubagent,
+  reshapeModelEntry,
+  resolveFormat,
+} from "@/lib/opencodeConfig.js";
 
 const execAsync = promisify(exec);
 
 const getConfigDir = () => path.join(os.homedir(), ".config", "opencode");
 const getConfigPath = () => path.join(getConfigDir(), "opencode.json");
 
-// Conservative fallback for ids resolvable from neither the live catalog nor the
-// static registry — flagged "unverified", never invented (mirrors ZCode/dsh).
-const FALLBACK_SPEC = { contextWindow: 200000, maxOutput: 64000, vision: false, pdf: false, audioInput: false, videoInput: false, reasoning: false, tools: true };
+const isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 // Self-fetch must target the port this instance actually listens on. The
 // request URL carries it; PORT is only a fallback because the Next server may
@@ -87,39 +104,18 @@ const resolveModelSpecs = async (ids, catalog) => {
   return { specs, unverified };
 };
 
-// OpenCode model-entry shape (ConfigProviderV1.Model): limits, reasoning,
-// tool_call and the per-modality input list all come from capabilities. The old
-// shape hardcoded ["text","image"] for every model, which lied about vision and
-// left context/output at OpenCode's 0 default (breaking compaction).
-const buildModelEntry = (id, caps) => {
-  const input = ["text"];
-  if (caps.vision) input.push("image");
-  if (caps.pdf) input.push("pdf");
-  if (caps.audioInput) input.push("audio");
-  if (caps.videoInput) input.push("video");
-  const attachment = Boolean(caps.vision || caps.pdf || caps.audioInput || caps.videoInput);
-  return {
-    name: id,
-    limit: {
-      context: Math.floor(caps.contextWindow),
-      output: Math.floor(caps.maxOutput),
-    },
-    reasoning: caps.reasoning === true,
-    tool_call: caps.tools !== false,
-    attachment,
-    modalities: { input, output: ["text"] },
-  };
+const npmPathEnv = () => {
+  const isWindows = os.platform() === "win32";
+  return isWindows
+    ? { ...process.env, PATH: `${process.env.APPDATA}\\npm;${process.env.PATH}` }
+    : process.env;
 };
 
 // Check if opencode CLI is installed (via which/where or config file exists)
 const checkOpenCodeInstalled = async () => {
   try {
-    const isWindows = os.platform() === "win32";
-    const command = isWindows ? "where opencode" : "which opencode";
-    const env = isWindows
-      ? { ...process.env, PATH: `${process.env.APPDATA}\\npm;${process.env.PATH}` }
-      : process.env;
-    await execAsync(command, { windowsHide: true, env });
+    const command = os.platform() === "win32" ? "where opencode" : "which opencode";
+    await execAsync(command, { windowsHide: true, env: npmPathEnv() });
     return true;
   } catch {
     try {
@@ -128,6 +124,17 @@ const checkOpenCodeInstalled = async () => {
     } catch {
       return false;
     }
+  }
+};
+
+// `opencode --version` — V2 reports a 2.x version, which is the only reliable
+// signal on a fresh install that has no config file to inspect yet.
+const readOpenCodeVersion = async () => {
+  try {
+    const { stdout } = await execAsync("opencode --version", { windowsHide: true, env: npmPathEnv() });
+    return stdout.trim().split(/\r?\n/)[0] || null;
+  } catch {
+    return null;
   }
 };
 
@@ -158,10 +165,7 @@ const readConfig = async () => {
   return result.data ?? null;
 };
 
-const hasAFRouterConfig = (config) => {
-  if (!config?.provider) return false;
-  return !!config.provider["afrouter"];
-};
+const hasAFRouterConfig = (config) => Boolean(readAFRouterProvider(config).entry);
 
 // Write the config via a temp file + atomic rename. OpenCode rewrites this file
 // on config changes, so a torn write would drop the user's whole provider tree.
@@ -183,6 +187,44 @@ const writeConfigAtomic = async (config) => {
   }
 };
 
+// Drop the `afrouter` entry from the shape we are NOT writing, then the map
+// itself when nothing else lives in it. Keeps one provider out of both shapes.
+const dropStaleProvider = (config, mapKey) => {
+  if (!isPlainObject(config[mapKey])) return;
+  delete config[mapKey][AFROUTER_PROVIDER_ID];
+  if (Object.keys(config[mapKey]).length === 0) delete config[mapKey];
+};
+
+/**
+ * Write, carry over, or clear AFRouter's subagent override in the requested
+ * shape.
+ *
+ * A blank model means "let OpenCode decide" — V1/V2 then inherit the session's
+ * model — so we remove our entry instead of pinning the first selected model.
+ * Following the Grok Build integration, an *omitted* field (headless callers
+ * that never knew about it) leaves an existing override untouched, while an
+ * explicit empty string clears it.
+ */
+const applySubagent = (config, format, subagentModel) => {
+  const mapKey = agentMapKey(format);
+  const otherKey = agentMapKey(otherFormat(format));
+  const explicit = typeof subagentModel === "string" ? subagentModel.trim() : undefined;
+
+  const existing = config[mapKey]?.[SUBAGENT_NAME] ?? config[otherKey]?.[SUBAGENT_NAME];
+  const carriedModel =
+    explicit === undefined && isOwnedSubagent(existing)
+      ? existing.model.slice(AFROUTER_PROVIDER_ID.length + 1)
+      : null;
+
+  // Ours may sit in the other shape; drop it before writing the new one.
+  for (const key of [mapKey, otherKey]) removeOwnedSubagent(config, key);
+
+  const model = explicit || carriedModel;
+  if (!model) return;
+  if (!isPlainObject(config[mapKey])) config[mapKey] = {};
+  config[mapKey][SUBAGENT_NAME] = buildSubagentEntry(model);
+};
+
 // GET - Check opencode CLI and read current settings
 export async function GET() {
   try {
@@ -197,7 +239,9 @@ export async function GET() {
     }
 
     const config = await readConfig();
-    const providerConfig = config?.provider?.["afrouter"];
+    const version = await readOpenCodeVersion();
+    const { format, source: formatSource } = resolveFormat({ config, version });
+    const providerConfig = readAFRouterProvider(config).entry;
     const modelMap = providerConfig?.models || {};
 
     return NextResponse.json({
@@ -205,11 +249,15 @@ export async function GET() {
       config,
       hasAFRouter: hasAFRouterConfig(config),
       configPath: getConfigPath(),
-        opencode: {
-          models: Object.keys(modelMap),
-          activeModel: config?.model?.startsWith("afrouter/") ? config.model.replace(/^afrouter\//, "") : null,
-          baseURL: providerConfig?.options?.baseURL || null,
-        },
+      opencode: {
+        models: Object.keys(modelMap),
+        activeModel: config?.model?.startsWith("afrouter/") ? config.model.replace(/^afrouter\//, "") : null,
+        baseURL: providerBaseUrl(providerConfig),
+        subagentModel: readSubagentModel(config),
+        version,
+        format,
+        formatSource,
+      },
     });
   } catch (error) {
     console.log("Error checking opencode settings:", error);
@@ -217,10 +265,11 @@ export async function GET() {
   }
 }
 
-// POST - Apply AFRouter as openai-compatible provider (multi-model support)
+// POST - Apply AFRouter as an openai-compatible provider (multi-model support)
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, model, models, activeModel, subagentModel } = await request.json();
+    const { baseUrl, apiKey, model, models, activeModel, subagentModel, format: requestedFormat } =
+      await request.json();
 
     // Accept either `model` (string, legacy) or `models` (array of strings)
     const modelsArray = Array.isArray(models) ? models.slice() : (typeof model === "string" ? [model] : []);
@@ -247,50 +296,60 @@ export async function POST(request) {
     }
     const config = existing.data || {};
 
+    // Which shape to write: an explicit choice from the card wins, then the
+    // config's own shape, then the installed CLI version (V2 uses the native
+    // shape; V1 is the default because V2 still reads it).
+    const version = await readOpenCodeVersion();
+    const { format, source: formatSource } = resolveFormat({ requested: requestedFormat, config, version });
+
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
     const keyToUse = apiKey || "sk_afrouter";
-    const effectiveSubagentModel = subagentModel || modelsArray[0];
 
-    // Ensure provider object
-    if (!config.provider) config.provider = {};
+    const mapKey = providerMapKey(format);
+    const staleMapKey = providerMapKey(otherFormat(format));
 
-    // Preserve any existing afrouter provider entry and its models
-    const existingProvider = config.provider["afrouter"] || { npm: "@ai-sdk/openai-compatible", options: {}, models: {} };
-
-    // Merge options (overwrite baseURL/apiKey)
-    existingProvider.options = {
-      ...existingProvider.options,
+    // Rebuild the provider in the target shape from whichever shape it is in
+    // now, so switching formats never leaves V1 and V2 members side by side.
+    const sourceProvider =
+      config[mapKey]?.[AFROUTER_PROVIDER_ID] || config[staleMapKey]?.[AFROUTER_PROVIDER_ID] || {};
+    const provider = buildProviderEntry(format, sourceProvider);
+    provider[providerCredentialKey(format)] = {
+      ...provider[providerCredentialKey(format)],
       baseURL: normalizedBaseUrl,
       apiKey: keyToUse,
     };
 
-    // Ensure models map exists
-    existingProvider.models = existingProvider.models || {};
+    // Convert models the user already had, then refresh the requested ones from
+    // resolved capability specs. `onlyIds` semantics: every requested id is
+    // refreshed so a re-Apply after a capability update propagates new limits.
+    // Entries the user hand-edited keep their display `name` when it differs
+    // from the id, but their machine-readable spec fields are always refreshed.
+    for (const id of Object.keys(provider.models)) {
+      provider.models[id] = reshapeModelEntry(provider.models[id], format);
+    }
 
-    // Resolve each requested model's specs from the live catalog, the static
-    // capability tables, or the conservative fallback. Unknown ids are still
-    // written (with fallback specs) so the user's selection is never dropped.
     const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
     const { specs, unverified } = await resolveModelSpecs(modelsArray, catalog);
 
-    // Add or update entries for all requested models. `onlyIds` semantics:
-    // every requested id is refreshed so a re-Apply after a capability update
-    // propagates the new limits. Entries the user hand-edited keep their `name`
-    // only when it differs from the id (preserve display names), but the
-    // machine-readable spec fields are always refreshed.
     for (const m of modelsArray) {
       if (!m || typeof m !== "string") continue;
       const caps = specs.get(m) || FALLBACK_SPEC;
-      const entry = buildModelEntry(m, caps);
-      const existingEntry = existingProvider.models[m];
-      if (existingEntry && typeof existingEntry === "object" && typeof existingEntry.name === "string" && existingEntry.name !== m) {
+      const entry = buildModelEntry(m, caps, format);
+      const existingEntry = provider.models[m];
+      if (
+        existingEntry &&
+        typeof existingEntry === "object" &&
+        typeof existingEntry.name === "string" &&
+        existingEntry.name !== m
+      ) {
         entry.name = existingEntry.name;
       }
-      existingProvider.models[m] = entry;
+      provider.models[m] = entry;
     }
 
-    // Save merged provider back
-    config.provider["afrouter"] = existingProvider;
+    if (!isPlainObject(config[mapKey])) config[mapKey] = {};
+    config[mapKey][AFROUTER_PROVIDER_ID] = provider;
+    dropStaleProvider(config, staleMapKey);
 
     // Set the active model: prefer explicit activeModel, else first of modelsArray
     // If activeModel is explicitly empty string, clear the model
@@ -303,13 +362,8 @@ export async function POST(request) {
       }
     }
 
-    // Add subagent configuration
-    if (!config.agent) config.agent = {};
-    config.agent.explorer = {
-      description: "Fast explorer subagent for codebase exploration",
-      mode: "subagent",
-      model: `afrouter/${effectiveSubagentModel}`,
-    };
+    // Add, carry over, or clear the subagent override.
+    applySubagent(config, format, subagentModel);
 
     await writeConfigAtomic(config);
 
@@ -317,6 +371,8 @@ export async function POST(request) {
       success: true,
       message: "OpenCode settings applied successfully!",
       configPath,
+      format,
+      formatSource,
       written: modelsArray,
       unverified,
     });
@@ -380,31 +436,40 @@ export async function DELETE(request) {
     }
     const config = existing.data;
 
-    // If specific model provided, remove just that model
-    if (modelToRemove && config.provider?.["afrouter"]?.models) {
-      delete config.provider["afrouter"].models[modelToRemove];
-      
-      // If no models left, remove the provider
-      if (Object.keys(config.provider["afrouter"].models).length === 0) {
-        delete config.provider["afrouter"];
-        if (config.model?.startsWith("afrouter/")) delete config.model;
-      } else if (config.model === `afrouter/${modelToRemove}`) {
-        // If removed model was active, switch to first remaining model
-        const remainingModels = Object.keys(config.provider["afrouter"].models);
-        config.model = `afrouter/${remainingModels[0]}`;
+    // The provider may live in either shape depending on the OpenCode version
+    // the user runs, so every mutation walks both maps.
+    const providerMapKeys = [providerMapKey("v2"), providerMapKey("v1")];
+
+    if (modelToRemove) {
+      // If specific model provided, remove just that model
+      for (const mapKey of providerMapKeys) {
+        const models = config[mapKey]?.[AFROUTER_PROVIDER_ID]?.models;
+        if (!isPlainObject(models) || !Object.prototype.hasOwnProperty.call(models, modelToRemove)) continue;
+        delete models[modelToRemove];
+        if (Object.keys(models).length === 0) {
+          delete config[mapKey][AFROUTER_PROVIDER_ID];
+        } else if (config.model === `afrouter/${modelToRemove}`) {
+          // If removed model was active, switch to first remaining model
+          config.model = `afrouter/${Object.keys(models)[0]}`;
+        }
       }
+      // The provider is gone entirely — drop the dangling active model too.
+      if (config.model === `afrouter/${modelToRemove}`) delete config.model;
     } else {
       // No specific model - remove entire afrouter provider
-      if (config.provider) delete config.provider["afrouter"];
+      for (const mapKey of providerMapKeys) {
+        if (isPlainObject(config[mapKey])) delete config[mapKey][AFROUTER_PROVIDER_ID];
+      }
       if (config.model?.startsWith("afrouter/")) delete config.model;
     }
 
-    // Remove subagent configuration
-    if (config.agent?.explorer?.model?.startsWith("afrouter/")) {
-      delete config.agent.explorer;
-      // Clean up empty agent object
-      if (Object.keys(config.agent).length === 0) delete config.agent;
+    // Clean up provider maps we emptied (but never a map holding other providers)
+    for (const mapKey of providerMapKeys) {
+      if (isPlainObject(config[mapKey]) && Object.keys(config[mapKey]).length === 0) delete config[mapKey];
     }
+
+    // Remove subagent configuration from either shape
+    for (const mapKey of [agentMapKey("v2"), agentMapKey("v1")]) removeOwnedSubagent(config, mapKey);
 
     await writeConfigAtomic(config);
 

@@ -475,9 +475,11 @@ async function openCodeQuickSetup(port) {
     if (!models.includes(next)) models.push(next);
   }
 
-  // Optional subagent model
-  let subagentModel = firstModel;
-  const wantSubagent = await confirm(`Set a different subagent model? (default: ${firstModel})`);
+  // Optional subagent model. Blank is the default: AFRouter then leaves the
+  // subagent unset so OpenCode resolves its model itself (it inherits the
+  // session's model), instead of pinning the first selected model.
+  let subagentModel = "";
+  const wantSubagent = await confirm("Set a subagent model? (no = OpenCode decides)");
   if (wantSubagent) {
     const picked = await selectModelFromList("Select Subagent Model", firstModel, { excludeCombos: true });
     if (picked) subagentModel = picked;
