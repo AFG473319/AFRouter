@@ -144,6 +144,13 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
   // detected (config shape, then `opencode --version`), else the V1 default.
   const effectiveFormat = isFormat(formatChoice) ? formatChoice : (status?.opencode?.format || DEFAULT_FORMAT);
 
+  // Why Auto resolved the way it did — the server already reports the winning
+  // source, so surface it instead of letting "Auto (…v2…)" + "Writing V1"
+  // look like a contradiction when an existing V1 config wins over the version.
+  const formatHint = isFormat(formatChoice)
+    ? "your choice"
+    : ({ manual: "your choice", config: "your existing config", version: "your OpenCode version", default: "default" }[status?.opencode?.formatSource] || null);
+
   const checkStatus = async () => {
     setChecking(true);
     try {
@@ -365,12 +372,12 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
                     onChange={(e) => setFormatChoice(e.target.value)}
                     className="w-full min-w-0 px-2 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5"
                   >
-                    <option value="auto">Auto{status?.opencode?.version ? ` (OpenCode ${status.opencode.version})` : ""}</option>
+                    <option value="auto">Auto{status?.opencode?.version ? ` (${status.opencode.version})` : ""}</option>
                     <option value="v1">OpenCode 1 — provider / agent</option>
                     <option value="v2">OpenCode 2 — providers / agents</option>
                   </select>
                   <span className="text-[10px] text-text-muted sm:text-xs">
-                    Writing the <span className="text-primary">{effectiveFormat.toUpperCase()}</span> shape
+                    Writing the <span className="text-primary">{effectiveFormat.toUpperCase()}</span> shape{formatHint ? ` — ${formatHint}` : ""}
                   </span>
                 </div>
 
