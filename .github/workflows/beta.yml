@@ -162,7 +162,8 @@ jobs:
             echo "fetches the official stable release from the npm registry;"
             echo "beta builds are never published there, so a mix-up is impossible."
             echo ""
-            echo "To test by hand: unzip, then run 'node custom-server.js --port 20128'"
+            echo "To test by hand: unzip, then run 'node custom-server.js' with"
+            echo "PORT=20128 in the environment (PowerShell: \$env:PORT=20128),"
             echo "and open http://localhost:20128 (health: /api/health)."
           } > "$BOX_MARKER"
           echo "download box ready" >> "$GITHUB_STEP_SUMMARY"
@@ -172,6 +173,10 @@ jobs:
         with:
           name: afrouter-beta-UNSTABLE-${{ github.sha }}
           path: .next/standalone
+          # The production build lives in the HIDDEN .next/ directory, which
+          # upload-artifact skips by default. Without this the box contains
+          # server.js but no build output and cannot boot.
+          include-hidden-files: true
           retention-days: 5
 
       - name: Report timings
