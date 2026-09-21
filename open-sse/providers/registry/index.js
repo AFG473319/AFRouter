@@ -126,6 +126,7 @@ import p122 from "./xquik.js";
 import p124 from "./nous-portal.js";
 import p125 from "./orcarouter.js";
 import p126 from "./agnesai.js";
+import p127 from "./typesafe.js";
 export default [
   p0,
   p1,
@@ -252,4 +253,5 @@ export default [
   p124,
   p125,
   p126,
+  p127,
 ];
