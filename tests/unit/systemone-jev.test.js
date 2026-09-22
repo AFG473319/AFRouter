@@ -5,15 +5,59 @@ import {
   isSystemOneModelRef,
   validateSystemOneProbe,
 } from "../../src/app/api/models/test/ping.js";
-import { validateSystemOneBody } from "../../src/app/api/v1/systemone/route.js";
+import {
+  validateSystemOneBody,
+  extractSystemOneTokens,
+  recordSystemOneLogs,
+  POST,
+} from "../../src/app/api/v1/systemone/route.js";
 
 const mocks = vi.hoisted(() => ({
   getApiKeys: vi.fn(),
+  getSettings: vi.fn(),
   getConsistentMachineId: vi.fn(),
+  getModelInfo: vi.fn(),
+  getProviderCredentials: vi.fn(),
+  markAccountUnavailable: vi.fn(),
+  clearAccountError: vi.fn(),
+  extractApiKey: vi.fn(),
+  isValidApiKey: vi.fn(),
+  getExecutor: vi.fn(),
+  proxyAwareFetch: vi.fn(),
+  saveRequestUsage: vi.fn(),
+  saveRequestDetail: vi.fn(),
+  trackPendingRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/localDb", () => ({
   getApiKeys: mocks.getApiKeys,
+  getSettings: mocks.getSettings,
+}));
+
+vi.mock("@/lib/usageDb", () => ({
+  saveRequestUsage: mocks.saveRequestUsage,
+  saveRequestDetail: mocks.saveRequestDetail,
+  trackPendingRequest: mocks.trackPendingRequest,
+}));
+
+vi.mock("@/sse/services/model.js", () => ({
+  getModelInfo: mocks.getModelInfo,
+}));
+
+vi.mock("@/sse/services/auth.js", () => ({
+  getProviderCredentials: mocks.getProviderCredentials,
+  markAccountUnavailable: mocks.markAccountUnavailable,
+  clearAccountError: mocks.clearAccountError,
+  extractApiKey: mocks.extractApiKey,
+  isValidApiKey: mocks.isValidApiKey,
+}));
+
+vi.mock("open-sse/executors/index.js", () => ({
+  getExecutor: mocks.getExecutor,
+}));
+
+vi.mock("open-sse/utils/proxyFetch.js", () => ({
+  proxyAwareFetch: mocks.proxyAwareFetch,
 }));
 
 vi.mock("@/shared/utils/machineId", () => ({
@@ -33,11 +77,30 @@ vi.mock("next/server", () => ({
 
 const originalFetch = global.fetch;
 
+function systemOneRequest(body) {
+  return new Request("http://127.0.0.1:20128/v1/systemone", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+const validBody = {
+  model: "oc/jev-1.13-free",
+  state: "Help! My payouts have been failing for 3 days.",
+  questions: { is_urgent: { type: "noul", instructions: "Does this convey urgency?" } },
+};
+
 describe("Jev SystemOne models", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getApiKeys.mockResolvedValue([{ key: "sk-internal", isActive: true }]);
+    mocks.getSettings.mockResolvedValue({ requireApiKey: false });
     mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.extractApiKey.mockReturnValue(undefined);
+    mocks.clearAccountError.mockResolvedValue(undefined);
+    mocks.saveRequestUsage.mockResolvedValue(undefined);
+    mocks.saveRequestDetail.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -153,5 +216,164 @@ describe("Jev SystemOne models", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/no typed answers/);
+  });
+});
+
+describe("Jev SystemOne request logs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getApiKeys.mockResolvedValue([{ key: "sk-internal", isActive: true }]);
+    mocks.getSettings.mockResolvedValue({ requireApiKey: false });
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.extractApiKey.mockReturnValue(undefined);
+    mocks.clearAccountError.mockResolvedValue(undefined);
+    mocks.saveRequestUsage.mockResolvedValue(undefined);
+    mocks.saveRequestDetail.mockResolvedValue(undefined);
+  });
+
+  it("extracts TypeSafe usage into prompt/completion token columns", () => {
+    expect(
+      extractSystemOneTokens({ usage: { input_tokens: 425, output_tokens: 73 } })
+    ).toEqual({ prompt_tokens: 425, completion_tokens: 73 });
+    expect(extractSystemOneTokens({ usage: { input_tokens: 10, output_tokens: null } })).toEqual({
+      prompt_tokens: 10,
+      completion_tokens: 0,
+    });
+    expect(extractSystemOneTokens({})).toEqual({ prompt_tokens: 0, completion_tokens: 0 });
+    expect(extractSystemOneTokens(null)).toEqual({ prompt_tokens: 0, completion_tokens: 0 });
+  });
+
+  it("writes usageHistory + request detail in the same shape as chat models", () => {
+    const parsed = {
+      model: "jev-1.13-free",
+      answers: { is_urgent: { type: "noul", noul: 1 } },
+      usage: { input_tokens: 425, output_tokens: 73 },
+    };
+
+    recordSystemOneLogs({
+      provider: "opencode",
+      model: "jev-1.13-free",
+      connectionId: "conn-1",
+      apiKey: undefined,
+      clientBody: validBody,
+      upstreamBody: { model: "jev-1.13-free", state: validBody.state, questions: validBody.questions },
+      parsed,
+      latencyMs: 120,
+      status: "success",
+    });
+
+    expect(mocks.saveRequestUsage).toHaveBeenCalledTimes(1);
+    expect(mocks.saveRequestUsage.mock.calls[0][0]).toMatchObject({
+      provider: "opencode",
+      model: "jev-1.13-free",
+      connectionId: "conn-1",
+      endpoint: "/v1/systemone",
+      status: "ok",
+      tokens: { prompt_tokens: 425, completion_tokens: 73 },
+    });
+
+    expect(mocks.saveRequestDetail).toHaveBeenCalledTimes(1);
+    expect(mocks.saveRequestDetail.mock.calls[0][0]).toMatchObject({
+      provider: "opencode",
+      model: "jev-1.13-free",
+      connectionId: "conn-1",
+      status: "success",
+      endpoint: "/v1/systemone",
+      tokens: { prompt_tokens: 425, completion_tokens: 73 },
+      response: { answers: parsed.answers },
+      latency: { ttft: 120, total: 120 },
+    });
+  });
+
+  it("still records a log row when upstream omits usage", () => {
+    recordSystemOneLogs({
+      provider: "opencode",
+      model: "jev-1.13-free",
+      connectionId: "conn-1",
+      clientBody: validBody,
+      upstreamBody: null,
+      parsed: { model: "jev-1.13-free", answers: { is_urgent: { type: "noul", noul: 0.5 } } },
+      latencyMs: 50,
+      status: "success",
+    });
+
+    expect(mocks.saveRequestUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokens: { prompt_tokens: 0, completion_tokens: 0 },
+        status: "ok",
+      })
+    );
+  });
+
+  it("POST success records logs like other models", async () => {
+    mocks.getModelInfo.mockResolvedValue({ provider: "opencode", model: "jev-1.13-free" });
+    mocks.getProviderCredentials.mockResolvedValue({
+      connectionId: "conn-1",
+      providerSpecificData: {},
+    });
+    mocks.getExecutor.mockReturnValue({
+      buildUrl: () => "https://opencode.ai/zen/v1/systemone",
+      buildHeaders: () => ({ "content-type": "application/json" }),
+    });
+    const parsed = {
+      model: "jev-1.13-free",
+      answers: { is_urgent: { type: "noul", noul: 0.99 } },
+      usage: { input_tokens: 425, output_tokens: 73 },
+    };
+    mocks.proxyAwareFetch.mockResolvedValue(
+      new Response(JSON.stringify(parsed), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const res = await POST(systemOneRequest(validBody));
+    expect(res.status).toBe(200);
+
+    expect(mocks.trackPendingRequest).toHaveBeenCalledWith("jev-1.13-free", "opencode", "conn-1", true);
+    expect(mocks.trackPendingRequest).toHaveBeenCalledWith("jev-1.13-free", "opencode", "conn-1", false, false);
+    expect(mocks.saveRequestUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "opencode",
+        model: "jev-1.13-free",
+        connectionId: "conn-1",
+        endpoint: "/v1/systemone",
+        tokens: { prompt_tokens: 425, completion_tokens: 73 },
+        status: "ok",
+      })
+    );
+    expect(mocks.saveRequestDetail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "opencode",
+        model: "jev-1.13-free",
+        status: "success",
+        endpoint: "/v1/systemone",
+      })
+    );
+  });
+
+  it("POST terminal failure still records an error detail row", async () => {
+    mocks.getModelInfo.mockResolvedValue({ provider: "opencode", model: "jev-1.13-free" });
+    mocks.getProviderCredentials.mockResolvedValue({
+      connectionId: "conn-1",
+      providerSpecificData: {},
+    });
+    mocks.getExecutor.mockReturnValue({
+      buildUrl: () => "https://opencode.ai/zen/v1/systemone",
+      buildHeaders: () => ({}),
+    });
+    mocks.proxyAwareFetch.mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "upstream boom" } }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    mocks.markAccountUnavailable.mockResolvedValue({ shouldFallback: false });
+
+    const res = await POST(systemOneRequest(validBody));
+    expect(res.status).toBe(500);
+    expect(mocks.saveRequestDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "error", model: "jev-1.13-free" })
+    );
   });
 });

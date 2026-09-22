@@ -5,6 +5,7 @@
 - **Agent Skills**: `AFROUTER_URL` is documented as optional — every skill resolves `BASE="${AFROUTER_URL:-http://localhost:20128}"` and no longer instructs an agent to look for the variable. Auth is documented as required by default, matching `requireApiKey: true`.
 
 ## Fixes
+- **Jev System One**: `/v1/systemone` now writes the same request logs as chat models — `usageHistory` (Request Logs / usage stats) and request details. Token counts are mapped from TypeSafe `{input_tokens, output_tokens}` into the prompt/completion columns; rows are recorded even when upstream omits usage so Jev calls no longer disappear from the logs.
 - **Agent Skills**: correct the System One skill — `oc/jev-1.13-free` is the only routed id, and `GET /v1/models` omits no-auth providers (opencode has no connection), so the skill now gives the exact model id instead of a catalog query that returns nothing on a populated instance.
 - **Agent Skills**: add the missing `Authorization` header to the System One curl example.
 

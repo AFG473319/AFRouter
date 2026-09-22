@@ -8,6 +8,7 @@ import {
   isValidApiKey,
 } from "@/sse/services/auth.js";
 import { getSettings } from "@/lib/localDb";
+import { saveRequestUsage, saveRequestDetail, trackPendingRequest } from "@/lib/usageDb";
 import {
   getModelTargetFormat,
   getModelUpstreamId,
@@ -73,6 +74,69 @@ export function validateSystemOneBody(body) {
   return null;
 }
 
+/**
+ * Normalize System One usage ({input_tokens, output_tokens}) into the
+ * prompt/completion shape used by usageHistory — same log columns as chat.
+ * Exported for unit tests.
+ */
+export function extractSystemOneTokens(parsed) {
+  const u = parsed && typeof parsed === "object" ? parsed.usage : null;
+  if (!u || typeof u !== "object") {
+    return { prompt_tokens: 0, completion_tokens: 0 };
+  }
+  return {
+    prompt_tokens: u.input_tokens ?? u.prompt_tokens ?? 0,
+    completion_tokens: u.output_tokens ?? u.completion_tokens ?? 0,
+  };
+}
+
+export function recordSystemOneLogs({
+  provider,
+  model,
+  connectionId,
+  apiKey,
+  clientBody,
+  upstreamBody,
+  parsed,
+  latencyMs,
+  status = "success",
+}) {
+  const tokens = extractSystemOneTokens(parsed);
+  // Always persist a usageHistory row so Jev shows up in Request Logs like
+  // chat models — even when upstream omits token counts.
+  saveRequestUsage({
+    provider,
+    model,
+    connectionId: connectionId || undefined,
+    apiKey: apiKey || undefined,
+    endpoint: "/v1/systemone",
+    tokens,
+    status: "ok",
+    timestamp: new Date().toISOString(),
+  }).catch(() => {});
+
+  saveRequestDetail({
+    provider: provider || "unknown",
+    model: model || "unknown",
+    connectionId: connectionId || undefined,
+    timestamp: new Date().toISOString(),
+    latency: { ttft: latencyMs, total: latencyMs },
+    tokens,
+    request: {
+      model: clientBody?.model,
+      state: clientBody?.state,
+      questions: clientBody?.questions,
+    },
+    providerRequest: upstreamBody || null,
+    providerResponse: parsed || null,
+    response: {
+      answers: parsed?.answers ?? null,
+    },
+    status,
+    endpoint: "/v1/systemone",
+  }).catch(() => {});
+}
+
 export async function OPTIONS() {
   return new Response(null, {
     headers: {
@@ -103,8 +167,8 @@ export async function POST(request) {
   }
 
   const settings = await getSettings();
+  const apiKey = extractApiKey(request);
   if (settings.requireApiKey) {
-    const apiKey = extractApiKey(request);
     if (!apiKey || !(await isValidApiKey(apiKey))) {
       return NextResponse.json({ error: apiKey ? "Invalid API key" : "Missing API key" }, { status: 401 });
     }
@@ -127,16 +191,45 @@ export async function POST(request) {
 
   const upstreamModel = getModelUpstreamId(alias, model);
   const upstreamBody = { model: upstreamModel, state: body.state, questions: body.questions };
+  const requestStartTime = Date.now();
 
   const excludeConnectionIds = new Set();
   let lastError = "All accounts unavailable";
   let lastStatus = 503;
+  let trackedConnectionId = null;
+
+  const trackStart = (connectionId) => {
+    trackedConnectionId = connectionId;
+    trackPendingRequest(model, provider, connectionId, true);
+  };
+  const trackEnd = (error = false) => {
+    if (trackedConnectionId != null) {
+      trackPendingRequest(model, provider, trackedConnectionId, false, error);
+      trackedConnectionId = null;
+    }
+  };
+  const failWithLogs = (status, message, connectionId, parsed = null) => {
+    trackEnd(true);
+    recordSystemOneLogs({
+      provider,
+      model,
+      connectionId,
+      apiKey,
+      clientBody: body,
+      upstreamBody,
+      parsed,
+      latencyMs: Date.now() - requestStartTime,
+      status: "error",
+    });
+    return NextResponse.json({ error: message }, { status });
+  };
 
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
     if (!credentials || credentials.allRateLimited) {
       return NextResponse.json({ error: lastError }, { status: lastStatus });
     }
+    trackStart(credentials.connectionId);
 
     const executor = getExecutor(provider);
     let url;
@@ -145,7 +238,7 @@ export async function POST(request) {
       url = executor.buildUrl(model, false, 0, credentials);
       headers = executor.buildHeaders(credentials, false, url, model);
     } catch (err) {
-      return NextResponse.json({ error: err?.message || "Failed to build upstream request" }, { status: 500 });
+      return failWithLogs(500, err?.message || "Failed to build upstream request", credentials.connectionId);
     }
 
     const proxyOptions = {
@@ -174,10 +267,11 @@ export async function POST(request) {
         credentials.connectionId, 502, lastError, provider, model
       );
       if (shouldFallback) {
+        trackEnd(true);
         excludeConnectionIds.add(credentials.connectionId);
         continue;
       }
-      return NextResponse.json({ error: lastError }, { status: 502 });
+      return failWithLogs(502, lastError, credentials.connectionId);
     }
 
     const rawText = await upstreamRes.text().catch(() => "");
@@ -197,13 +291,26 @@ export async function POST(request) {
         credentials.connectionId, upstreamRes.status, String(detail).slice(0, 200), provider, model
       );
       if (shouldFallback) {
+        trackEnd(true);
         excludeConnectionIds.add(credentials.connectionId);
         continue;
       }
-      return NextResponse.json({ error: lastError }, { status: upstreamRes.status });
+      return failWithLogs(upstreamRes.status, lastError, credentials.connectionId, parsed);
     }
 
     await clearAccountError(credentials.connectionId, credentials, model).catch(() => {});
+    trackEnd(false);
+    recordSystemOneLogs({
+      provider,
+      model,
+      connectionId: credentials.connectionId,
+      apiKey,
+      clientBody: body,
+      upstreamBody,
+      parsed,
+      latencyMs: Date.now() - requestStartTime,
+      status: "success",
+    });
     return NextResponse.json(parsed ?? { error: "Empty upstream response" });
   }
 }
