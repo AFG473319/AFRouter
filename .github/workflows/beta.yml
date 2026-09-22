@@ -3,10 +3,14 @@ name: Beta — branch build, test, smoke
 # Remote beta workflow for AI-generated changes.
 # Flow: push feature/beta branch (or open a PR) -> install/cache -> core tests
 # -> full suite (advisory, known-fails aware) -> webpack production build ->
-# ephemeral smoke test on port 20128 -> pass/fail report.
+# ephemeral smoke test on port 20128 -> pass/fail report -> UNSTABLE
+# prerelease download box (push/dispatch only).
 #
-# Explicitly NOT here: npm publish, releases, auto-merge, version bumps.
-# Release paths (tags -> docker-publish.yml) are untouched.
+# Explicitly NOT here: npm publish, official version releases, auto-merge,
+# version bumps. Release paths (tags -> docker-publish.yml) are untouched.
+# The only release created here is the rolling prerelease `beta-latest`
+# (download box only) so agents/humans can fetch the smoke-tested build
+# without going through Azure-backed Actions artifacts.
 
 on:
   push:
@@ -15,7 +19,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: beta-${{ github.ref }}
@@ -178,6 +182,61 @@ jobs:
           # server.js but no build output and cannot boot.
           include-hidden-files: true
           retention-days: 5
+
+      # ---- Rolling prerelease: stable download URL, no Azure blob ----
+      # Actions artifacts are slow/flaky from some networks (they redirect to
+      # Azure blob). GitHub Release assets use objects.githubusercontent.com
+      # and a fixed URL. Skipped on pull_request (fork PRs have a read-only
+      # token; same-repo PRs would thrash beta-latest on every push).
+      # This is a zip of server files, NOT an npm pack — the guard above still
+      # holds (no .tgz, root private:true).
+      - name: Pack beta download box (zip)
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          ZIP="$RUNNER_TEMP/afrouter-beta-UNSTABLE.zip"
+          (cd .next/standalone && zip -qr "$ZIP" .)
+          ls -lh "$ZIP"
+          echo "packed $ZIP" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish beta-latest UNSTABLE prerelease
+        if: success() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZIP: ${{ runner.temp }}/afrouter-beta-UNSTABLE.zip
+        run: |
+          SHORT_SHA="$(echo "${{ github.sha }}" | cut -c1-7)"
+          BRANCH="${GITHUB_REF_NAME}"
+          NOTES=$(cat <<EOF
+          AFRouter UNSTABLE beta — NOT a release, NOT an npm package.
+
+          - commit: ${{ github.sha }}
+          - branch: $BRANCH
+          - built: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          - workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          You CANNOT install this with npm. Unzip, then run \`node custom-server.js\` with \`PORT=20128\`.
+          Health check: http://localhost:20128/api/health
+          EOF
+          )
+
+          # Force-move the rolling tag so it always points at this commit
+          # (gh release edit does not move tags).
+          git tag -f beta-latest "${{ github.sha }}"
+          git push -f origin refs/tags/beta-latest
+
+          if gh release view beta-latest >/dev/null 2>&1; then
+            gh release upload beta-latest "$ZIP" --clobber
+            gh release edit beta-latest \
+              --prerelease \
+              --title "Beta UNSTABLE ($SHORT_SHA)" \
+              --notes "$NOTES"
+          else
+            gh release create beta-latest "$ZIP" \
+              --prerelease \
+              --title "Beta UNSTABLE ($SHORT_SHA)" \
+              --notes "$NOTES"
+          fi
+          echo "published prerelease [beta-latest](${{ github.server_url }}/${{ github.repository }}/releases/tag/beta-latest)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report timings
         if: always()
