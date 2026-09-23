@@ -2,7 +2,7 @@ import { PROVIDERS } from "./providers.js";
 import REGISTRY from "../providers/registry/index.js";
 // PROVIDER_MODELS now built from providers/registry (transport + models co-located)
 import { PROVIDER_MODELS } from "../providers/index.js";
-import { modelQuotaFamily, modelStrip, modelTargetFormat, modelSupportedFormats, normalizeModelId } from "../providers/models/schema.js";
+import { modelQuotaFamily, modelStrip, modelTargetFormat, modelSupportedFormats, normalizeModelId, providerDefaultTargetFormat } from "../providers/models/schema.js";
 import { CODEX_REVIEW_SUFFIX, isMuseSparkModel } from "../providers/models/helpers.js";
 import { FORMATS } from "../translator/formats.js";
 export { PROVIDER_MODELS };
@@ -52,13 +52,32 @@ export function findModelName(aliasOrId, modelId) {
   return found?.name || modelId;
 }
 
+function findProviderDef(aliasOrId) {
+  if (!aliasOrId) return undefined;
+  return REGISTRY.find((r) => r.id === aliasOrId || r.alias === aliasOrId || r.uiAlias === aliasOrId);
+}
+
 export function getModelTargetFormat(aliasOrId, modelId) {
   if ((!aliasOrId || aliasOrId === "oc" || aliasOrId === "opencode" || aliasOrId === "ocg" || aliasOrId === "opencode-go") && isMuseSparkModel(modelId)) {
     return FORMATS.OPENAI_RESPONSES;
   }
   const models = PROVIDER_MODELS[aliasOrId];
   if (!models) return null;
-  return modelTargetFormat(findModel(models, modelId, aliasOrId));
+  const found = findModel(models, modelId, aliasOrId);
+  const explicit = modelTargetFormat(found);
+  if (explicit) return explicit;
+  // Passthrough/unlisted ids inherit the provider's default format
+  // (TypeSafe AI: defaultTargetFormat "systemone" for every model).
+  return providerDefaultTargetFormat(findProviderDef(aliasOrId));
+}
+
+/**
+ * True when provider/model is a decisions-only System One model (TypeSafe Jev,
+ * OpenCode Jev free, …). Handles registered targetFormat and provider-level
+ * defaultTargetFormat so passthrough ids route and log like the catalog ones.
+ */
+export function isSystemOneModel(aliasOrId, modelId) {
+  return getModelTargetFormat(aliasOrId, modelId) === "systemone";
 }
 
 // Declared upstream formats for a model (registry `supportedFormats`). Drives the

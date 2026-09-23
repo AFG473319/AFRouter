@@ -10,12 +10,13 @@ import {
 import { getSettings } from "@/lib/localDb";
 import { saveRequestUsage, saveRequestDetail, trackPendingRequest } from "@/lib/usageDb";
 import {
-  getModelTargetFormat,
   getModelUpstreamId,
+  isSystemOneModel,
   PROVIDER_ID_TO_ALIAS,
 } from "open-sse/config/providerModels.js";
 import { getExecutor } from "open-sse/executors/index.js";
 import { proxyAwareFetch } from "open-sse/utils/proxyFetch.js";
+import * as log from "@/sse/utils/logger.js";
 
 const SYSTEMONE_TIMEOUT_MS = 30000;
 
@@ -100,10 +101,19 @@ export function recordSystemOneLogs({
   parsed,
   latencyMs,
   status = "success",
+  httpStatus = null,
+  reqTag = null,
 }) {
   const tokens = extractSystemOneTokens(parsed);
-  // Always persist a usageHistory row so Jev shows up in Request Logs like
-  // chat models — even when upstream omits token counts.
+  const ok = status === "success" || status === "ok";
+  // Request Logs UI keys off "OK" / "FAILED" / "PENDING" (same as chat rows).
+  const requestLogStatus = ok
+    ? "200 OK"
+    : `FAILED ${httpStatus || (status === "error" ? 500 : status)}`;
+
+  // Always persist a usageHistory row so every System One model (OpenCode Jev,
+  // TypeSafe Jev, …) shows up in Request Logs like chat models — even when
+  // upstream omits token counts.
   saveRequestUsage({
     provider,
     model,
@@ -111,7 +121,7 @@ export function recordSystemOneLogs({
     apiKey: apiKey || undefined,
     endpoint: "/v1/systemone",
     tokens,
-    status: "ok",
+    status: requestLogStatus,
     timestamp: new Date().toISOString(),
   }).catch(() => {});
 
@@ -132,9 +142,49 @@ export function recordSystemOneLogs({
     response: {
       answers: parsed?.answers ?? null,
     },
-    status,
+    status: ok ? "success" : "error",
     endpoint: "/v1/systemone",
   }).catch(() => {});
+
+  // Console Log (dashboard) captures console.log — emit the same correlated
+  // request/done lines chat models use so System One is visible there too.
+  // The ▶ line is written earlier (see logSystemOneRequest) so in-flight and
+  // early-failure paths still show up; this emits the terminal line only.
+  const tag = reqTag || log.tagForSession(connectionId || `${provider}/${model}`);
+  if (ok) {
+    log.line(
+      tag,
+      "📊",
+      `DONE ${latencyMs}ms · IN ${tokens.prompt_tokens} · OUT ${tokens.completion_tokens}`
+    );
+  } else {
+    log.errorLine(
+      tag,
+      "✗",
+      `ERROR ${httpStatus || 500} · ${provider}/${model} · ${latencyMs}ms`
+    );
+  }
+}
+
+/**
+ * First Console Log line for a System One request (same shape as chatCore's
+ * ▶ line). Call once after the model resolves so even early failures and
+ * in-flight work appear on /dashboard/console-log.
+ */
+export function logSystemOneRequest({
+  clientModel,
+  provider,
+  model,
+  questionCount = 0,
+  connectionId = null,
+  reqTag,
+}) {
+  const acc = connectionId ? connectionId.slice(0, 8) : "-";
+  log.line(
+    reqTag,
+    "▶",
+    `POST ${clientModel} → ${provider}/${model} · FMT: systemone · JSON · ${questionCount} Q · ACC:${acc}`
+  );
 }
 
 export async function OPTIONS() {
@@ -180,9 +230,9 @@ export async function POST(request) {
   }
   const { provider, model } = modelInfo;
   const alias = PROVIDER_ID_TO_ALIAS[provider] || provider;
-  const targetFormat =
-    getModelTargetFormat(alias, model) ?? getModelTargetFormat(provider, model);
-  if (targetFormat !== "systemone") {
+  // isSystemOneModel covers registered targetFormat AND provider-level
+  // defaultTargetFormat (TypeSafe passthrough ids).
+  if (!isSystemOneModel(alias, model) && !isSystemOneModel(provider, model)) {
     return NextResponse.json(
       { error: `Model ${provider}/${model} is not a System One model; use /v1/chat/completions for chat text` },
       { status: 400 }
@@ -192,6 +242,17 @@ export async function POST(request) {
   const upstreamModel = getModelUpstreamId(alias, model);
   const upstreamBody = { model: upstreamModel, state: body.state, questions: body.questions };
   const requestStartTime = Date.now();
+  // Stable Console Log tag for this request — emitted before any account/upstream
+  // work so Jev shows on /dashboard/console-log even when the call fails early.
+  const reqTag = log.tagForSession(`${provider}/${model}`);
+  logSystemOneRequest({
+    clientModel: body.model,
+    provider,
+    model,
+    questionCount: Object.keys(body.questions).length,
+    connectionId: null,
+    reqTag,
+  });
 
   const excludeConnectionIds = new Set();
   let lastError = "All accounts unavailable";
@@ -208,7 +269,7 @@ export async function POST(request) {
       trackedConnectionId = null;
     }
   };
-  const failWithLogs = (status, message, connectionId, parsed = null) => {
+  const failWithLogs = (httpStatus, message, connectionId, parsed = null) => {
     trackEnd(true);
     recordSystemOneLogs({
       provider,
@@ -220,14 +281,17 @@ export async function POST(request) {
       parsed,
       latencyMs: Date.now() - requestStartTime,
       status: "error",
+      httpStatus,
+      reqTag,
     });
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: message }, { status: httpStatus });
   };
 
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
     if (!credentials || credentials.allRateLimited) {
-      return NextResponse.json({ error: lastError }, { status: lastStatus });
+      // Terminal with no usable account — still record + console-log like chat.
+      return failWithLogs(lastStatus, lastError, null);
     }
     trackStart(credentials.connectionId);
 
@@ -310,6 +374,7 @@ export async function POST(request) {
       parsed,
       latencyMs: Date.now() - requestStartTime,
       status: "success",
+      reqTag,
     });
     return NextResponse.json(parsed ?? { error: "Empty upstream response" });
   }

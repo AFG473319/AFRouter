@@ -9,6 +9,7 @@ import {
   validateSystemOneBody,
   extractSystemOneTokens,
   recordSystemOneLogs,
+  logSystemOneRequest,
   POST,
 } from "../../src/app/api/v1/systemone/route.js";
 
@@ -27,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   saveRequestUsage: vi.fn(),
   saveRequestDetail: vi.fn(),
   trackPendingRequest: vi.fn(),
+  logLine: vi.fn(),
+  logErrorLine: vi.fn(),
+  logTagForSession: vi.fn(() => "🟢"),
 }));
 
 vi.mock("@/lib/localDb", () => ({
@@ -75,6 +79,14 @@ vi.mock("next/server", () => ({
   },
 }));
 
+vi.mock("@/sse/utils/logger.js", () => ({
+  tagForSession: mocks.logTagForSession,
+  nextTag: () => "🟢",
+  line: mocks.logLine,
+  errorLine: mocks.logErrorLine,
+  fmtThink: () => null,
+}));
+
 const originalFetch = global.fetch;
 
 function systemOneRequest(body) {
@@ -117,6 +129,12 @@ describe("Jev SystemOne models", () => {
     expect(getModelTargetFormat("oc", "muse-spark-1.3-contributor-free")).toBe("openai-responses");
   });
 
+  it("inherits systemone via TypeSafe defaultTargetFormat for passthrough ids", () => {
+    expect(getModelTargetFormat("typesafe", "jev-1.13.0")).toBe("systemone");
+    expect(getModelTargetFormat("typesafe", "jev-latest")).toBe("systemone");
+    expect(getModelTargetFormat("typesafe", "jev-1.15.0")).toBe("systemone");
+  });
+
   it("detects systemone refs without catching normal models", () => {
     expect(isSystemOneModelRef("oc/jev-1.13")).toBe(false);
     expect(isSystemOneModelRef("oc/jev-1.13-free")).toBe(true);
@@ -125,6 +143,11 @@ describe("Jev SystemOne models", () => {
     expect(isSystemOneModelRef("openai/gpt-5")).toBe(false);
     expect(isSystemOneModelRef("jev-1.13")).toBe(false);
     expect(isSystemOneModelRef("")).toBe(false);
+    // TypeSafe: registered + passthrough ids are all System One
+    expect(isSystemOneModelRef("typesafe/jev-1.13.0")).toBe(true);
+    expect(isSystemOneModelRef("typesafe/jev-latest")).toBe(true);
+    expect(isSystemOneModelRef("typesafe/jev-1.15.0")).toBe(true);
+    expect(isSystemOneModelRef("typesafe/jev-1.13.0(high)")).toBe(true);
   });
 
   it("validates typed systemone answers, not chat choices", () => {
@@ -243,6 +266,32 @@ describe("Jev SystemOne request logs", () => {
     expect(extractSystemOneTokens(null)).toEqual({ prompt_tokens: 0, completion_tokens: 0 });
   });
 
+  it("emits an early ▶ Console Log line for every System One request", () => {
+    logSystemOneRequest({
+      clientModel: "typesafe/jev-1.13.0",
+      provider: "typesafe",
+      model: "jev-1.13.0",
+      questionCount: 2,
+      connectionId: "conn-abcdef12",
+      reqTag: "🟢",
+    });
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "▶",
+      expect.stringContaining("POST typesafe/jev-1.13.0 → typesafe/jev-1.13.0")
+    );
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "▶",
+      expect.stringContaining("2 Q")
+    );
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "▶",
+      expect.stringContaining("ACC:conn-abc")
+    );
+  });
+
   it("writes usageHistory + request detail in the same shape as chat models", () => {
     const parsed = {
       model: "jev-1.13-free",
@@ -260,6 +309,7 @@ describe("Jev SystemOne request logs", () => {
       parsed,
       latencyMs: 120,
       status: "success",
+      reqTag: "🟢",
     });
 
     expect(mocks.saveRequestUsage).toHaveBeenCalledTimes(1);
@@ -268,7 +318,7 @@ describe("Jev SystemOne request logs", () => {
       model: "jev-1.13-free",
       connectionId: "conn-1",
       endpoint: "/v1/systemone",
-      status: "ok",
+      status: "200 OK",
       tokens: { prompt_tokens: 425, completion_tokens: 73 },
     });
 
@@ -283,6 +333,12 @@ describe("Jev SystemOne request logs", () => {
       response: { answers: parsed.answers },
       latency: { ttft: 120, total: 120 },
     });
+    // Terminal line only — ▶ is emitted earlier via logSystemOneRequest.
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "📊",
+      "DONE 120ms · IN 425 · OUT 73"
+    );
   });
 
   it("still records a log row when upstream omits usage", () => {
@@ -300,7 +356,7 @@ describe("Jev SystemOne request logs", () => {
     expect(mocks.saveRequestUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         tokens: { prompt_tokens: 0, completion_tokens: 0 },
-        status: "ok",
+        status: "200 OK",
       })
     );
   });
@@ -339,7 +395,7 @@ describe("Jev SystemOne request logs", () => {
         connectionId: "conn-1",
         endpoint: "/v1/systemone",
         tokens: { prompt_tokens: 425, completion_tokens: 73 },
-        status: "ok",
+        status: "200 OK",
       })
     );
     expect(mocks.saveRequestDetail).toHaveBeenCalledWith(
@@ -349,6 +405,41 @@ describe("Jev SystemOne request logs", () => {
         status: "success",
         endpoint: "/v1/systemone",
       })
+    );
+    // Early ▶ (before upstream) + terminal 📊 (after) — Console Log parity with chat.
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "▶",
+      expect.stringContaining("POST oc/jev-1.13-free → opencode/jev-1.13-free")
+    );
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "📊",
+      expect.stringContaining("DONE")
+    );
+  });
+
+  it("POST with no credentials still console-logs and records a failed row", async () => {
+    mocks.getModelInfo.mockResolvedValue({ provider: "opencode", model: "jev-1.13-free" });
+    mocks.getProviderCredentials.mockResolvedValue(null);
+
+    const res = await POST(systemOneRequest(validBody));
+    expect(res.status).toBe(503);
+    expect(mocks.saveRequestUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "FAILED 503", model: "jev-1.13-free" })
+    );
+    expect(mocks.saveRequestDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "error", model: "jev-1.13-free" })
+    );
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "▶",
+      expect.stringContaining("POST oc/jev-1.13-free")
+    );
+    expect(mocks.logErrorLine).toHaveBeenCalledWith(
+      "🟢",
+      "✗",
+      expect.stringContaining("ERROR 503")
     );
   });
 
@@ -374,6 +465,60 @@ describe("Jev SystemOne request logs", () => {
     expect(res.status).toBe(500);
     expect(mocks.saveRequestDetail).toHaveBeenCalledWith(
       expect.objectContaining({ status: "error", model: "jev-1.13-free" })
+    );
+    expect(mocks.saveRequestUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "FAILED 500", model: "jev-1.13-free" })
+    );
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "▶",
+      expect.stringContaining("POST oc/jev-1.13-free")
+    );
+    expect(mocks.logErrorLine).toHaveBeenCalledWith(
+      "🟢",
+      "✗",
+      expect.stringContaining("ERROR 500")
+    );
+  });
+
+  it("records TypeSafe passthrough models like registered Jev ids", () => {
+    recordSystemOneLogs({
+      provider: "typesafe",
+      model: "jev-1.15.0",
+      connectionId: "conn-ts",
+      clientBody: { ...validBody, model: "typesafe/jev-1.15.0" },
+      upstreamBody: { model: "jev-1.15.0", state: validBody.state, questions: validBody.questions },
+      parsed: {
+        model: "jev-1.15.0",
+        answers: { is_urgent: { type: "noul", noul: 1 } },
+        usage: { input_tokens: 10, output_tokens: 2 },
+      },
+      latencyMs: 30,
+      status: "success",
+      reqTag: "🟢",
+    });
+
+    expect(mocks.saveRequestUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "typesafe",
+        model: "jev-1.15.0",
+        endpoint: "/v1/systemone",
+        status: "200 OK",
+        tokens: { prompt_tokens: 10, completion_tokens: 2 },
+      })
+    );
+    expect(mocks.saveRequestDetail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "typesafe",
+        model: "jev-1.15.0",
+        status: "success",
+        endpoint: "/v1/systemone",
+      })
+    );
+    expect(mocks.logLine).toHaveBeenCalledWith(
+      "🟢",
+      "📊",
+      "DONE 30ms · IN 10 · OUT 2"
     );
   });
 });

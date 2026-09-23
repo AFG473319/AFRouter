@@ -3,7 +3,7 @@ import { resolveProviderId } from "@/shared/constants/providers.js";
 import { unwrapClineEnvelope } from "open-sse/shared/clineEnvelope.js";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
-import { getModelTargetFormat } from "open-sse/config/providerModels.js";
+import { isSystemOneModel } from "open-sse/config/providerModels.js";
 
 // Jev (TypeSafe System One) never generates text: it answers typed questions
 // via POST /zen/v1/systemone with {model, state, questions} and returns typed
@@ -17,7 +17,8 @@ const SYSTEMONE_PROBE = {
 };
 
 /**
- * True when a "provider/model" ref points at a decisions-only System One model.
+ * True when a "provider/model" ref points at a decisions-only System One model
+ * (OpenCode Jev free, TypeSafe Jev including passthrough ids, …).
  * Exported for unit tests.
  */
 export function isSystemOneModelRef(model) {
@@ -29,8 +30,8 @@ export function isSystemOneModelRef(model) {
   if (!alias || !id) return false;
   try {
     return (
-      getModelTargetFormat(alias, id) === "systemone" ||
-      getModelTargetFormat(alias.toLowerCase(), id) === "systemone"
+      isSystemOneModel(alias, id) ||
+      isSystemOneModel(alias.toLowerCase(), id)
     );
   } catch {
     return false;

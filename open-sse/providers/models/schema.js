@@ -39,6 +39,16 @@ export function modelTargetFormat(model) {
   return model?.targetFormat || MODEL_DEFAULTS.targetFormat;
 }
 
+/**
+ * Provider-level target format fallback for passthrough model ids.
+ * Single-format providers (e.g. TypeSafe AI: every model is System One)
+ * declare `defaultTargetFormat` so unknown/passthrough ids still route
+ * and log like the registered ones.
+ */
+export function providerDefaultTargetFormat(providerDef) {
+  return providerDef?.defaultTargetFormat || null;
+}
+
 // Per-model declared upstream formats (e.g. ["openai", "claude"]). Guards the
 // sourceFormat-matched transport for multi-endpoint providers whose models differ
 // in endpoint support (opencode-go: kimi/glm only do /chat/completions, minimax/qwen

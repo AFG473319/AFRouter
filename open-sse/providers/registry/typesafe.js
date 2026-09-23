@@ -30,6 +30,10 @@ export default {
     baseUrl: "https://api.typesafe.ai/v1/systemone",
     validateUrl: "https://api.typesafe.ai/v1/models",
   },
+  // Every TypeSafe model is a decisions-only System One model — including
+  // passthrough ids not listed below. Routing, ping, and request logs all
+  // rely on this so TypeSafe behaves like registered Jev models.
+  defaultTargetFormat: "systemone",
   models: [
     { id: "jev-1.13.0", name: "Jev 1.13", targetFormat: "systemone", contextLength: 64000 },
     { id: "jev-latest", name: "Jev Latest", targetFormat: "systemone", contextLength: 64000 },

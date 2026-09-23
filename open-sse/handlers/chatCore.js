@@ -86,6 +86,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // a chat payload to a chat endpoint it cannot answer.
   if (modelTargetFormat === "systemone") {
     trackPendingRequest(model, provider, connectionId, false, true);
+    // Same Console Log visibility as a real request so mis-routed Jev calls
+    // still show up on /dashboard/console-log.
+    if (log?.errorLine) {
+      log.errorLine(reqTag, "✗", `BLOCKED 400 · ${provider}/${model} · decisions-only System One — use POST /v1/systemone`);
+    }
     return createErrorResult(
       HTTP_STATUS.BAD_REQUEST,
       `Model ${provider}/${model} is a decisions-only System One model (TypeSafe Jev): it answers typed questions with {model, state, questions} and cannot generate chat text. Call POST /v1/systemone on this gateway (same auth) instead of /v1/chat/completions. Upstream docs: POST https://opencode.ai/zen/v1/systemone.`

@@ -796,7 +796,15 @@ export async function getRecentLogs(limit = 200) {
       const tk = r.tokens ? parseJson(r.tokens, {}) : {};
       const sent = r.promptTokens ?? tk.prompt_tokens ?? "-";
       const received = r.completionTokens ?? tk.completion_tokens ?? "-";
-      return `${ts} | ${m} | ${p} | ${account} | ${sent} | ${received} | ${r.status || "-"}`;
+      // Request Logs UI keys off "OK" / "FAILED" / "PENDING". Older rows and
+      // some writers store "ok"/"success"/"error" — normalize so System One
+      // and chat rows style the same.
+      const rawStatus = r.status || "-";
+      const status =
+        rawStatus === "ok" || rawStatus === "success" ? "200 OK"
+        : rawStatus === "error" ? "FAILED"
+        : rawStatus;
+      return `${ts} | ${m} | ${p} | ${account} | ${sent} | ${received} | ${status}`;
     });
   } catch (e) {
     console.error("[usageRepo] getRecentLogs failed:", e.message);
