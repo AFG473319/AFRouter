@@ -416,19 +416,35 @@ export function compareResults(baselineFile, currentFile) {
   current = current || JSON.parse(fs.readFileSync(currentFile, "utf8"));
 
   if (machineKey(baseline.machine) !== machineKey(current.machine)) {
-    logWarn("baseline was recorded on a DIFFERENT machine/runtime — deltas below are not trustworthy:");
-    logWarn(`  baseline: ${machineKey(baseline.machine)}`);
-    logWarn(`  current : ${machineKey(current.machine)}`);
+    const b = baseline.machine || {};
+    const c = current.machine || {};
+    // Runner pools hand out different hosts (observed: EPYC 7763 vs EPYC
+    // 9V74 on consecutive ubuntu-latest runs). Same platform/arch/cores/node
+    // but another CPU model is host noise, not a different machine class —
+    // warn softly so a real cross-machine comparison stays alarming.
+    const sameRuntimeClass =
+      b.platform === c.platform && b.arch === c.arch &&
+      b.cpuCount === c.cpuCount && b.node === c.node;
+    if (sameRuntimeClass) {
+      logWarn(`host CPU differs (${b.cpu || "?"} vs ${c.cpu || "?"}) — same runner class; deltas carry host noise`);
+      logWarn("especially on sub-second metrics (unit tier can swing tens of % between hosts)");
+    } else {
+      logWarn("baseline was recorded on a DIFFERENT machine/runtime — deltas below are not trustworthy:");
+      logWarn(`  baseline: ${machineKey(baseline.machine)}`);
+      logWarn(`  current : ${machineKey(current.machine)}`);
+    }
   }
 
+  const names = Object.keys(current.metrics || {});
+  const nameW = Math.max(7, ...names.map((n) => n.length)) + 1; // unit-tier names run ~70 chars
   console.log("");
-  console.log(["metric", "baseline", "current", "delta"].map((h, i) => h.padEnd(i === 0 ? 34 : 12)).join("").trimEnd());
-  console.log("─".repeat(70));
+  console.log(["metric", "baseline", "current", "delta"].map((h, i) => h.padEnd(i === 0 ? nameW : 12)).join("").trimEnd());
+  console.log("─".repeat(nameW + 36));
   let comparable = 0;
   for (const [name, cur] of Object.entries(current.metrics || {})) {
     const base = baseline.metrics?.[name];
     if (!base) {
-      console.log(`${name.padEnd(34)}${"(new)".padEnd(12)}${fmtNum(cur.median).padEnd(12)}${"—"}`);
+      console.log(`${name.padEnd(nameW)}${"(new)".padEnd(12)}${fmtNum(cur.median).padEnd(12)}${"—"}`);
       continue;
     }
     comparable++;
@@ -436,7 +452,7 @@ export function compareResults(baselineFile, currentFile) {
     // Lower is better for every metric we record (times), so ▲ = slower.
     const arrow = Math.abs(d) < 3 ? "±" : d > 0 ? "▲" : "▼";
     console.log(
-      `${name.padEnd(34)}${fmtNum(base.median).padEnd(12)}${fmtNum(cur.median).padEnd(12)}${`${arrow} ${d >= 0 ? "+" : ""}${d.toFixed(1)}%`}`
+      `${name.padEnd(nameW)}${fmtNum(base.median).padEnd(12)}${fmtNum(cur.median).padEnd(12)}${`${arrow} ${d >= 0 ? "+" : ""}${d.toFixed(1)}%`}`
     );
   }
   console.log("");

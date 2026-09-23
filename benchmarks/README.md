@@ -93,6 +93,13 @@ A run never touches your real setup:
   machine warns loudly and makes deltas untrustworthy).
 - `--compare` prints per-metric deltas. **±3% = noise.** Nothing here is a hard
   CI gate — runner noise makes failing a build on a 5% wiggle a lie.
+- **CI hosts vary:** two consecutive `ubuntu-latest` runs landed on EPYC 7763
+  vs EPYC 9V74 (same platform/cores/node, different CPU model). `--compare`
+  prints a soft *host CPU differs* note for that case instead of a hard
+  mismatch, and sub-second numbers — especially the `unit` tier — can swing
+  tens of percent between hosts. Prefer `build`/`startup`/`request` for trend
+  reading; if a delta looks too good (or bad) to be true, re-run or
+  re-baseline before believing it.
 
 ## Continuous integration (`.github/workflows/bench.yml`)
 
