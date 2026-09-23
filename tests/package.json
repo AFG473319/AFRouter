@@ -6,7 +6,8 @@
   "description": "Unit tests for afrouter embeddings endpoint",
   "scripts": {
     "test": "vitest run --reporter=verbose",
-    "test:watch": "vitest --reporter=verbose"
+    "test:watch": "vitest --reporter=verbose",
+    "bench": "vitest bench --run"
   },
   "devDependencies": {
     "vitest": "^4.0.0"

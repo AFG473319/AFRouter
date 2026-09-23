@@ -10,6 +10,7 @@
     "postbuild": "node scripts/copy-standalone-assets.mjs",
     "postbuild:bun": "node scripts/copy-standalone-assets.mjs",
     "start": "node custom-server.js --port 20128",
+    "bench": "node scripts/bench/index.mjs",
     "dev:bun": "bun --bun next dev --webpack --port 20128",
     "build:bun": "bun --bun next build --webpack",
     "start:bun": "bun ./.next/standalone/custom-server.js",

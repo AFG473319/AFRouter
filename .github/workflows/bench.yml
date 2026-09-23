@@ -1,0 +1,126 @@
+name: Benchmarks — build, startup, request, unit
+
+# Runs the full benchmark suite on a consistent ubuntu runner so perf work
+# doesn't have to be measured on a laptop (see benchmarks/README.md):
+#   build    cold production build into .next-bench/ (never touches .next)
+#   startup  gateway boot distribution: health / first route / warm route
+#   request  end-to-end latency through the full pipeline vs a local stub
+#   unit     in-process hot functions (vitest bench)
+#
+# Comparison against benchmarks/baseline.json is ADVISORY ONLY — machine-class
+# noise means hard gates lie; the job fails only on infrastructure problems
+# (build error, suite crash), never on a slower number.
+#
+# Triggers: manual dispatch (suite subset / sizes / label), every PR (numbers
+# for the change under review), and master pushes (mainline trend). Feature
+# branch pushes already get beta.yml; bench there is on-demand via dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Suites (comma list: build,startup,request,unit — empty = all; startup/request need the build suite in the same run)"
+        required: false
+        default: ""
+      runs:
+        description: "Repetitions for build/startup (empty = defaults: build 1, startup 3)"
+        required: false
+        default: ""
+      iterations:
+        description: "Samples per request scenario (empty = 30)"
+        required: false
+        default: ""
+      label:
+        description: "Results label (empty = ci-<short sha>)"
+        required: false
+        default: ""
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22 (matches Dockerfile node:22-alpine)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ensure npm cache dir exists
+        run: mkdir -p ~/.npm
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-root-${{ hashFiles('package-lock.json') }}-tests-${{ hashFiles('tests/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-root-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Install tests deps (unit tier)
+        run: npm ci --no-audit --no-fund
+        working-directory: tests
+
+      # Suites isolate themselves: cold build dir (.next-bench), temp DATA_DIR,
+      # ephemeral port, fixture provider + local stub upstream. Nothing here
+      # talks to a live provider or touches the real ~/.afrouter.
+      - name: Run benchmarks
+        env:
+          BENCH_ONLY: ${{ inputs.only }}
+          BENCH_RUNS: ${{ inputs.runs }}
+          BENCH_ITER: ${{ inputs.iterations }}
+          BENCH_LABEL: ${{ inputs.label }}
+        run: |
+          set -o pipefail
+          ARGS=""
+          if [ -n "$BENCH_ONLY" ]; then ARGS="$ARGS --only $BENCH_ONLY"; fi
+          if [ -n "$BENCH_RUNS" ]; then ARGS="$ARGS --runs $BENCH_RUNS"; fi
+          if [ -n "$BENCH_ITER" ]; then ARGS="$ARGS --iterations $BENCH_ITER"; fi
+          LABEL="${BENCH_LABEL:-ci-$(echo "$GITHUB_SHA" | cut -c1-7)}"
+          COMPARE=""
+          if [ -f benchmarks/baseline.json ]; then COMPARE="--compare"; fi
+          npm run bench -- --label "$LABEL" $COMPARE $ARGS 2>&1 | tee "$RUNNER_TEMP/bench-console.txt"
+
+      - name: Write step summary (table + baseline deltas)
+        if: always()
+        run: |
+          {
+            echo "## Benchmarks \`$(echo "$GITHUB_SHA" | cut -c1-7)\` (${GITHUB_REF_NAME})"
+            echo ""
+            echo '```'
+            if [ -f "$RUNNER_TEMP/bench-console.txt" ]; then
+              cat "$RUNNER_TEMP/bench-console.txt"
+            else
+              echo "(no console output captured)"
+            fi
+            echo '```'
+            echo ""
+            echo "Per-metric JSON is in the run artifact. Deltas vs \`benchmarks/baseline.json\` are advisory (±3% = noise, runner-class dependent) — details in \`benchmarks/README.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ github.run_id }}
+          path: benchmarks/results/*.json
+          if-no-files-found: warn
+          retention-days: 30
