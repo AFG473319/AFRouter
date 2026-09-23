@@ -256,6 +256,51 @@ const COMBO_BOOLEAN_CAPS = [
   "thinkingCanDisable", "thinkingEffortSupported",
 ];
 
+// Custom-model rows carry `caps` captured from the provider's own catalog when
+// the model was added (POST /api/models/custom enriches from OpenRouter/Nous).
+// That snapshot is fresher and gateway-specific, so it wins over the static
+// tables for the fields it declares — but it is a partial snapshot: booleans
+// only ever turn ON (the hand-written tables carry verified flags) and
+// table-resolved extras (thinkingFormat, thinkingRange, …) survive untouched.
+const PERSISTED_LIMIT_KEYS = new Set(["contextWindow", "maxOutput"]);
+
+function mergePersistedCapabilities(base, persisted) {
+  if (!persisted || typeof persisted !== "object") return base;
+  const merged = { ...(base || DEFAULT_CAPABILITIES) };
+  for (const [key, value] of Object.entries(persisted)) {
+    if (typeof value === "boolean") {
+      if (value) merged[key] = true;
+    } else if (PERSISTED_LIMIT_KEYS.has(key)) {
+      if (Number.isSafeInteger(value) && value > 0) merged[key] = value;
+    } else if (value !== null && value !== undefined) {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+// Keyed by `${alias}::${modelId}`: the same model id can exist under several
+// provider aliases with different specs, so the alias is part of the key.
+function buildCustomCapsMap(customModels) {
+  const map = new Map();
+  for (const model of customModels) {
+    const alias = model?.providerAlias;
+    const id = typeof model?.id === "string" ? model.id.trim() : "";
+    if (!alias || !id || !model?.caps || typeof model.caps !== "object") continue;
+    map.set(`${alias}::${id}`, model.caps);
+  }
+  return map;
+}
+
+function lookupCustomCaps(customCaps, aliases, modelId) {
+  if (!customCaps) return null;
+  for (const alias of aliases) {
+    const hit = customCaps.get(`${alias}::${modelId}`);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /**
  * Aggregate capabilities across a combo's member models so the /v1/models entry
  * carries the same shape as a concrete model. Numeric limits are the MINIMUM
@@ -268,7 +313,7 @@ const COMBO_BOOLEAN_CAPS = [
  * @param {Set<string>} [seen] - names already visited (cycle guard)
  * @returns {object|null} merged capabilities, or null if no resolvable members
  */
-function mergeComboCapabilities(memberStrings, comboByName, seen = new Set()) {
+function mergeComboCapabilities(memberStrings, comboByName, seen = new Set(), customCaps = null) {
   if (!Array.isArray(memberStrings) || memberStrings.length === 0) return null;
 
   const merged = { ...DEFAULT_CAPABILITIES };
@@ -281,11 +326,14 @@ function mergeComboCapabilities(memberStrings, comboByName, seen = new Set()) {
     let caps;
     if (member.includes("/")) {
       const { provider, model } = parseModel(member);
-      caps = getCapabilitiesForModel(provider, model);
+      caps = mergePersistedCapabilities(
+        getCapabilitiesForModel(provider, model),
+        lookupCustomCaps(customCaps, [provider, PROVIDER_ID_TO_ALIAS[provider] || provider], model),
+      );
     } else if (comboByName.has(member)) {
       if (seen.has(member)) continue; // cycle guard
       seen.add(member);
-      caps = mergeComboCapabilities(comboByName.get(member).models, comboByName, seen);
+      caps = mergeComboCapabilities(comboByName.get(member).models, comboByName, seen, customCaps);
     } else {
       caps = getCapabilitiesForModel(null, member);
     }
@@ -341,6 +389,10 @@ export async function buildModelsList(kindFilter, options = {}) {
   } catch (e) {
     console.log("Could not fetch custom models");
   }
+  // Specs captured when each model was added. The listing prefers them over the
+  // static tables so a fresh OpenRouter/Nous entry keeps its real window,
+  // modalities, and reasoning flags instead of the DEFAULT_CAPABILITIES floor.
+  const customCapsByAliasId = buildCustomCapsMap(customModels);
 
   let modelAliases = {};
   try {
@@ -379,7 +431,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     } else {
       // Merge capabilities from member models so clients see a context window
       // and feature set for the combo (bounded by its smallest-window member).
-      const caps = mergeComboCapabilities(combo.models, comboByName);
+      const caps = mergeComboCapabilities(combo.models, comboByName, new Set(), customCapsByAliasId);
       if (caps) {
         entry.capabilities = caps;
         entry.context_length = caps.contextWindow;
@@ -420,11 +472,22 @@ export async function buildModelsList(kindFilter, options = {}) {
       // Disabled custom models follow the same hide-list as built-ins
       if (isDisabled(providerAlias, modelId)) continue;
 
-      models.push({
+      const entry = {
         id: `${providerAlias}/${modelId}`,
         object: "model",
         owned_by: providerAlias,
-      });
+      };
+      const persisted = lookupCustomCaps(customCapsByAliasId, [providerAlias], modelId);
+      if (persisted) {
+        const caps = mergePersistedCapabilities(
+          getCapabilitiesForModel(providerAlias, modelId),
+          persisted,
+        );
+        entry.capabilities = caps;
+        entry.context_length = caps.contextWindow;
+        entry.max_completion_tokens = caps.maxOutput;
+      }
+      models.push(entry);
     }
   } else {
     for (const [providerId, conn] of activeConnectionByProvider.entries()) {
@@ -566,9 +629,16 @@ export async function buildModelsList(kindFilter, options = {}) {
         // { id, name } — no per-model capability data. Fall back to the same
         // pattern-matched capabilities the dashboard uses (useModelCaps.js) so
         // dynamically-discovered LLM models still surface vision/reasoning/search/tools.
-        const caps = liveCapabilitiesById.get(modelId)
-          || capabilitiesFromServiceKind(customKind || liveKind)
-          || (kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null);
+        // A custom-model row's persisted specs win when present: they were
+        // captured from the provider's own catalog at add time (see
+        // mergePersistedCapabilities for the merge rules).
+        const staticCaps = kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null;
+        const persistedCaps = lookupCustomCaps(customCapsByAliasId, [outputAlias, staticAlias, providerId], modelId);
+        const caps = persistedCaps
+          ? mergePersistedCapabilities(staticCaps, persistedCaps)
+          : liveCapabilitiesById.get(modelId)
+            || capabilitiesFromServiceKind(customKind || liveKind)
+            || staticCaps;
         if (caps) model.capabilities = caps;
         // Token limits under the snake_case names the OpenAI/OpenRouter
         // convention uses. `capabilities.contextWindow` is camelCase and nested,
