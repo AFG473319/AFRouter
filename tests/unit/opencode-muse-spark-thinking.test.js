@@ -193,25 +193,25 @@ describe("OpenCode Free Muse Spark thinking", () => {
       {
         type: "function",
         name: "bash",
-        description: "OpenCode built-in bash tool",
+        description: "Built-in bash tool",
         parameters: { type: "object", properties: {} },
       },
       {
         type: "function",
         name: "glob",
-        description: "OpenCode built-in glob tool",
+        description: "Built-in glob tool",
         parameters: { type: "object", properties: {} },
       },
       {
         type: "function",
         name: "grep",
-        description: "OpenCode built-in grep tool",
+        description: "Built-in grep tool",
         parameters: { type: "object", properties: {} },
       },
       {
         type: "function",
         name: "read",
-        description: "OpenCode built-in read tool",
+        description: "Built-in read tool",
         parameters: { type: "object", properties: {} },
       },
     ]);

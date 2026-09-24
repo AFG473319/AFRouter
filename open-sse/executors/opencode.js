@@ -213,7 +213,7 @@ function ensureChatFingerprintTools(body) {
       type: "function",
       function: {
         name,
-        description: `OpenCode built-in ${name} tool`,
+        description: `Built-in ${name} tool`,
         parameters: { type: "object", properties: {} },
       },
     });
@@ -240,7 +240,7 @@ function ensureResponsesFingerprintTools(body) {
     body.tools.push({
       type: "function",
       name,
-      description: `OpenCode built-in ${name} tool`,
+      description: `Built-in ${name} tool`,
       parameters: { type: "object", properties: {} },
     });
     present.add(name);
