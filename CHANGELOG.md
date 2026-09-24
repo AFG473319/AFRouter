@@ -1,3 +1,19 @@
+# v0.5.85 (2026-09-24)
+
+## Features
+- **TypeSafe AI**: free-tier provider with the Jev 1.13 decisions-only models, served through `POST /v1/systemone` (typed `{answers}` + usage). Any `typesafe/*` passthrough id routes and logs like a registered Jev model, and `oc/jev-1.13-free` stays the only OpenCode-routed id. New provider tile on the dashboard.
+- **Beta builds**: every non-master push and PR now publishes a rolling UNSTABLE download box as a GitHub prerelease (`beta-latest`) after the smoke test — stable `objects.githubusercontent.com` link instead of Azure-blob artifacts: `gh release download beta-latest --repo AFG473319/AFRouter`.
+
+## Fixes
+- **Model specs**: `/v1/models` reports the real capabilities for models you add to a connection (context window, max output, modalities, reasoning) instead of the 200K/64K default floor. The add flow already captured the exact specs from the provider's catalog (OpenRouter/Nous) — the listing now uses them, merges them with hand-written table knowledge (flags only turn on, table extras survive), and applies the same merge to combo members.
+- **Jev System One**: requests now record Request Logs / usage like chat models (rows are written even when upstream omits usage, tokens mapped from TypeSafe's `{input_tokens, output_tokens}`) and emit Console Log lines (`▶` request, `📊 DONE` / `✗ ERROR`).
+- **OpenAI reasoning models**: thinking can no longer be switched off — `reasoning_effort: "none"` is rejected upstream, so these models now clamp to the minimum instead of offering a disable option.
+- **OpenCode settings card**: explains which rule picked V1 vs V2 (manual, existing config shape, installed CLI version, default) and no longer renders the version twice.
+- **TypeSafe logo**: provider tile art fixed (outer pink disc removed).
+
+## Engineering
+- **Benchmarks**: zero-dependency `npm run bench` suite — cold build, gateway startup (health / first route / warm route), full-pipeline request latency against a local stub upstream, and `vitest bench` hot functions. Runs on GitHub Actions (PRs, master, manual dispatch) with advisory-only baseline comparison; see `benchmarks/README.md`.
+
 # v0.5.84 (2026-09-20)
 
 ## Features

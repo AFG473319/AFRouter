@@ -1,6 +1,6 @@
 {
   "name": "afrouter-app",
-  "version": "0.5.84",
+  "version": "0.5.85",
   "description": "AFRouter web dashboard",
   "private": true,
   "scripts": {
