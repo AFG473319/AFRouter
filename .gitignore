@@ -13,8 +13,12 @@
 # testing
 /coverage
 
+# benchmark results (regenerate with `npm run bench`; baseline.json IS committed)
+/benchmarks/results/
+
 # next.js
 /.next/
+/.next-bench/
 /.next-cli-build/
 /out/
 cli/.build-home/

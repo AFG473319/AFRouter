@@ -18,6 +18,13 @@ export default defineConfig({
     // Suppress noisy console output from handlers under test
     silent: false,
   },
+  // `vitest bench` tier (tests/benchmarks/*.bench.js) — separate discovery from
+  // test.include; mirror the test excludes (.claude worktrees carry their own
+  // copies but lack installed node_modules).
+  benchmark: {
+    include: ["benchmarks/**/*.bench.js"],
+    exclude: ["**/node_modules/**", "**/.claude/**", "**/dist/**"],
+  },
   resolve: {
     // Use array form so subpath aliases (e.g. "@/lib/db/index.js") resolve correctly.
     alias: [
