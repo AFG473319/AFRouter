@@ -22,6 +22,27 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # Docker Hub is optional: the account may not exist and the secrets may
+      # never have been added. GHCR always works (automatic GITHUB_TOKEN), so
+      # without Hub credentials we publish GHCR-only instead of failing the job.
+      - name: Decide target registries
+        id: registries
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "images<<EOF" >> "$GITHUB_OUTPUT"
+          echo "${{ env.GHCR_IMAGE }}" >> "$GITHUB_OUTPUT"
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "${{ env.DOCKERHUB_IMAGE }}" >> "$GITHUB_OUTPUT"
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Docker Hub credentials absent - publishing GHCR only. Add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets to also push afg473319/afrouter."
+          fi
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -30,6 +51,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
+        if: steps.registries.outputs.dockerhub == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -39,9 +61,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.GHCR_IMAGE }}
-            ${{ env.DOCKERHUB_IMAGE }}
+          images: ${{ steps.registries.outputs.images }}
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}

@@ -2,6 +2,14 @@
   "name": "@afg473319/afrouter",
   "version": "0.5.85",
   "description": "AFRouter CLI - Start and manage AFRouter server",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AFG473319/AFRouter.git"
+  },
+  "homepage": "https://github.com/AFG473319/AFRouter",
+  "bugs": {
+    "url": "https://github.com/AFG473319/AFRouter/issues"
+  },
   "bin": {
     "afrouter": "cli.js"
   },
