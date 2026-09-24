@@ -1,6 +1,10 @@
 // Provider icon paths under /public/providers.
 // Alias related brands; session-cache 404s so one miss never spams again.
 
+const ICON_EXTENSIONS = {
+  "tokenharbor": "svg",
+};
+
 const ICON_ALIASES = {
   "perplexity-agent": "perplexity",
   "gitlab-duo": "gitlab",
@@ -29,7 +33,8 @@ export function resolveProviderIconId(providerId) {
 /** `/providers/{id}.png` or null when previously failed. */
 export function getProviderIconSrc(providerId) {
   const id = resolveProviderIconId(providerId);
-  return id ? `/providers/${id}.png` : null;
+  if (!id) return null;
+  return `/providers/${id}.${ICON_EXTENSIONS[id] || "png"}`;
 }
 
 /** Call from img onError so later mounts skip the request. */

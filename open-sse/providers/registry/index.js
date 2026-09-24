@@ -127,6 +127,7 @@ import p124 from "./nous-portal.js";
 import p125 from "./orcarouter.js";
 import p126 from "./agnesai.js";
 import p127 from "./typesafe.js";
+import p128 from "./tokenharbor.js";
 export default [
   p0,
   p1,
@@ -254,4 +255,5 @@ export default [
   p125,
   p126,
   p127,
+  p128,
 ];

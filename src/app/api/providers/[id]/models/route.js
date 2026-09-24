@@ -129,6 +129,7 @@ const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => asyn
 
 // Provider models endpoints configuration
 const PROVIDER_MODELS_CONFIG = {
+  tokenharbor: createOpenAIModelsConfig("https://tokenharbor.ai/v1/models"),
   claude: {
     url: "https://api.anthropic.com/v1/models",
     method: "GET",

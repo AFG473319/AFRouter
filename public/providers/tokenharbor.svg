@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-labelledby="title">
+  <title id="title">Token Harbor</title>
+  <rect width="192" height="192" rx="42" fill="#111827"/>
+  <path d="M56 63v47c0 20 16 36 40 36s40-16 40-36V63" fill="none" stroke="#F8FAFC" stroke-width="13" stroke-linecap="square"/>
+  <path d="M96 34v81" fill="none" stroke="#F8FAFC" stroke-width="13" stroke-linecap="square"/>
+  <path d="M96 115v18" fill="none" stroke="#F8FAFC" stroke-width="13" stroke-linecap="square"/>
+  <path d="M78 43h36" fill="none" stroke="#F8FAFC" stroke-width="13" stroke-linecap="square"/>
+  <path d="M96 43 78 25h36L96 43Z" fill="#F8FAFC"/>
+</svg>

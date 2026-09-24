@@ -299,6 +299,14 @@ export async function POST(request) {
           isValid = geminiRes.ok;
           break;
 
+        case "tokenharbor": {
+          const res = await fetch("https://tokenharbor.ai/v1/models", {
+            headers: { Authorization: `Bearer ${apiKey}` },
+          });
+          isValid = res.ok;
+          break;
+        }
+
         case "openrouter":
           const openrouterRes = await fetch("https://openrouter.ai/api/v1/models", {
             headers: { "Authorization": `Bearer ${apiKey}` },
