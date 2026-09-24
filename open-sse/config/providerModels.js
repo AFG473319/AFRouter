@@ -27,16 +27,46 @@ const DOT_VERSION_PROVIDERS = new Set(["kr", "kiro"]);
 // ("claude-sonnet-4-5" ~= "claude-sonnet-4.5"). Other providers use exact match only.
 function findModel(models, modelId, aliasOrId) {
   if (!models) return undefined;
-  const baseModelId = typeof modelId === "string"
+  const baseModelId = stripThinkingModelId(modelId);
+  const index = getModelIndex(aliasOrId);
+  const normalizedModelId = DOT_VERSION_PROVIDERS.has(aliasOrId)
+    ? normalizeModelId(baseModelId)
+    : baseModelId;
+  return index?.exact.get(modelId)
+    || index?.base.get(baseModelId)
+    || index?.normalized.get(normalizedModelId)
+    || undefined;
+}
+
+// Registry models are immutable after module initialization. Build lookup maps once
+// instead of scanning every provider's model array for each routing field lookup.
+function stripThinkingModelId(modelId) {
+  return typeof modelId === "string"
     ? modelId.replace(/\([^()]+\)\s*$/, "").trim()
     : modelId;
-  const found = models.find(m => m.id === modelId || m.id === baseModelId);
-  if (found) return found;
-  if (!DOT_VERSION_PROVIDERS.has(aliasOrId)) return undefined;
-  const normalized = normalizeModelId(baseModelId);
-  if (normalized === baseModelId) return undefined;
-  return models.find(m => m.id === normalized);
 }
+
+function getModelIndex(aliasOrId) {
+  return MODEL_INDEXES[aliasOrId];
+}
+
+const MODEL_INDEXES = Object.fromEntries(
+  Object.entries(PROVIDER_MODELS).map(([alias, models]) => {
+    const exact = new Map();
+    const base = new Map();
+    const normalized = new Map();
+    for (const model of models) {
+      if (!exact.has(model.id)) exact.set(model.id, model);
+      const modelBase = stripThinkingModelId(model.id);
+      if (!base.has(modelBase)) base.set(modelBase, model);
+      if (DOT_VERSION_PROVIDERS.has(alias)) {
+        const modelNormalized = normalizeModelId(modelBase);
+        if (!normalized.has(modelNormalized)) normalized.set(modelNormalized, model);
+      }
+    }
+    return [alias, { exact, base, normalized }];
+  }),
+);
 
 export function isValidModel(aliasOrId, modelId, passthroughProviders = new Set()) {
   if (passthroughProviders.has(aliasOrId)) return true;
@@ -52,9 +82,16 @@ export function findModelName(aliasOrId, modelId) {
   return found?.name || modelId;
 }
 
+const PROVIDER_DEFS_BY_KEY = new Map();
+for (const entry of REGISTRY) {
+  for (const key of [entry.id, entry.alias, entry.uiAlias]) {
+    if (key && !PROVIDER_DEFS_BY_KEY.has(key)) PROVIDER_DEFS_BY_KEY.set(key, entry);
+  }
+}
+
 function findProviderDef(aliasOrId) {
   if (!aliasOrId) return undefined;
-  return REGISTRY.find((r) => r.id === aliasOrId || r.alias === aliasOrId || r.uiAlias === aliasOrId);
+  return PROVIDER_DEFS_BY_KEY.get(aliasOrId);
 }
 
 export function getModelTargetFormat(aliasOrId, modelId) {

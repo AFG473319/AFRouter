@@ -407,7 +407,42 @@ export async function buildModelsList(kindFilter, options = {}) {
   } catch (e) {
     console.log("Could not fetch disabled models");
   }
-  const isDisabled = (alias, modelId) => Array.isArray(disabledByAlias[alias]) && disabledByAlias[alias].includes(modelId);
+  const disabledModelSets = new Map(
+    Object.entries(disabledByAlias || {}).map(([alias, ids]) => [alias, new Set(Array.isArray(ids) ? ids : [])]),
+  );
+  const isDisabled = (alias, modelId) => disabledModelSets.get(alias)?.has(modelId) === true;
+
+  // Build per-call indexes once instead of rescanning every custom/alias row for
+  // every active provider. These remain request-local so dashboard changes are
+  // visible immediately without stale cross-request caches.
+  const customModelKindsByAlias = new Map();
+  for (const model of customModels) {
+    const alias = model?.providerAlias;
+    const id = typeof model?.id === "string" ? model.id.trim() : "";
+    if (!alias || !id) continue;
+    let rows = customModelKindsByAlias.get(alias);
+    if (!rows) {
+      rows = [];
+      customModelKindsByAlias.set(alias, rows);
+    }
+    rows.push([id, getModelKind(model) || LLM_KIND]);
+  }
+
+  const aliasModelIdsByPrefix = new Map();
+  for (const fullModel of Object.values(modelAliases || {})) {
+    if (typeof fullModel !== "string") continue;
+    const slash = fullModel.indexOf("/");
+    if (slash <= 0 || slash === fullModel.length - 1) continue;
+    const prefix = fullModel.slice(0, slash);
+    const modelId = fullModel.slice(slash + 1).trim();
+    if (!modelId) continue;
+    let ids = aliasModelIdsByPrefix.get(prefix);
+    if (!ids) {
+      ids = new Set();
+      aliasModelIdsByPrefix.set(prefix, ids);
+    }
+    ids.add(modelId);
+  }
 
   const activeConnectionByProvider = new Map();
   for (const conn of connections) {
@@ -568,45 +603,23 @@ export async function buildModelsList(kindFilter, options = {}) {
         .filter((modelId) => typeof modelId === "string" && modelId.trim() !== "");
 
       const customModelKindById = new Map();
-      const customModelIds = customModels
-        .filter((m) => {
-          if (!m?.id) return false;
-          const kind = getModelKind(m) || LLM_KIND;
+      for (const alias of [outputAlias, staticAlias, providerId]) {
+        const rows = customModelKindsByAlias.get(alias);
+        if (!rows) continue;
+        for (const [modelId, kind] of rows) {
           // imageToText custom models are vision-capable chat models: expose them
           // both in the default LLM list and in /v1/models/image-to-text.
-          if (!kindFilter.includes(kind) && !(kind === "imageToText" && kindFilter.includes(LLM_KIND))) return false;
-          const alias = m.providerAlias;
-          return alias === staticAlias || alias === outputAlias || alias === providerId;
-        })
-        .map((m) => {
-          const modelId = String(m.id).trim();
-          if (modelId) customModelKindById.set(modelId, getModelKind(m) || LLM_KIND);
-          return modelId;
-        })
-        .filter((modelId) => modelId !== "");
+          if (!kindFilter.includes(kind) && !(kind === "imageToText" && kindFilter.includes(LLM_KIND))) continue;
+          customModelKindById.set(modelId, kind);
+        }
+      }
+      const customModelIds = Array.from(customModelKindById.keys());
 
-      const aliasModelIds = Object.values(modelAliases || {})
-        .filter((fullModel) => {
-          if (typeof fullModel !== "string" || !fullModel.includes("/")) return false;
-          return (
-            fullModel.startsWith(`${outputAlias}/`) ||
-            fullModel.startsWith(`${staticAlias}/`) ||
-            fullModel.startsWith(`${providerId}/`)
-          );
-        })
-        .map((fullModel) => {
-          if (fullModel.startsWith(`${outputAlias}/`)) {
-            return fullModel.slice(outputAlias.length + 1);
-          }
-          if (fullModel.startsWith(`${staticAlias}/`)) {
-            return fullModel.slice(staticAlias.length + 1);
-          }
-          if (fullModel.startsWith(`${providerId}/`)) {
-            return fullModel.slice(providerId.length + 1);
-          }
-          return fullModel;
-        })
-        .filter((modelId) => typeof modelId === "string" && modelId.trim() !== "");
+      const aliasModelIds = [];
+      for (const prefix of [outputAlias, staticAlias, providerId]) {
+        const ids = aliasModelIdsByPrefix.get(prefix);
+        if (ids) aliasModelIds.push(...ids);
+      }
 
       const mergedModelIds = Array.from(new Set([...modelIds, ...customModelIds, ...aliasModelIds]));
 
