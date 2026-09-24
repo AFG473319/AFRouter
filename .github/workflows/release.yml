@@ -102,6 +102,12 @@ jobs:
       - name: Install root deps
         run: npm ci --no-audit --no-fund
 
+      # The MITM sub-build (build-cli.js step 8) bundles with esbuild, which is
+      # a devDependency of the CLI package. cli/ has no tracked lockfile, so npm
+      # install — not npm ci — is the only option there.
+      - name: Install CLI build deps (esbuild for the MITM sub-build)
+        run: npm install --no-audit --no-fund --prefix cli
+
       - name: Upgrade npm (trusted publishing + provenance need npm >= 11.6)
         run: npm install -g npm@latest
 
