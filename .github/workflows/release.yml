@@ -40,6 +40,7 @@ on:
 
 permissions:
   contents: write   # tag push after a dispatched publish
+  actions: write     # dispatch docker-publish.yml for the released tag
   id-token: write   # npm trusted publishing (OIDC) + provenance attestations
 
 concurrency:
@@ -166,10 +167,11 @@ jobs:
           fi
           npm publish --access=public --provenance --ignore-scripts
 
-      - name: Create + push the release tag (dispatch path)
+      - name: Create + push the release tag, then build the images (dispatch path)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_after_publish && !inputs.dry_run }}
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -180,8 +182,13 @@ jobs:
           else
             git tag "v$VERSION"
             git push origin "v$VERSION"
-            echo "pushed v$VERSION — docker-publish.yml (GHCR + Docker Hub) will build the images"
+            echo "pushed v$VERSION"
           fi
+          # A push made with GITHUB_TOKEN deliberately does NOT trigger other
+          # workflows (GitHub's recursion guard) — workflow_dispatch is the
+          # documented exception, so ask for the image build explicitly.
+          gh workflow run docker-publish.yml --repo "${{ github.repository }}" --ref "v$VERSION" \
+            || echo "::warning::could not dispatch docker-publish.yml for v$VERSION - run it manually from the Actions tab"
 
       - name: Step summary
         if: always()
