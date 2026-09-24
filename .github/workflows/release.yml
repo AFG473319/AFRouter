@@ -1,0 +1,187 @@
+name: Release — build & publish to npm
+
+# Official npm release of the CLI package (@afg473319/afrouter), which ships the
+# whole gateway: the Next.js production build is assembled into cli/app ON THE
+# RUNNER, scrubbed of builder identity, fail-closed verified, smoke-tested, and
+# published. The root app package stays private:true and is never published.
+#
+# Auth (one-time setup, either):
+#   - npm automation token in the `NPM_TOKEN` repository secret, or
+#   - npm "trusted publishing" (OIDC): on npmjs.com connect this repo + this
+#     workflow file once; the job has id-token: write and needs no secret.
+#
+# Trigger: push a v* tag (also fires docker-publish.yml for GHCR + Docker Hub),
+# or dispatch manually with the version — default is a dry_run rehearsal.
+#
+# Privacy: the build never runs on a developer machine, so no personal paths can
+# enter the artifact. sanitize-personal.js then rewrites the runner's home prefix
+# in embedded manifests, and verify-package-clean.js fails the release if any
+# non-generic home path, machine-id, state DB, or .env survives in the bundle.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (must match cli/package.json, root package.json, and CHANGELOG.md) — e.g. 0.5.85"
+        required: true
+        type: string
+      dry_run:
+        description: "Rehearsal: build + privacy gate + smoke test, but no publish"
+        required: false
+        default: true
+        type: boolean
+      tag_after_publish:
+        description: "After a real publish, create+push the v<version> tag so docker-publish.yml also runs"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write   # tag push after a dispatched publish
+  id-token: write   # npm trusted publishing (OIDC) + provenance attestations
+
+concurrency:
+  group: release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false   # never kill a release mid-publish
+
+env:
+  NEXT_TELEMETRY_DISABLED: 1
+  CI: true
+
+jobs:
+  preflight:
+    name: Preflight (version consistency)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version must agree everywhere and must be unpublished
+        id: check
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version || github.ref_name }}"
+          VERSION="${VERSION#v}"
+          CLI_VER=$(node -p "require('./cli/package.json').version")
+          ROOT_VER=$(node -p "require('./package.json').version")
+          if [ "$CLI_VER" != "$VERSION" ]; then echo "::error::cli/package.json is $CLI_VER, expected $VERSION"; exit 1; fi
+          if [ "$ROOT_VER" != "$VERSION" ]; then echo "::error::root package.json is $ROOT_VER, expected $VERSION (keep cli -> root versions equal in git)"; exit 1; fi
+          if ! grep -q "^# v$VERSION " CHANGELOG.md; then echo "::error::CHANGELOG.md has no '# v$VERSION (...)' entry"; exit 1; fi
+          if npm view "@afg473319/afrouter@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::@afg473319/afrouter@$VERSION is ALREADY on npm — bump the version, releases are immutable"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "preflight OK — releasing $VERSION (unpublished; changelog present; cli/root versions match)"
+
+  publish:
+    name: Build, verify & publish
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22 (matches Dockerfile node:22-alpine and beta.yml)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-release-${{ hashFiles('package-lock.json') }}-${{ hashFiles('cli/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-release-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Upgrade npm (trusted publishing + provenance need npm >= 11.6)
+        run: npm install -g npm@latest
+
+      - name: Build CLI package (production Next.js build assembled into cli/app)
+        working-directory: cli
+        run: npm run build
+
+      - name: Build must not alter the committed version state
+        run: git diff --exit-code -- package.json
+
+      - name: Scrub builder identity from the bundle
+        run: node cli/scripts/sanitize-personal.js
+
+      - name: Privacy gate — fail if any builder path/identity/state survived
+        run: node cli/scripts/verify-package-clean.js
+
+      - name: Smoke test the packaged app
+        run: |
+          set -euo pipefail
+          export DATA_DIR="$RUNNER_TEMP/release-smoke"
+          mkdir -p "$DATA_DIR"
+          DISABLE_BACKGROUND_TOKEN_REFRESH=1 PORT=20999 \
+            node cli/app/custom-server.js --port 20999 > "$RUNNER_TEMP/release-smoke.log" 2>&1 &
+          SRV=$!
+          OK=0
+          for i in $(seq 1 90); do
+            if [ "$(curl -fsS http://127.0.0.1:20999/api/health 2>/dev/null || true)" = '{"ok":true}' ]; then OK=1; break; fi
+            sleep 2
+          done
+          kill $SRV 2>/dev/null || true
+          wait $SRV 2>/dev/null || true
+          if [ "$OK" != "1" ]; then
+            echo "::error::packaged app did not answer /api/health — log tail:"
+            tail -n 60 "$RUNNER_TEMP/release-smoke.log"
+            exit 1
+          fi
+          echo "packaged app healthy on 20999"
+
+      - name: Tarball preview (exactly what npm would upload)
+        if: ${{ inputs.dry_run && github.event_name == 'workflow_dispatch' }}
+        working-directory: cli
+        run: npm pack --dry-run --ignore-scripts 2>&1 | tail -n 25
+
+      - name: Publish to npm
+        if: ${{ github.event_name == 'push' || !inputs.dry_run }}
+        working-directory: cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "No NPM_TOKEN secret present — publishing via npm trusted publishing (OIDC)."
+          fi
+          npm publish --access=public --provenance --ignore-scripts
+
+      - name: Create + push the release tag (dispatch path)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_after_publish && !inputs.dry_run }}
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin --tags
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "tag v$VERSION already exists — leaving it untouched"
+          else
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+            echo "pushed v$VERSION — docker-publish.yml (GHCR + Docker Hub) will build the images"
+          fi
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Release ${{ needs.preflight.outputs.version }}"
+            echo ""
+            if [ "${{ inputs.dry_run }}" = "true" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "**Dry run** — built, privacy-gated and smoke-tested; nothing was published."
+            else
+              echo "Published to npm: \`npm i -g @afg473319/afrouter@${{ needs.preflight.outputs.version }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
