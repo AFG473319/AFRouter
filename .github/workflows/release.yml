@@ -71,6 +71,10 @@ jobs:
           if [ "$CLI_VER" != "$VERSION" ]; then echo "::error::cli/package.json is $CLI_VER, expected $VERSION"; exit 1; fi
           if [ "$ROOT_VER" != "$VERSION" ]; then echo "::error::root package.json is $ROOT_VER, expected $VERSION (keep cli -> root versions equal in git)"; exit 1; fi
           if ! grep -q "^# v$VERSION " CHANGELOG.md; then echo "::error::CHANGELOG.md has no '# v$VERSION (...)' entry"; exit 1; fi
+          # npm verifies the sigstore provenance bundle against the package's own
+          # repository.url; an empty value is rejected with a 422 at publish time.
+          REPO_URL=$(node -p "require('./cli/package.json').repository?.url || ''")
+          if [ -z "$REPO_URL" ]; then echo "::error::cli/package.json has no repository.url — npm provenance rejects the upload without it"; exit 1; fi
           if npm view "@afg473319/afrouter@$VERSION" version >/dev/null 2>&1; then
             echo "::error::@afg473319/afrouter@$VERSION is ALREADY on npm — bump the version, releases are immutable"; exit 1
           fi
