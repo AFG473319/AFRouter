@@ -107,4 +107,19 @@ describe("release package privacy", () => {
 
     expect(runExpectingFailure(VERIFY)).toBe(false);
   });
+
+  it("exempts vendored dependencies from content checks but not from identity files", () => {
+    // Upstream packages legitimately embed foreign-home and Windows example
+    // strings (bindings: /home/nate, sql.js: /home/web_user, next: C:\\Users\\…),
+    // and they ship byte-identical to every install — they cannot carry the
+    // builder's identity.
+    write("node_modules/bindings/bindings.js", 'const dev = "/home/nate/project";');
+    write("node_modules/next/dist/server/patch.js", 'const win = "C:\\\\Users\\\\dev\\\\app";');
+    write("node_modules/sql.js/dist/sql-wasm.js", 'var home = "/home/web_user";');
+    expect(runExpectingFailure(VERIFY)).toBe(false);
+
+    // …but a credential/identity file under a dependency is still fatal.
+    write("node_modules/some-pkg/machine-id", "raw");
+    expect(runExpectingFailure(VERIFY)).toBe(true);
+  });
 });
