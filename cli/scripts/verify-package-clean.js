@@ -5,13 +5,23 @@
 //
 // Invariants (no developer name is ever embedded in this repo to check against —
 // the checks are structural, so they hold for any builder on any machine):
-//   1. No Windows home paths (`C:\Users\...`, `C:/Users/...`) anywhere. The
-//      release build runs on Linux; such a path means a locally packed artifact.
+//   1. No Windows home paths (`C:\Users\...`, `C:/Users/...`) anywhere outside
+//      vendored dependencies. The release build runs on Linux; such a path in
+//      generated output means a locally packed artifact leaked in.
 //   2. No /home/<user> path for any account other than the generic CI accounts
 //      the sanitizer leaves in place (runner) or its neutral replacement
-//      (builder). A foreign home path means a non-CI build leaked through.
-//   3. No machine-id / SQLite state files in the bundle.
-//   4. No `.env` files (credentials) in the bundle.
+//      (builder). A foreign home path in generated output means a non-CI build.
+//   3. No machine-id / SQLite state / .env files — checked EVERYWHERE,
+//      including node_modules (a credential file must never ship, and a
+//      postinstall artifact under a dependency would be just as fatal).
+//
+// Vendored node_modules is exempt from the two CONTENT checks only: dependency
+// source ships byte-identical to every install and legitimately contains
+// foreign-home constants (`/home/nate` in bindings, `/home/web_user` in
+// sql.js's emscripten output, Windows example strings in next) — none of which
+// can be the builder's identity. Generated build output (manifests, .nft.json,
+// source maps, server chunks — everything outside node_modules) is where build
+// paths actually land, and it is scanned strictly.
 //
 // Text files only (same allowlist as the sanitizer); binaries are skipped.
 // Exits 1 and prints every offending path so the failure is actionable.
@@ -45,10 +55,12 @@ function checkTextFile(file, s) {
   // checkFileNames covers that.
 }
 
-function checkFileNames(file, name) {
+function checkFileNames(file, name, vendored) {
   const lower = name.toLowerCase();
   if (lower === "machine-id" || lower === "machineid") record(file, "identity-file", name);
-  if (lower.endsWith(".sqlite") || lower.endsWith(".sqlite-wal") || lower.endsWith(".sqlite-shm")) record(file, "state-file", name);
+  // Vendored packages may legitimately ship .sqlite fixtures; a state DB only
+  // matters in the app's own tree.
+  if (!vendored && (lower.endsWith(".sqlite") || lower.endsWith(".sqlite-wal") || lower.endsWith(".sqlite-shm"))) record(file, "state-file", name);
   if (lower === ".env" || lower.startsWith(".env.")) record(file, "env-file", name);
 }
 
@@ -56,7 +68,9 @@ function checkFileNames(file, name) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) { walk(p); continue; }
-    checkFileNames(p, e.name);
+    const vendored = p.split(path.sep).includes("node_modules");
+    checkFileNames(p, e.name, vendored);
+    if (vendored) continue; // content checks skip vendored dependencies
     if (!TEXT_EXT.has(path.extname(e.name).toLowerCase())) continue;
     let s;
     try { s = fs.readFileSync(p, "utf8"); } catch { continue; }
