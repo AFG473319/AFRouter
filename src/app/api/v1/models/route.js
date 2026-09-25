@@ -8,6 +8,7 @@ import {
 import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
 import { parseModel } from "@/sse/services/model.js";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
+import { buildRetiredModelIndex, isRetiredInListing } from "@/lib/retiredModelsList.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
@@ -412,6 +413,13 @@ export async function buildModelsList(kindFilter, options = {}) {
   );
   const isDisabled = (alias, modelId) => disabledModelSets.get(alias)?.has(modelId) === true;
 
+  // Models the upstream retired (NVIDIA NIM sunsets hosted ids after a fixed
+  // window) are hidden here as well. Routing already bypasses them, so
+  // advertising them only hands clients an id that is guaranteed to 404.
+  const retiredModelIndex = buildRetiredModelIndex(connections);
+  const isHidden = (alias, modelId) =>
+    isDisabled(alias, modelId) || isRetiredInListing(retiredModelIndex, alias, modelId);
+
   // Build per-call indexes once instead of rescanning every custom/alias row for
   // every active provider. These remain request-local so dashboard changes are
   // visible immediately without stale cross-request caches.
@@ -486,7 +494,7 @@ export async function buildModelsList(kindFilter, options = {}) {
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
       for (const model of providerModels) {
         if (!kindFilter.includes(modelKind(model))) continue;
-        if (isDisabled(alias, model.id)) continue;
+        if (isHidden(alias, model.id)) continue;
         models.push({
           id: `${alias}/${model.id}`,
           object: "model",
@@ -505,7 +513,7 @@ export async function buildModelsList(kindFilter, options = {}) {
       const modelId = String(customModel.id).trim();
       if (!modelId) continue;
       // Disabled custom models follow the same hide-list as built-ins
-      if (isDisabled(providerAlias, modelId)) continue;
+      if (isHidden(providerAlias, modelId)) continue;
 
       const entry = {
         id: `${providerAlias}/${modelId}`,
@@ -631,7 +639,7 @@ export async function buildModelsList(kindFilter, options = {}) {
         // imageToText custom models stay in the LLM list (vision-capable chat models)
         const allowAsLlm = kind === "imageToText" && kindFilter.includes(LLM_KIND);
         if (!kindFilter.includes(kind) && !allowAsLlm) continue;
-        if (isDisabled(outputAlias, modelId) || isDisabled(staticAlias, modelId)) continue;
+        if (isHidden(outputAlias, modelId) || isHidden(staticAlias, modelId)) continue;
 
         const model = {
           id: `${outputAlias}/${modelId}`,

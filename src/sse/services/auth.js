@@ -2,6 +2,16 @@ import { getProviderConnections, validateApiKey, updateProviderConnection, getSe
 import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
+import {
+  isRetiredModelError,
+  getRetiredModelCooldownMs,
+  getRetiredStrikes,
+  getRetiredModelKey,
+  buildRetireModelUpdate,
+  buildUnretireModelUpdate,
+  isModelRetired,
+  collectRetiredModelsByModel,
+} from "open-sse/services/retiredModels.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import { getAntigravityQuotaCache, isAntigravityPoolBlocked } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
@@ -110,13 +120,34 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     connections.forEach(c => {
       const excluded = excludeSet.has(c.id);
       const locked = isModelLockActive(c, model);
+      const retired = isModelRetired(c, model);
       if (excluded || locked) {
         const lockUntil = getEarliestModelLockUntil(c);
-        log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `modelLocked(${model}) until ${lockUntil}` : ""}`);
+        const tag = retired ? `retired(${model})` : `modelLocked(${model})`;
+        log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `${tag} until ${lockUntil}` : ""}`);
       }
     });
 
     if (availableConnections.length === 0) {
+      // Every account bypassed THIS model (upstream retired the id) while the
+      // credentials themselves are fine. Answer with a model-scoped error so a
+      // combo falls through to the next model instead of reporting a rate limit.
+      if (model) {
+        const retired = collectRetiredModelsByModel(connections);
+        const entry = retired.get(model);
+        if (entry) {
+          log.warn("AUTH", `${provider} | model ${model} retired upstream until ${entry.until} (strike ${entry.strikes}) — all ${connections.length} accounts bypassed`);
+          return {
+            modelRetired: true,
+            model,
+            retryAfter: entry.until,
+            retryAfterHuman: formatRetryAfter(entry.until),
+            lastError: "Model retired by upstream (NVIDIA NIM sunsets models after a fixed window)",
+            lastErrorCode: 404
+          };
+        }
+      }
+
       // Find earliest persistent lock or lazy Antigravity quota-cache reset for retry timing.
       const lockedConns = connections.filter(c => isModelLockActive(c, model));
       const expiries = lockedConns.map(c => getEarliestModelLockUntil(c)).filter(Boolean);
@@ -273,6 +304,27 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
+  // Upstream retired this model id. NVIDIA NIM sunsets hosted models after a
+  // fixed window: the id then 404s forever while every sibling model on the
+  // SAME key keeps working. A flat 2-minute 404 cooldown retries a dead id every
+  // 2 minutes indefinitely, and marking the connection unavailable would take
+  // the healthy models down with it. Lock the MODEL with an escalating horizon
+  // and leave the credential active.
+  if (model && isRetiredModelError(status, errorText)) {
+    const strikes = getRetiredStrikes(conn, model) + 1;
+    const cooldownMs = getRetiredModelCooldownMs(strikes);
+    const retireReason = (typeof errorText === "string" && errorText)
+      ? errorText.slice(0, 100)
+      : `Model retired upstream (${status})`;
+    const retireUpdate = buildRetireModelUpdate(model, { strikes, reason: retireReason });
+
+    await updateProviderConnection(connectionId, retireUpdate);
+
+    const connName = conn?.displayName || conn?.name || conn?.email || connectionId.slice(0, 8);
+    log.warn("AUTH", `${connName} retired ${model} until ${retireUpdate[getRetiredModelKey(model)]} (strike ${strikes}) [${status}] — bypassing model, credential stays active`);
+    return { shouldFallback: true, cooldownMs, retired: true };
+  }
+
   const reason = typeof errorText === "string" ? errorText.slice(0, 100) : "Provider error";
   const lockUpdate = buildModelLockUpdate(githubResetAtMs ? null : model, cooldownMs);
 
@@ -326,6 +378,14 @@ export async function clearAccountError(connectionId, currentConnection, model =
   const conn = currentConnection._connection || currentConnection;
   const now = Date.now();
   const allLockKeys = Object.keys(conn).filter(k => k.startsWith("modelLock_"));
+
+  // A model that answers again is serving again (NVIDIA brings id back, or the
+  // retirement was a transient blip). Drop the bypass marker and its strike
+  // count so routing stops skipping it.
+  if (model && isModelRetired(conn, model)) {
+    await updateProviderConnection(connectionId, buildUnretireModelUpdate(model));
+    log.info("AUTH", `${conn?.displayName || connectionId.slice(0, 8)} | ${model} responding again — retirement cleared`);
+  }
 
   if (!conn.testStatus && !conn.lastError && allLockKeys.length === 0) return;
 
