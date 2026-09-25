@@ -24,7 +24,9 @@ export async function GET(request) {
     }
     const json = await res.json();
     const raw = json.data ?? json.models ?? json;
-    const data = filter(Array.isArray(raw) ? raw : []);
+    // Most provider catalogs are arrays. models.dev is a provider map, so pass
+    // that object as a single item and let the provider filter unwrap it.
+    const data = filter(Array.isArray(raw) ? raw : (raw && typeof raw === "object" ? [raw] : []));
     return NextResponse.json({ data });
   } catch {
     return NextResponse.json({ data: [] });

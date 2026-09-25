@@ -75,6 +75,57 @@ export const ERROR_RULES = [
   { status: 429, backoff: true },
 ];
 
+// --- Retired models -------------------------------------------------------
+// Some upstreams retire model ids instead of failing the credential: NVIDIA
+// NIM sunsets hosted models after a fixed window, and the id then answers 404
+// forever while every sibling model on the same API key keeps working. A 404
+// must not be treated as a plain 2-minute cooldown here — that retries a dead
+// id every 2 minutes, indefinitely.
+//
+// Text rules win over status rules: a 404 whose body names a *different*
+// model ("model X not found" for a combo fallthrough) is a routing artifact,
+// not a retirement.
+export const RETIRED_MODEL_RULES = [
+  // --- Text-based rules (checked first, order = priority) ---
+  { text: "model not found" },
+  { text: "model_not_found" },
+  { text: "model does not exist" },
+  { text: "no such model" },
+  { text: "unknown model" },
+  { text: "model is not available" },
+  { text: "model not available" },
+  { text: "no longer available" },
+  { text: "is deprecated" },
+  { text: "has been deprecated" },
+  { text: "decommissioned" },
+  { text: "model_not_supported" },
+  { text: "model not supported" },
+  { text: "unsupported model" },
+
+  // --- Status-based rules (fallback when text doesn't match) ---
+  { status: 404 },
+  { status: 406 },
+];
+
+/**
+ * Cooldown ladder for a retired model, indexed by consecutive strike count.
+ * Strike 1 is deliberately short so a transient routing hiccup is not punished,
+ * but each repeat multiplies until the id is effectively bypassed. Capped at 30
+ * days: long enough that a genuinely dead id stops being retried, short enough
+ * that a resurrected id comes back on its own without a manual unlock.
+ */
+export const RETIRED_MODEL_COOLDOWNS = [
+  5 * 60 * 1000,           // 5 min  — first sighting, probably transient
+  30 * 60 * 1000,          // 30 min
+  6 * 60 * 60 * 1000,      // 6 h
+  24 * 60 * 60 * 1000,     // 24 h
+  7 * 24 * 60 * 60 * 1000, // 7 d
+  30 * 24 * 60 * 60 * 1000,// 30 d — cap
+];
+
+/** Number of leading ladder entries (used by tests / docs). */
+export const RETIRED_MODEL_MAX_STRIKES = RETIRED_MODEL_COOLDOWNS.length;
+
 // Backward compat: COOLDOWN_MS object (used by index.js re-export)
 export const COOLDOWN_MS = {
   unauthorized: COOLDOWN.long,

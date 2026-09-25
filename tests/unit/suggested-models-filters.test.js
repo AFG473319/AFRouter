@@ -43,4 +43,38 @@ describe("suggested-models filters", () => {
       expect(FILTERS.openai({ data: "unexpected" })).toEqual([]);
     });
   });
+
+  describe("nvidia (models.dev provider catalog)", () => {
+    const model = (overrides = {}) => ({
+      id: "vendor/model",
+      name: "Model",
+      modalities: { input: ["text"], output: ["text"] },
+      tool_call: true,
+      cost: { input: 0, output: 0 },
+      limit: { context: 128000 },
+      last_updated: "2026-01-01",
+      ...overrides,
+    });
+
+    it("returns free tool-capable chat models with context specs", () => {
+      const out = FILTERS.nvidia({ nvidia: { models: { "vendor/model": model() } } });
+      expect(out).toEqual([{ id: "vendor/model", name: "Model", contextLength: 128000 }]);
+    });
+
+    it("excludes non-chat, paid, and non-tool models and orders newest first", () => {
+      const out = FILTERS.nvidia({ nvidia: { models: {
+        old: model(),
+        new: model({ id: "vendor/new", last_updated: "2026-02-01" }),
+        paid: model({ id: "vendor/paid", cost: { input: 0.1, output: 0 } }),
+        image: model({ id: "vendor/image", modalities: { input: ["text"], output: ["image"] } }),
+        noTools: model({ id: "vendor/no-tools", tool_call: false }),
+      } } });
+      expect(out.map((m) => m.id)).toEqual(["vendor/new", "vendor/model"]);
+    });
+
+    it("tolerates missing or malformed provider data", () => {
+      expect(FILTERS.nvidia(null)).toEqual([]);
+      expect(FILTERS.nvidia({ nvidia: { models: {} } })).toEqual([]);
+    });
+  });
 });

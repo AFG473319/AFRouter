@@ -11,6 +11,12 @@ const OPTIONAL_FIELDS = [
 ];
 
 const MODEL_LOCK_PREFIX = "modelLock_";
+// Retirement markers are the long-horizon form of a model lock (upstream sunsets
+// a model id). Re-enabling a connection is a deliberate "use this again", so it
+// clears them exactly like it clears modelLock_* — otherwise a manually
+// re-enabled connection would keep bypassing a model the user just restored.
+const RETIRED_MODEL_PREFIX = "retiredModel_";
+const RETIRED_STRIKES_PREFIX = "retiredStrikes_";
 
 function resetHealthStateOnActivation(existing, patch) {
   if (patch?.testStatus !== "active") return patch;
@@ -27,6 +33,7 @@ function resetHealthStateOnActivation(existing, patch) {
 
   for (const key of Object.keys(existing || {})) {
     if (key.startsWith(MODEL_LOCK_PREFIX)) normalized[key] = null;
+    if (key.startsWith(RETIRED_MODEL_PREFIX) || key.startsWith(RETIRED_STRIKES_PREFIX)) normalized[key] = null;
   }
 
   return normalized;

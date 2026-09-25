@@ -235,6 +235,17 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
 
+    // Upstream retired this model id: every connection is bypassed for it, but
+    // the credentials are healthy. Answer 404 so a combo moves to the next
+    // model immediately instead of retrying a dead NIM model each turn.
+    if (credentials?.modelRetired) {
+      log.warn("CHAT", `[${provider}/${model}] retired upstream (${credentials.retryAfterHuman}) — skipping`);
+      return errorResponse(
+        HTTP_STATUS.NOT_FOUND,
+        `[${provider}/${model}] Model retired by upstream. Retry after ${credentials.retryAfterHuman}.`
+      );
+    }
+
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
       if (credentials?.allRateLimited) {

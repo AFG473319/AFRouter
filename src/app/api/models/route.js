@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getModelAliases, setModelAlias, getCustomModels } from "@/models";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
+import { getProviderConnections } from "@/lib/localDb";
+import { buildRetiredModelIndex, isRetiredInListing } from "@/lib/retiredModelsList.js";
 import { AI_MODELS } from "@/shared/constants/config";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
@@ -11,11 +13,18 @@ export async function GET() {
     const modelAliases = await getModelAliases();
     const disabled = await getDisabledModels();
 
+    // Hide models the upstream retired (NVIDIA NIM sunsets hosted ids after a
+    // fixed window) so the dashboard stops offering ids that routing bypasses.
+    const retiredIndex = buildRetiredModelIndex(
+      await getProviderConnections().catch(() => [])
+    );
+
     const models = AI_MODELS
       .filter((m) => {
         const alias = getProviderAlias(m.provider) || m.provider;
         const list = disabled[alias] || disabled[m.provider] || [];
-        return !list.includes(m.model);
+        if (list.includes(m.model)) return false;
+        return !isRetiredInListing(retiredIndex, alias, m.model);
       })
       .map((m) => {
         const fullModel = `${m.provider}/${m.model}`;

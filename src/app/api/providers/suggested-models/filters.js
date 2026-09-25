@@ -32,6 +32,32 @@ export const FILTERS = {
       })
       .slice(0, 100),
 
+  // NVIDIA's public /v1/models endpoint is OpenAI-shaped but only returns
+  // ids. models.dev is the provider-scoped catalog used here instead: it keeps
+  // the live NIM ids and carries enough metadata to avoid suggesting
+  // embeddings, image/video models, safety models, and paid-only entries as
+  // chat models. The page's existing custom-model flow persists the full specs
+  // when a suggestion is added.
+  "nvidia": (payload) => {
+    const envelope = Array.isArray(payload) ? payload[0] : payload;
+    const provider = envelope?.nvidia || envelope;
+    return Object.values(provider?.models || {})
+      .filter((model) => model?.id)
+      .filter((model) => model.modalities?.input?.includes("text") && model.modalities?.output?.includes("text"))
+      .filter((model) => model.tool_call === true)
+      .filter((model) => model.cost?.input === 0 && model.cost?.output === 0)
+      .sort((a, b) => String(b.last_updated || "").localeCompare(String(a.last_updated || ""))
+        || (b.limit?.context || 0) - (a.limit?.context || 0))
+      .slice(0, 100)
+      .map((model) => ({
+        id: model.id,
+        name: model.name || model.id,
+        ...(Number.isSafeInteger(model.limit?.context) && model.limit.context > 0
+          ? { contextLength: model.limit.context }
+          : {}),
+      }));
+  },
+
   "openrouter-free": (models) =>
     models
       .filter(
