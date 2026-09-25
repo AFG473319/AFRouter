@@ -1,3 +1,8 @@
+# v0.5.86 (2026-09-25)
+
+## Features
+- **Pi Agent**: new CLI tool integration. AFRouter registers itself as an `afrouter` provider in `~/.pi/agent/models.json` (`openai-completions` API with `supportsDeveloperRole`/`supportsReasoningEffort` compat disabled) so Pi's model picker offers AFRouter models — Pi re-reads the file on every `/model`, no restart needed. Dashboard card supports endpoint selection (local/tunnel/Tailscale), API-key picker, multi-model apply with capability specs from the live catalog, per-model removal, Manual Config for remote machines, and a Reset that removes only the AFRouter entry.
+
 # v0.5.85 (2026-09-24)
 
 ## Features

@@ -176,6 +176,33 @@ export const CLI_TOOLS = {
       },
     ],
   },
+  pi: {
+    id: "pi",
+    name: "Pi Agent",
+    icon: "terminal",
+    color: "#0EA5E9",
+    description: "Pi coding agent (custom providers via models.json)",
+    configType: "custom",
+    docsUrl: "https://github.com/badlogic/pi-mono",
+    notes: [
+      {
+        type: "info",
+        text: "AFRouter registers itself as an `afrouter` provider in ~/.pi/agent/models.json so Pi's model picker offers AFRouter models.",
+      },
+      {
+        type: "info",
+        text: "Pi re-reads models.json every time /model runs — no restart needed. Pick a model with /model afrouter/<id> or start with pi --provider afrouter --model <id>.",
+      },
+      {
+        type: "warning",
+        text: "Config path: Linux/macOS ~/.pi/agent/models.json • Windows %USERPROFILE%\\.pi\\agent\\models.json",
+      },
+      {
+        type: "warning",
+        text: "Reset removes only the AFRouter entry — providers you configured by hand are kept.",
+      },
+    ],
+  },
   cowork: {
     id: "cowork",
     name: "Claude Cowork",
