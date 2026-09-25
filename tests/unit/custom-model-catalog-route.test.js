@@ -16,6 +16,11 @@ const entry = {
   top_provider: { max_completion_tokens: 131072 },
   supported_parameters: ["tools", "reasoning"],
 };
+const nvidiaEntry = {
+  id: "nvidia/nemotron-3.5-lightning-30b-a3b", name: "Nemotron 3.5 Lightning",
+  modalities: { input: ["text", "image"], output: ["text"] },
+  tool_call: true, reasoning: true, limit: { context: 262144, output: 262144 },
+};
 const save = (providerAlias = "nous", extra = {}) => POST(new Request("http://localhost/api/models/custom", {
   method: "POST", headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ providerAlias, id: entry.id, ...extra }),
@@ -45,6 +50,20 @@ describe("custom model catalog enrichment", () => {
     await save("openrouter");
     expect(fetch).toHaveBeenCalledWith("https://openrouter.ai/api/v1/models", expect.objectContaining({ headers: { Accept: "application/json" } }));
     expect(db.getProviderConnections).not.toHaveBeenCalled();
+  });
+  it("enriches NVIDIA models from the models.dev provider catalog", async () => {
+    fetch.mockResolvedValue(Response.json({ nvidia: { models: { [nvidiaEntry.id]: nvidiaEntry } } }));
+    const response = await POST(new Request("http://localhost/api/models/custom", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providerAlias: "nvidia", id: nvidiaEntry.id }),
+    }));
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledWith("https://models.dev/api.json", expect.objectContaining({ headers: { Accept: "application/json" } }));
+    expect(db.getProviderConnections).not.toHaveBeenCalled();
+    expect(db.addCustomModel).toHaveBeenCalledWith(expect.objectContaining({
+      providerAlias: "nvidia", id: nvidiaEntry.id, name: nvidiaEntry.name,
+      caps: expect.objectContaining({ vision: true, tools: true, reasoning: true, contextWindow: 262144, maxOutput: 262144 }),
+    }));
   });
   it("does not let the modal's unchecked defaults mask catalog capabilities", async () => {
     await save("nous", { caps: { vision: false, reasoning: false } });

@@ -34,12 +34,27 @@ export default {
     { id: "fastpitch", name: "FastPitch", kind: "tts" },
     { id: "tacotron2", name: "Tacotron2", kind: "tts" },
   ],
-  serviceKinds: ["llm","tts","embedding"],
+  // models.dev carries both the live NVIDIA model ids and the specs that the
+  // hosted NIM catalog does not expose from /v1/models. Keep this source
+  // provider-owned: the dashboard can discover new ids without a release, and
+  // custom models are enriched at add time from the same catalog.
+  modelSpecs: { format: "models-dev", provider: "nvidia", auth: "none" },
+  modelsFetcher: { url: "https://models.dev/api.json", type: "nvidia" },
+  // The hosted catalog changes independently of AFRouter releases. Accept
+  // ids returned by the catalog even before a user adds them explicitly.
+  passthroughModels: true,
+  serviceKinds: ["llm", "tts", "stt", "embedding"],
   ttsConfig: {
     baseUrl: "https://integrate.api.nvidia.com/v1/audio/speech",
     authType: "apikey",
     authHeader: "bearer",
     format: "nvidia-tts",
+  },
+  sttConfig: {
+    baseUrl: "https://integrate.api.nvidia.com/v1/audio/transcriptions",
+    authType: "apikey",
+    authHeader: "bearer",
+    format: "openai",
   },
   embeddingConfig: { baseUrl: "https://integrate.api.nvidia.com/v1/embeddings", authType: "apikey", authHeader: "bearer" },
 };
