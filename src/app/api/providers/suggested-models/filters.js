@@ -69,6 +69,24 @@ export const FILTERS = {
       .map((m) => ({ id: m.id, name: m.name, contextLength: m.context_length }))
       .sort((a, b) => b.contextLength - a.contextLength),
 
+  // Kilo's gateway catalog is OpenRouter-shaped but declares its own free flag,
+  // so use it instead of guessing from $0 pricing: the pricing heuristic also
+  // needs a context floor (it is what hides 65k-128k free ids and, worse,
+  // suggests $0 audio-output models like google/lyria-3-pro-preview as chat
+  // models). isFree is authoritative and covers both cases.
+  "kilo-free": (models) =>
+    (Array.isArray(models) ? models : [])
+      .filter((m) => m?.id && m.isFree === true)
+      .filter((m) => (m.architecture?.output_modalities || ["text"]).includes("text"))
+      .map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        ...(Number.isSafeInteger(m.context_length) && m.context_length > 0
+          ? { contextLength: m.context_length }
+          : {}),
+      }))
+      .sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0)),
+
   "opencode-free": (models) =>
     models
       .filter((m) => (m.id?.endsWith("-free") || KNOWN_FREE_OPENCODE_MODELS.includes(m.id)) && !DEAD_FREE_OPENCODE_MODELS.has(m.id))
