@@ -1,7 +1,10 @@
-# v0.5.86 (2026-09-25)
+# v0.5.86 (2026-09-26)
 
 ## Features
 - **Pi Coding Agent**: new CLI tool integration. AFRouter registers itself as an `afrouter` provider in Pi's agent directory — `~/.pi/agent/models.json`, or `$PI_CODING_AGENT_DIR` when set — with `api: "openai-completions"`, so Pi's `/model` picker offers AFRouter models. Pi re-reads the file each time `/model` opens, so no restart is needed. Real per-model specs are resolved from the live `/v1/models` catalog (`contextWindow`, `maxTokens`, `input`, `reasoning`), which is what Pi uses to size compaction, image encoding and the `/thinking` picker. An optional **Startup** toggle pins `defaultProvider`/`defaultModel` in `settings.json` so `pi` starts on AFRouter with no `/model` step. Dashboard card supports endpoint selection (local/tunnel/Tailscale), API-key picker, multi-model apply, per-model removal, Manual Config for remote machines, and a Reset that removes only the models AFRouter wrote (tracked in a ledger, so hand-added models under the same provider are spared and reported).
+
+## Fixes
+- **Kilo Code model specs**: kilocode was the only OpenRouter-shaped provider without a `modelSpecs` declaration, so the catalog lookup bailed out before fetching anything. A model saved from Kilo Code's catalog therefore stored no capabilities and fell back to the 200K/64K default floor — including models whose real context window is 1M. It now declares `modelSpecs: { format: "openrouter", auth: "none" }` (identical to OpenRouter's; the catalog is public, so no credentials are needed), so context window, max output and modalities come from the catalog.
 
 # v0.5.85 (2026-09-24)
 
