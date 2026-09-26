@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
 import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
-import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
+import { getModelsByProviderId } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
-import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import { assembleProviderModelRows } from "@/shared/utils/providerModelRows";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -73,7 +73,6 @@ export default function ProviderDetailPage() {
   const [liveModels, setLiveModels] = useState([]);
   // Live-catalog fetch warning/error (surfaced for zed only; cursor behavior unchanged).
   const [liveModelsError, setLiveModelsError] = useState(null);
-  const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
@@ -181,6 +180,17 @@ export default function ProviderDetailPage() {
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
+  // One place assembles the page's model rows from every source (registry seed,
+  // live catalog, custom models, legacy aliases) and collapses them by id, so
+  // Available / Disabled / Suggested / Disable-All all agree on one row per model.
+  const modelRows = useMemo(() => assembleProviderModelRows({
+    builtInModels: models,
+    customModels,
+    modelAliases,
+    disabledIds: disabledModelIds,
+    providerStorageAlias,
+    suggestedModels,
+  }), [models, customModels, modelAliases, disabledModelIds, providerStorageAlias, suggestedModels]);
   // Union of levels across this provider's reasoning models — drives the level picker options.
   // Include custom models too (e.g. manually added gpt-5.6-sol → max).
   const providerThinkingLevels = (() => {
@@ -192,13 +202,8 @@ export default function ProviderDetailPage() {
       const lv = getThinkingLevels(providerId, modelId);
       if (lv) lv.forEach((l) => { if (l !== "none") set.add(l); });
     };
-    for (const m of models) addLevels(m.id);
-    for (const m of kiloFreeModels) addLevels(m.id);
-    for (const entry of customModels) {
-      if (entry.providerAlias !== providerStorageAlias) continue;
-      if ((entry.kind || entry.type || "llm") !== "llm") continue;
-      addLevels(entry.id);
-    }
+    for (const m of modelRows.baseRows) addLevels(m.id);
+    for (const entry of modelRows.customRows) addLevels(entry.id);
     return set.size ? ["auto", ...[...set]] : null;
   })();
   const providerDisplayAlias = isCompatible
@@ -291,15 +296,6 @@ export default function ProviderDetailPage() {
       console.log("Error fetching custom models:", error);
     }
   }, []);
-
-  // Fetch free models from Kilo API for kilocode provider
-  useEffect(() => {
-    if (providerId !== "kilocode") return;
-    fetch("/api/providers/kilo/free-models")
-      .then((res) => res.json())
-      .then((data) => { if (data.models?.length) setKiloFreeModels(data.models); })
-      .catch(() => {});
-  }, [providerId]);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -1163,26 +1159,14 @@ export default function ProviderDetailPage() {
         />
       );
     }
-    // Combine hardcoded models with Kilo free models (deduplicated)
-    // Exclude non-llm models (embedding, tts, etc.) — they have dedicated pages under media-providers
-    const allModels = [
-      ...models,
-      ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
-    ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; });
-    const disabledSet = new Set(disabledModelIds);
-    const displayModels = allModels.filter((m) => !disabledSet.has(m.id));
-    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
-    const customModelRows = getProviderCustomModelRows({
-      customModels,
-      modelAliases,
-      providerAlias: providerStorageAlias,
-      builtInModels: models,
-      type: "llm",
-    });
-    // Custom models participate in the shared disabled-models store — hide
-    // disabled ones from Available Models and surface them in Disabled models.
-    const activeCustomRows = customModelRows.filter((model) => !disabledSet.has(model.id));
-    const disabledCustomRows = customModelRows.filter((model) => disabledSet.has(model.id));
+    // Rows come from modelRows (see the memo above): one row per model id across
+    // every source, split into Available / Disabled / Suggested once for the
+    // whole page. Non-llm kinds (embedding, tts, ...) are filtered there — they
+    // have dedicated pages under media-providers.
+    const {
+      displayModels, disabledDisplayModels,
+      activeCustomRows, disabledCustomRows,
+    } = modelRows;
 
     return (
       <div className="flex flex-wrap gap-3">
@@ -1279,34 +1263,16 @@ export default function ProviderDetailPage() {
 
         {/* Suggested models from provider API — show only models not yet added */}
         {suggestedModels.length > 0 && (() => {
-          const addedFullModels = new Set([
-            ...Object.values(modelAliases),
-            ...customModelRows.map((model) => model.fullModel),
-          ]);
-          const hardcodedIds = new Set(models.map((m) => m.id));
-          const disabledSet = new Set(disabledModelIds);
-          // Same $0-id heuristic as suggested-models/filters.js ("x-free", ":free", "orcarouter/free")
-          const isFreeId = (id) => /(^|[-_/:])free$/i.test(id || "");
-          const notAdded = suggestedModels.filter(
-            (m) => !addedFullModels.has(`${providerStorageAlias}/${m.id}`) && !hardcodedIds.has(m.id)
-          );
-          // Seeded $0 models the user disabled — surface them here so a "disable all"
-          // doesn't bury the free pool under Disabled models. Restore, not add:
-          // these are seeded ids, adding would duplicate the built-in row.
-          const freeDisabled = suggestedModels.filter(
-            (m) =>
-              hardcodedIds.has(m.id) &&
-              disabledSet.has(m.id) &&
-              isFreeId(m.id) &&
-              !addedFullModels.has(`${providerStorageAlias}/${m.id}`)
-          );
+          const { suggestedNotAdded: notAdded, suggestedFreeDisabled: freeDisabled } = modelRows;
           if (notAdded.length === 0 && freeDisabled.length === 0) return null;
           // Only fetcher types that actually filter to $0 models may claim "free"
-          // here; generic catalogs (orcarouter, tokenrouter, venice, …) are paid.
+          // here; generic catalogs (orcarouter, tokenrouter, venice, ...) are paid.
+          // "kilo-free" is Kilo's own isFree flag, which keeps sub-200k free ids
+          // that a context floor would hide, so it must not claim one either.
           const suggestedType = providerInfo?.modelsFetcher?.type;
           const suggestedLabel = suggestedType === "openrouter-free"
             ? "Suggested free models (≥200k context):"
-            : (suggestedType === "opencode-free" || suggestedType === "mimo-free")
+            : (suggestedType === "opencode-free" || suggestedType === "mimo-free" || suggestedType === "kilo-free")
               ? "Suggested free models:"
               : "Suggested models:";
           const modelBtnClass = "flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors";
@@ -1810,20 +1776,9 @@ export default function ProviderDetailPage() {
             )}
           </div>
           {!isCompatible && (() => {
-            // Custom models (suggested :free adds, legacy aliases) disable like built-ins
-            const customIds = getProviderCustomModelRows({
-              customModels,
-              modelAliases,
-              providerAlias: providerStorageAlias,
-              builtInModels: models,
-              type: "llm",
-            }).map((m) => m.id);
-            const allIds = [
-              ...models,
-              ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
-            ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; }).map((m) => m.id)
-              .concat(customIds);
-            const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
+            // Disable-All / Active-All cover exactly the rows rendered above —
+            // one entry per model id, built-ins and custom together.
+            const activeIds = modelRows.disableAllIds;
             return (
               <div className="flex gap-2">
                 {disabledModelIds.length > 0 && (
