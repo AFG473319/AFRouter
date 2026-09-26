@@ -6,6 +6,7 @@ export { default as HermesToolCard } from "./HermesToolCard";
 export { default as DefaultToolCard } from "./DefaultToolCard";
 export { default as AntigravityToolCard } from "./AntigravityToolCard";
 export { default as OpenCodeToolCard } from "./OpenCodeToolCard";
+export { default as PiToolCard } from "./PiToolCard";
 export { default as MiMoCodeToolCard } from "./MiMoCodeToolCard";
 export { default as CoworkToolCard } from "./CoworkToolCard";
 export { default as CopilotToolCard } from "./CopilotToolCard";

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { GET as claudeGet } from "../claude-settings/route";
 import { GET as codexGet } from "../codex-settings/route";
 import { GET as opencodeGet } from "../opencode-settings/route";
+import { GET as piGet } from "../pi-settings/route";
 import { GET as droidGet } from "../droid-settings/route";
 import { GET as openclawGet } from "../openclaw-settings/route";
 import { GET as hermesGet } from "../hermes-settings/route";
@@ -23,6 +24,7 @@ const STATUS_GETTERS = {
   claude: claudeGet,
   codex: codexGet,
   opencode: opencodeGet,
+  pi: piGet,
   droid: droidGet,
   openclaw: openclawGet,
   hermes: hermesGet,

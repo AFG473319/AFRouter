@@ -150,6 +150,38 @@ export const CLI_TOOLS = {
     description: "OpenCode AI Terminal Assistant",
     configType: "custom",
   },
+  pi: {
+    id: "pi",
+    name: "Pi Coding Agent",
+    image: "/providers/pi.svg",
+    color: "#000000",
+    description: "Pi — minimal, extensible terminal coding agent (pi.dev)",
+    configType: "custom",
+    docsUrl: "https://pi.dev/docs/latest/models",
+    defaultCommand: "pi",
+    notes: [
+      {
+        type: "info",
+        text: "AFRouter writes an `afrouter` provider into ~/.pi/agent/models.json with api \"openai-completions\", so Pi's /model picker lists AFRouter models.",
+      },
+      {
+        type: "info",
+        text: "Real specs are written per model (contextWindow, maxTokens, input, reasoning) — Pi uses them for compaction thresholds, image encoding and the /thinking picker.",
+      },
+      {
+        type: "info",
+        text: "Optionally pins defaultProvider/defaultModel in ~/.pi/agent/settings.json so pi starts on AFRouter with no /model step.",
+      },
+      {
+        type: "warning",
+        text: "Config path: ~/.pi/agent (or $PI_CODING_AGENT_DIR). Opening /model reloads models.json — no restart needed; /reload picks up settings.json changes.",
+      },
+      {
+        type: "warning",
+        text: "Pi reports $0 cost for custom providers, and a gateway has no per-model cache lifetime to declare, so cost and promptCache are intentionally left unset.",
+      },
+    ],
+  },
   mimocode: {
     id: "mimocode",
     name: "MiMo Code / Desktop",
