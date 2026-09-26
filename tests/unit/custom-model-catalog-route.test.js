@@ -65,6 +65,17 @@ describe("custom model catalog enrichment", () => {
       caps: expect.objectContaining({ vision: true, tools: true, reasoning: true, contextWindow: 262144, maxOutput: 262144 }),
     }));
   });
+  it("fills in Kilo Code specs from its public catalog instead of the 200K floor", async () => {
+    await save("kilocode");
+    expect(fetch).toHaveBeenCalledWith("https://api.kilo.ai/api/gateway/models", expect.objectContaining({
+      headers: { Accept: "application/json" },
+    }));
+    expect(db.getProviderConnections).not.toHaveBeenCalled();
+    expect(db.addCustomModel).toHaveBeenCalledWith(expect.objectContaining({
+      providerAlias: "kilocode", id: entry.id, name: "Union Alpha",
+      caps: expect.objectContaining({ contextWindow: 262144, maxOutput: 131072, vision: true }),
+    }));
+  });
   it("does not let the modal's unchecked defaults mask catalog capabilities", async () => {
     await save("nous", { caps: { vision: false, reasoning: false } });
     expect(db.addCustomModel.mock.calls[0][0].caps.vision).toBe(true);

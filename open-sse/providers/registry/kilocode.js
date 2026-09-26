@@ -36,11 +36,20 @@ export default {
     { id: "deepseek/deepseek-chat", name: "DeepSeek Chat" },
     { id: "deepseek/deepseek-reasoner", name: "DeepSeek Reasoner" },
   ],
-  // Kilo Code proxies the OpenRouter catalog (334 models at time of writing),
+  // Kilo Code proxies the OpenRouter catalog (394 models at time of writing),
   // so the hardcoded list above is only a fallback. Surfacing the full catalog
   // requires a fetcher + passthroughModels, matching how openrouter.js is set up.
   // Without these, only the 8 hardcoded models appear in the combo model picker,
   // hiding dynamic models like cohere/north-mini-code:free and poolside/laguna-m.1:free.
+  //
+  // modelSpecs is what fills in context window / modalities / max output when a
+  // model from that catalog is saved. Without it the lookup bails out before
+  // fetching, the model is stored with no caps, and every Kilo Code model then
+  // falls back to DEFAULT_CAPABILITIES.contextWindow (200K) — including ones
+  // whose real window is 1M. The catalog is public and already OpenRouter-shaped
+  // (data[] + architecture.input_modalities + top_provider.max_completion_tokens
+  // + context_length + supported_parameters), so it needs no credentials.
+  modelSpecs: { format: "openrouter", auth: "none" },
   modelsFetcher: { url: "https://api.kilo.ai/api/gateway/models", type: "openrouter-free" },
   passthroughModels: true,
   oauth: {
