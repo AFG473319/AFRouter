@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { GET as claudeGet } from "../claude-settings/route";
 import { GET as codexGet } from "../codex-settings/route";
 import { GET as opencodeGet } from "../opencode-settings/route";
+import { GET as piGet } from "../pi-settings/route";
 import { GET as droidGet } from "../droid-settings/route";
 import { GET as openclawGet } from "../openclaw-settings/route";
 import { GET as hermesGet } from "../hermes-settings/route";
@@ -18,12 +19,12 @@ import { GET as zcodeGet } from "../zcode-settings/route";
 import { GET as workbuddyGet } from "../workbuddy-settings/route";
 import { GET as deepseekHarnessGet } from "../deepseek-harness-settings/route";
 import { GET as mimocodeGet } from "../mimocode-settings/route";
-import { GET as piGet } from "../pi-settings/route";
 
 const STATUS_GETTERS = {
   claude: claudeGet,
   codex: codexGet,
   opencode: opencodeGet,
+  pi: piGet,
   droid: droidGet,
   openclaw: openclawGet,
   hermes: hermesGet,
@@ -38,7 +39,6 @@ const STATUS_GETTERS = {
   workbuddy: workbuddyGet,
   "deepseek-harness": deepseekHarnessGet,
   mimocode: mimocodeGet,
-  pi: piGet,
 };
 
 // Batch endpoint: gather all CLI tool statuses in one round-trip

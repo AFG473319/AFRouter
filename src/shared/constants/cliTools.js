@@ -150,6 +150,38 @@ export const CLI_TOOLS = {
     description: "OpenCode AI Terminal Assistant",
     configType: "custom",
   },
+  pi: {
+    id: "pi",
+    name: "Pi Coding Agent",
+    image: "/providers/pi.svg",
+    color: "#000000",
+    description: "Pi — minimal, extensible terminal coding agent (pi.dev)",
+    configType: "custom",
+    docsUrl: "https://pi.dev/docs/latest/models",
+    defaultCommand: "pi",
+    notes: [
+      {
+        type: "info",
+        text: "AFRouter writes an `afrouter` provider into ~/.pi/agent/models.json with api \"openai-completions\", so Pi's /model picker lists AFRouter models.",
+      },
+      {
+        type: "info",
+        text: "Real specs are written per model (contextWindow, maxTokens, input, reasoning) — Pi uses them for compaction thresholds, image encoding and the /thinking picker.",
+      },
+      {
+        type: "info",
+        text: "Optionally pins defaultProvider/defaultModel in ~/.pi/agent/settings.json so pi starts on AFRouter with no /model step.",
+      },
+      {
+        type: "warning",
+        text: "Config path: ~/.pi/agent (or $PI_CODING_AGENT_DIR). Opening /model reloads models.json — no restart needed; /reload picks up settings.json changes.",
+      },
+      {
+        type: "warning",
+        text: "Pi reports $0 cost for custom providers, and a gateway has no per-model cache lifetime to declare, so cost and promptCache are intentionally left unset.",
+      },
+    ],
+  },
   mimocode: {
     id: "mimocode",
     name: "MiMo Code / Desktop",
@@ -173,33 +205,6 @@ export const CLI_TOOLS = {
       {
         type: "warning",
         text: "Do NOT edit Desktop's preferences.json or model-catalog.json under %APPDATA%\\Xiaomi MiMo AI\\ — those are Xiaomi/Mify catalog only. Custom AFRouter models go in mimocode.jsonc.",
-      },
-    ],
-  },
-  pi: {
-    id: "pi",
-    name: "Pi Agent",
-    icon: "terminal",
-    color: "#0EA5E9",
-    description: "Pi coding agent (custom providers via models.json)",
-    configType: "custom",
-    docsUrl: "https://github.com/badlogic/pi-mono",
-    notes: [
-      {
-        type: "info",
-        text: "AFRouter registers itself as an `afrouter` provider in ~/.pi/agent/models.json so Pi's model picker offers AFRouter models.",
-      },
-      {
-        type: "info",
-        text: "Pi re-reads models.json every time /model runs — no restart needed. Pick a model with /model afrouter/<id> or start with pi --provider afrouter --model <id>.",
-      },
-      {
-        type: "warning",
-        text: "Config path: Linux/macOS ~/.pi/agent/models.json • Windows %USERPROFILE%\\.pi\\agent\\models.json",
-      },
-      {
-        type: "warning",
-        text: "Reset removes only the AFRouter entry — providers you configured by hand are kept.",
       },
     ],
   },
