@@ -91,6 +91,13 @@ const writeAtomic = async (filePath, content) => {
   return { backupPath };
 };
 
+const npmPathEnv = () => {
+  const isWindows = process.platform === "win32";
+  return isWindows && process.env.APPDATA
+    ? { ...process.env, PATH: `${process.env.APPDATA}\\npm;${process.env.PATH || ""}` }
+    : process.env;
+};
+
 // Detection: the agent dir, either of its config files, or a `pi` binary on
 // PATH. A config file may not exist yet on a fresh install — that is
 // "installed, not configured", not "not installed".
@@ -105,7 +112,7 @@ const checkInstalled = async () => {
   }
   try {
     const isWindows = process.platform === "win32";
-    await execAsync(isWindows ? "where pi" : "which pi", { windowsHide: true });
+    await execAsync(isWindows ? "where pi" : "which pi", { windowsHide: true, env: npmPathEnv() });
     return true;
   } catch {
     return false;
@@ -138,10 +145,14 @@ const resolveLiveCatalog = async (origin) => {
     const byAliasId = new Map();
     for (const m of models) {
       if (!m?.id || !m.capabilities) continue;
-      byId.set(m.id, m.capabilities);
+      const caps = {
+        ...m.capabilities,
+        name: m.name || m.id,
+      };
+      byId.set(m.id, caps);
       const bare = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
       const owner = m.owned_by || (m.id.includes("/") ? m.id.slice(0, m.id.indexOf("/")) : null);
-      if (bare && owner) byAliasId.set(`${owner}/${bare}`, m.capabilities);
+      if (bare && owner) byAliasId.set(`${owner}/${bare}`, caps);
     }
     return { byId, byAliasId };
   } catch {
@@ -150,12 +161,10 @@ const resolveLiveCatalog = async (origin) => {
 };
 
 const capsToSpec = (caps) => ({
+  name: caps.name || undefined,
   contextWindow: Math.floor(Number(caps.contextWindow)),
   maxTokens: Math.floor(Number(caps.maxOutput)),
   vision: caps.vision === true,
-  pdf: caps.pdf === true,
-  audioInput: caps.audioInput === true,
-  videoInput: caps.videoInput === true,
   reasoning: caps.reasoning === true,
 });
 
@@ -363,27 +372,44 @@ export async function POST(request) {
     // the user did not adopt is never recorded and therefore never deleted.
     await writeOwnership(modelsPath, [...writable].filter((id) => present.has(id)));
 
-    // settings.json: pin the startup model only when asked. Reading it as
-    // optional means a missing file is created on demand.
+    // settings.json: pin the startup model when asked (setDefault:true), drop
+    // our pin when explicitly asked off (setDefault:false), and leave the file
+    // untouched when the flag is absent (API callers that never cared). Reading
+    // it as optional means a missing file is created on demand.
     let defaultWritten = null;
+    let defaultCleared = false;
     if (setDefault === true) {
       const pinned = defaultModel && modelsArray.includes(defaultModel) ? defaultModel : modelsArray[0];
       const nextSettings = upsertPiDefaults(settingsResult.data || {}, { modelId: pinned });
       const settingsBackup = await writeAtomic(settingsPath, stringifyJsonDocument(nextSettings));
       defaultWritten = { model: pinned, backupPath: settingsBackup.backupPath };
+    } else if (setDefault === false) {
+      // Only clear what still points at us — a pin the user repointed at
+      // another provider is theirs and must survive an Apply.
+      const defaults = readPiDefaults(settingsResult.data || {});
+      const providerModelIds = readPiModelIds(nextModels);
+      if (defaults.isAFRouter || providerModelIds.includes(defaults.model)) {
+        const nextSettings = clearPiDefaults(settingsResult.data || {}, { providerModelIds });
+        const settingsBackup = await writeAtomic(settingsPath, stringifyJsonDocument(nextSettings));
+        defaultCleared = true;
+        defaultWritten = { model: null, backupPath: settingsBackup.backupPath };
+      }
     }
 
     return NextResponse.json({
       success: true,
-      message: defaultWritten
-        ? "Pi settings applied. It is now the startup provider — run pi to use it."
-        : "Pi settings applied! Open /model in Pi to pick an AFRouter model.",
+      message: defaultCleared
+        ? "Pi settings applied. AFRouter is no longer the startup provider."
+        : defaultWritten
+          ? "Pi settings applied. It is now the startup provider — run pi to use it."
+          : "Pi settings applied! Open /model in Pi to pick an AFRouter model.",
       configPath: modelsPath,
       settingsPath,
       backupPath,
       written: [...writable],
       unverified,
       defaultModel: defaultWritten,
+      defaultCleared,
       skippedCandidates: candidates.filter((id) => !writable.has(id)),
     });
   } catch (error) {
@@ -455,19 +481,30 @@ export async function DELETE(request) {
     const remaining = readPiModelIds(nextModels);
     await writeOwnership(modelsPath, owned.filter((id) => remaining.includes(id)));
 
-    // Clear the startup pin while it still points at AFRouter. Settings are only
+    // Clear or update the startup pin while it still points at AFRouter. Settings are only
     // touched when a model was actually removed, so a no-op DELETE is inert.
     let defaultCleared = false;
     const settingsPath = getSettingsPath();
     const settingsResult = await readJson(settingsPath);
     if (!settingsResult.missing && !settingsResult.corrupt) {
       const defaults = readPiDefaults(settingsResult.data);
-      if (defaults.isAFRouter || providerIdsBefore.includes(defaults.model)) {
-        await writeAtomic(
-          settingsPath,
-          stringifyJsonDocument(clearPiDefaults(settingsResult.data, { providerModelIds: providerIdsBefore })),
-        );
-        defaultCleared = true;
+      if (entryRemoved) {
+        if (defaults.isAFRouter || providerIdsBefore.includes(defaults.model)) {
+          await writeAtomic(
+            settingsPath,
+            stringifyJsonDocument(clearPiDefaults(settingsResult.data, { providerModelIds: providerIdsBefore })),
+          );
+          defaultCleared = true;
+        }
+      } else if (modelToRemove && defaults.model === modelToRemove) {
+        // Only the specific removed model was pinned; repoint to first remaining or clear
+        const nextSettings = { ...settingsResult.data };
+        if (remaining.length > 0) {
+          nextSettings.defaultModel = remaining[0];
+        } else {
+          delete nextSettings.defaultModel;
+        }
+        await writeAtomic(settingsPath, stringifyJsonDocument(nextSettings));
       }
     }
 

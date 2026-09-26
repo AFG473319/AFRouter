@@ -96,8 +96,9 @@ export default function PiToolCard({ tool, isExpanded, onToggle, baseUrl, apiKey
   const configStatus = getConfigStatus();
 
   const getEffectiveBaseUrl = () => {
-    const url = customBaseUrl || baseUrl;
-    return url.endsWith("/v1") ? url : `${url}/v1`;
+    const trimmed = String(customBaseUrl || baseUrl || "").trim().replace(/\/+$/, "");
+    if (!trimmed) return "";
+    return trimmed.endsWith("/v1") ? trimmed.replace(/\/+\/v1$/, "/v1") : `${trimmed}/v1`;
   };
 
   const getKeyToUse = () =>
@@ -130,9 +131,11 @@ export default function PiToolCard({ tool, isExpanded, onToggle, baseUrl, apiKey
           apiKey: getKeyToUse(),
           models: selectedModels,
           ...(adoptBootstrap ? { adoptBootstrap: true } : {}),
-          // Only send the pin when asked, and only with a model that is really
-          // going to be written — the route falls back to the first one.
-          ...(setDefault ? { setDefault: true, defaultModel } : {}),
+          // Always send the toggle explicitly: true pins AFRouter as startup,
+          // false drops a pin that still points at us, and the server only
+          // writes defaultModel with a model that is really going to exist.
+          setDefault: !!setDefault,
+          ...(setDefault && defaultModel ? { defaultModel } : {}),
         }),
       });
       const data = await res.json();
@@ -240,7 +243,7 @@ export default function PiToolCard({ tool, isExpanded, onToggle, baseUrl, apiKey
       <div className="flex items-start justify-between gap-3 hover:cursor-pointer sm:items-center" onClick={onToggle}>
         <div className="flex min-w-0 items-center gap-3">
           <div className="size-8 flex items-center justify-center shrink-0">
-            <Image src="/providers/pi.svg" alt={tool.name} width={32} height={32} className="size-8 object-contain rounded-lg" sizes="32px" onError={(e) => { e.target.style.display = "none"; }} loading="lazy" decoding="async" />
+            <Image src={tool.image || "/providers/pi.png"} alt={tool.name} width={32} height={32} className="size-8 object-contain rounded-lg" sizes="32px" onError={(e) => { e.target.style.display = "none"; }} loading="lazy" decoding="async" />
           </div>
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">

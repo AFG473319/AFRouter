@@ -8,14 +8,21 @@
  *  - POST preserves unrelated providers and provider fields we do not own
  *  - POST merges models additively without duplicating ids
  *  - input/reasoning declared only when the catalog says so
+ *  - input NEVER contains video/pdf/audio (Pi's schema only allows "text"/"image";
+ *    a foreign modality makes Pi reject the whole models.json)
+ *  - catalog display names are written as `name` for the /model picker
+ *  - re-Apply sanitizes invalid modalities on entries it merely preserves
  *  - POST setDefault pins defaultProvider/defaultModel and preserves other settings
  *  - ownership: a ledger record makes hand-added ids candidates that DELETE spares
  *  - DELETE removes the provider and clears our startup pin only
+ *  - DELETE of one model while others remain keeps the defaultProvider pin and
+ *    only repoints defaultModel when the pinned model itself was removed
  *  - DELETE is idempotent when nothing is configured
  *
- * PI_CODING_AGENT_DIR and DATA_DIR are redirected to per-test temp dirs; the
- * `pi` PATH probe and global.fetch are stubbed so spec resolution is
- * deterministic and never touches the real machine.
+ * PI_CODING_AGENT_DIR and DATA_DIR are redirected to per-test temp dirs;
+ * os.homedir is mocked so the ~/.pi/agent fallback never reads this machine's
+ * real Pi config; the `pi` PATH probe and global.fetch are stubbed so spec
+ * resolution is deterministic and never touches the real machine.
  */
 
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
@@ -23,7 +30,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const state = vi.hoisted(() => ({ agentDir: null, dataDir: null, piOnPath: false }));
+const state = vi.hoisted(() => ({ agentDir: null, dataDir: null, home: null, piOnPath: false }));
+
+// Redirect os.homedir so the route's ~/.pi/agent fallback never probes this
+// machine's real Pi install (the tests must pass on a box that has Pi).
+vi.mock("os", async (importOriginal) => {
+  const actual = await importOriginal();
+  const homedir = () => (state.home ? state.home : actual.homedir());
+  return { ...actual, default: { ...actual, homedir } };
+});
 
 // `pi` is looked up on PATH for install detection; make that deterministic
 // instead of depending on whether the host machine has Pi installed.
@@ -46,6 +61,20 @@ vi.mock("next/server", () => ({
 const RESOLVABLE = new Map([
   ["cc/claude-sonnet-4-5", { contextWindow: 200000, maxOutput: 64000, reasoning: false, vision: true }],
   ["deepseek/deepseek-v4-pro", { contextWindow: 1000000, maxOutput: 256000, reasoning: true, vision: false }],
+  // Claims every modality models.dev tracks — Pi may only ever receive text/image.
+  [
+    "gemini/gemini-3-pro",
+    {
+      name: "Gemini 3 Pro",
+      contextWindow: 1048576,
+      maxOutput: 65536,
+      reasoning: true,
+      vision: true,
+      pdf: true,
+      audioInput: true,
+      videoInput: true,
+    },
+  ],
 ]);
 
 vi.mock("open-sse/providers/capabilities.js", () => ({
@@ -98,6 +127,7 @@ function del(model) {
 beforeEach(() => {
   state.agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-agent-"));
   state.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-data-"));
+  state.home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-home-"));
   state.piOnPath = false;
   // Pi resolves the agent dir from $PI_CODING_AGENT_DIR; DATA_DIR holds the
   // ownership ledger. Both must point at the per-test temp dirs.
@@ -112,8 +142,9 @@ afterAll(() => {
 
 describe("GET", () => {
   it("reports not-installed without throwing when no agent dir and no pi binary", async () => {
+    // Fall back to the (mocked, empty) homedir — no ~/.pi/agent there — and the
+    // exec probe rejects because piOnPath is false.
     delete process.env.PI_CODING_AGENT_DIR;
-    state.agentDir = path.join(os.tmpdir(), `pi-missing-${Date.now()}`);
     const res = await GET({ url: "http://127.0.0.1:20128/api/cli-tools/pi-settings" });
     expect(res.status).toBe(200);
     expect(res.body.installed).toBe(false);
@@ -123,7 +154,6 @@ describe("GET", () => {
   it("treats a pi binary on PATH as installed even with no config yet", async () => {
     delete process.env.PI_CODING_AGENT_DIR;
     state.piOnPath = true;
-    state.agentDir = path.join(os.tmpdir(), `pi-pathonly-${Date.now()}`);
     const res = await GET({ url: "http://127.0.0.1:20128/api/cli-tools/pi-settings" });
     expect(res.body.installed).toBe(true);
     expect(res.body.hasAFRouter).toBe(false);
@@ -205,6 +235,45 @@ describe("POST", () => {
     expect(model.input).toEqual(["text"]);
   });
 
+  // Regression: AFRouter used to write "video"/"pdf"/"audio" into `input`.
+  // Pi's ModelDefinitionSchema only allows "text"|"image", so Pi rejected the
+  // whole models.json ("Invalid models.json schema") and the integration died.
+  it("never writes video/pdf/audio modalities even when the catalog claims them", async () => {
+    await post({ baseUrl: "http://x", apiKey: "k", models: ["gemini/gemini-3-pro"] });
+    const [model] = provider().models;
+    expect(model.input).toEqual(["text", "image"]);
+    expect(JSON.stringify(model)).not.toMatch(/video|audio|pdf/);
+  });
+
+  it("writes the catalog display name for the /model picker", async () => {
+    await post({ baseUrl: "http://x", apiKey: "k", models: ["gemini/gemini-3-pro"] });
+    expect(provider().models[0].name).toBe("Gemini 3 Pro");
+  });
+
+  it("omits name when the catalog has none", async () => {
+    await post({ baseUrl: "http://x", apiKey: "k", models: ["cc/claude-sonnet-4-5"] });
+    expect(provider().models[0].name).toBeUndefined();
+  });
+
+  // A candidate preserved verbatim by upsert must still be sanitized: Pi's
+  // schema validation is all-or-nothing, so one foreign modality anywhere in
+  // the file breaks every provider in it.
+  it("sanitizes invalid modalities on preserved entries", async () => {
+    await post({ baseUrl: "http://x", apiKey: "k", models: ["cc/claude-sonnet-4-5"] });
+    const models = readModels();
+    models.providers.afrouter.models.push({
+      id: "hand/typed-model",
+      contextWindow: 1,
+      maxTokens: 1,
+      input: ["text", "image", "video", "pdf"],
+    });
+    writeModels(models);
+
+    await post({ baseUrl: "http://x", apiKey: "k", models: ["cc/claude-sonnet-4-5"] });
+    const handAdded = provider().models.find((m) => m.id === "hand/typed-model");
+    expect(handAdded.input).toEqual(["text", "image"]);
+  });
+
   it("preserves unrelated providers", async () => {
     writeModels({ providers: { anthropic: { baseUrl: "https://api.anthropic.com", models: [] } } });
     await post({ baseUrl: "http://x", apiKey: "k", models: ["cc/claude-sonnet-4-5"] });
@@ -244,7 +313,8 @@ describe("POST", () => {
   it("marks unresolvable models unverified without inventing specs", async () => {
     const res = await post({ baseUrl: "http://x", apiKey: "k", models: ["unknown/model"] });
     expect(res.body.unverified).toEqual(["unknown/model"]);
-    expect(provider().models[0].contextWindow).toBe(200000);
+    // Pi's documented default contextWindow for a bare entry is 128000.
+    expect(provider().models[0].contextWindow).toBe(128000);
   });
 
   it("refuses to write corrupt models.json and leaves the file untouched", async () => {
@@ -344,6 +414,50 @@ describe("POST startup pin", () => {
   it("does not touch settings.json when the pin is not requested", async () => {
     await post({ baseUrl: "http://x", apiKey: "k", models: ["cc/claude-sonnet-4-5"] });
     expect(fs.existsSync(settingsPath())).toBe(false);
+  });
+
+  // Regression: the card's startup toggle used to be send-only-when-on, so
+  // turning it off and pressing Apply silently left the pin in place.
+  it("clears our pin when setDefault is explicitly false", async () => {
+    await post({
+      baseUrl: "http://x",
+      apiKey: "k",
+      models: ["cc/claude-sonnet-4-5"],
+      setDefault: true,
+      defaultModel: "cc/claude-sonnet-4-5",
+    });
+    const res = await post({
+      baseUrl: "http://x",
+      apiKey: "k",
+      models: ["cc/claude-sonnet-4-5"],
+      setDefault: false,
+    });
+    expect(res.body.defaultCleared).toBe(true);
+    const settings = readSettings();
+    expect(settings.defaultProvider).toBeUndefined();
+    expect(settings.defaultModel).toBeUndefined();
+  });
+
+  it("leaves a repointed pin alone when setDefault is explicitly false", async () => {
+    await post({
+      baseUrl: "http://x",
+      apiKey: "k",
+      models: ["cc/claude-sonnet-4-5"],
+      setDefault: true,
+      defaultModel: "cc/claude-sonnet-4-5",
+    });
+    writeSettings({ defaultProvider: "anthropic", defaultModel: "claude-sonnet-5", theme: "dark" });
+    const res = await post({
+      baseUrl: "http://x",
+      apiKey: "k",
+      models: ["cc/claude-sonnet-4-5"],
+      setDefault: false,
+    });
+    expect(res.body.defaultCleared).toBe(false);
+    const settings = readSettings();
+    expect(settings.defaultProvider).toBe("anthropic");
+    expect(settings.defaultModel).toBe("claude-sonnet-5");
+    expect(settings.theme).toBe("dark");
   });
 });
 
@@ -478,6 +592,40 @@ describe("DELETE", () => {
     const settings = readSettings();
     expect(settings.defaultProvider).toBeUndefined();
     expect(settings.defaultModel).toBeUndefined();
+  });
+
+  // Regression: removing ONE model used to wipe defaultProvider whenever the
+  // pin pointed at AFRouter — deleting an unrelated chip silently un-pinned
+  // AFRouter as Pi's startup provider.
+  it("keeps the startup pin when removing a non-pinned model while others remain", async () => {
+    await post({
+      baseUrl: "http://x",
+      apiKey: "k",
+      models: ["cc/claude-sonnet-4-5", "deepseek/deepseek-v4-pro"],
+      setDefault: true,
+      defaultModel: "cc/claude-sonnet-4-5",
+    });
+    const res = await del("deepseek/deepseek-v4-pro");
+    expect(res.body.entryRemoved).toBe(false);
+    expect(res.body.defaultCleared).toBeFalsy();
+    const settings = readSettings();
+    expect(settings.defaultProvider).toBe("afrouter");
+    expect(settings.defaultModel).toBe("cc/claude-sonnet-4-5");
+  });
+
+  it("repoints defaultModel when the pinned model is removed but others remain", async () => {
+    await post({
+      baseUrl: "http://x",
+      apiKey: "k",
+      models: ["cc/claude-sonnet-4-5", "deepseek/deepseek-v4-pro"],
+      setDefault: true,
+      defaultModel: "cc/claude-sonnet-4-5",
+    });
+    const res = await del("cc/claude-sonnet-4-5");
+    expect(res.body.entryRemoved).toBe(false);
+    const settings = readSettings();
+    expect(settings.defaultProvider).toBe("afrouter");
+    expect(settings.defaultModel).toBe("deepseek/deepseek-v4-pro");
   });
 
   it("never clears a startup pin the user repointed elsewhere", async () => {

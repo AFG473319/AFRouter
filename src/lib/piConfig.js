@@ -36,6 +36,11 @@
  *      default without touching anything else in that document.
  *
  * Deliberately NOT written, and why:
+ *   - `input` modalities beyond text/image: Pi's ModelDefinitionSchema only
+ *     accepts "text" and "image"; a foreign value (video, pdf, audio) fails
+ *     schema validation for the ENTIRE models.json and Pi drops every custom
+ *     model. Capabilities the gateway tracks but Pi cannot express are simply
+ *     dropped — never forwarded.
  *   - `promptCache`: declares a provider's cache lifetime so Pi can warm it.
  *     AFRouter does not publish one per routed model, and a wrong value makes Pi
  *     keep replaying a cold cache. Omitted (the docs' default = never warmed).
@@ -65,30 +70,40 @@ export const PI_API = "openai-completions";
 export const PI_DEFAULT_API_KEY = "sk_afrouter";
 
 // Conservative fallback for ids resolvable from neither the live catalog nor the
-// static registry — flagged "unverified", never invented.
+// static registry — flagged "unverified", never invented. Matches Pi's documented
+// 128k/16k text-only defaults.
 export const FALLBACK_SPEC = Object.freeze({
-  contextWindow: 200000,
-  maxTokens: 32000,
+  contextWindow: 128000,
+  maxTokens: 16384,
   vision: false,
-  pdf: false,
-  audioInput: false,
-  videoInput: false,
   reasoning: false,
-  tools: true,
 });
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 /** Pi talks to /v1/chat/completions; the gateway card supplies the bare origin. */
 export const normalizeBaseUrl = (baseUrl) => {
-  const trimmed = String(baseUrl || "").replace(/\/+$/, "");
-  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
+  const trimmed = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/v1") ? trimmed.replace(/\/+\/v1$/, "/v1") : `${trimmed}/v1`;
+};
+
+/**
+ * Sanitize input modalities so only Pi's documented ["text"] or ["text", "image"]
+ * are written. Pi's schema rejects foreign modalities (video, pdf, audio).
+ */
+export const sanitizeModelInput = (input) => {
+  if (!Array.isArray(input)) return ["text"];
+  const sanitized = input.filter((item) => item === "text" || item === "image");
+  if (!sanitized.includes("text")) sanitized.unshift("text");
+  return sanitized;
 };
 
 /**
  * One Pi model entry. `input` is explicit even for text-only models so the file
  * is self-describing; `reasoning` is omitted when false because that is Pi's
  * documented default and a bare `false` reads as "verified non-reasoning".
+ * Pi only supports "text" and "image" in input (never video, audio, or pdf).
  */
 export const buildModelEntry = (id, caps = {}) => {
   const entry = {
@@ -97,10 +112,10 @@ export const buildModelEntry = (id, caps = {}) => {
     maxTokens: Math.floor(caps.maxTokens ?? FALLBACK_SPEC.maxTokens),
     input: ["text"],
   };
+  if (caps.name && typeof caps.name === "string" && caps.name !== id) {
+    entry.name = caps.name;
+  }
   if (caps.vision) entry.input.push("image");
-  if (caps.pdf) entry.input.push("pdf");
-  if (caps.audioInput) entry.input.push("audio");
-  if (caps.videoInput) entry.input.push("video");
   if (caps.reasoning === true) entry.reasoning = true;
   return entry;
 };
@@ -129,7 +144,8 @@ export const readPiModelIds = (models) => {
  * Upsert `providers.afrouter` in models.json, merging models additively by id.
  * Every other provider and field is preserved. A pre-existing entry keeps any
  * field we do not own (custom `headers`, a hand-added `modelOverrides`, …) so a
- * user's own tuning survives a re-Apply.
+ * user's own tuning survives a re-Apply. Modalities on existing entries are
+ * sanitized to ensure invalid inputs like video do not crash Pi.
  */
 export const upsertPiProvider = (models, { baseUrl, apiKey, models: ids = [], specs = {} } = {}) => {
   const next = isObject(models) ? models : {};
@@ -139,7 +155,13 @@ export const upsertPiProvider = (models, { baseUrl, apiKey, models: ids = [], sp
 
   const byId = new Map();
   for (const model of Array.isArray(previous.models) ? previous.models : []) {
-    if (model && typeof model === "object" && model.id) byId.set(model.id, model);
+    if (model && typeof model === "object" && model.id) {
+      const sanitizedModel = {
+        ...model,
+        ...(model.input ? { input: sanitizeModelInput(model.input) } : {}),
+      };
+      byId.set(model.id, sanitizedModel);
+    }
   }
   for (const model of built.models) byId.set(model.id, model);
 
@@ -147,9 +169,7 @@ export const upsertPiProvider = (models, { baseUrl, apiKey, models: ids = [], sp
     ...previous,
     baseUrl: built.baseUrl,
     api: built.api,
-    // An empty key falls back to Pi's `sk_afrouter` local default, which is what
-    // a fresh install expects; a real key the user chose is always written.
-    ...(built.apiKey ? { apiKey: built.apiKey } : {}),
+    apiKey: built.apiKey || previous.apiKey || PI_DEFAULT_API_KEY,
     models: [...byId.values()],
   };
   next.providers = providers;
