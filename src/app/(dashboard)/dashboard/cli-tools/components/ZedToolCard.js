@@ -5,19 +5,16 @@ import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/comp
 import Image from "next/image";
 import BaseUrlSelect from "./BaseUrlSelect";
 import { rememberEndpoint } from "./cliEndpointPresets";
-import ApiKeySelect from "./ApiKeySelect";
-import { matchKnownEndpoint } from "./cliEndpointMatch";
 import { buildProviderEntry } from "@/lib/zedConfig.js";
 
 const ENDPOINT = "/api/cli-tools/zed-settings";
 
-export default function ZedToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
+export default function ZedToolCard({ tool, isExpanded, onToggle, baseUrl, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
   const [status, setStatus] = useState(initialStatus || null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [message, setMessage] = useState(null);
-  const [selectedApiKey, setSelectedApiKey] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [modelAliases, setModelAliases] = useState({});
   const [showManualConfigModal, setShowManualConfigModal] = useState(false);
@@ -28,12 +25,6 @@ export default function ZedToolCard({ tool, isExpanded, onToggle, baseUrl, apiKe
   useEffect(() => {
     selectedModelsRef.current = selectedModels;
   }, [selectedModels]);
-
-  useEffect(() => {
-    if (apiKeys?.length > 0 && !selectedApiKey) {
-      setSelectedApiKey(apiKeys[0].key);
-    }
-  }, [apiKeys, selectedApiKey]);
 
   useEffect(() => {
     if (initialStatus) setStatus(initialStatus);
@@ -87,11 +78,6 @@ export default function ZedToolCard({ tool, isExpanded, onToggle, baseUrl, apiKe
     return trimmed.endsWith("/v1") ? trimmed.replace(/\/+\/v1$/, "/v1") : `${trimmed}/v1`;
   };
 
-  const getKeyToUse = () =>
-    (selectedApiKey && selectedApiKey.trim())
-      ? selectedApiKey
-      : (!cloudEnabled ? "sk_afrouter" : selectedApiKey);
-
   const checkStatus = async () => {
     setChecking(true);
     try {
@@ -114,7 +100,6 @@ export default function ZedToolCard({ tool, isExpanded, onToggle, baseUrl, apiKe
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           baseUrl: getEffectiveBaseUrl(),
-          apiKey: getKeyToUse(),
           models: selectedModels,
         }),
       });
@@ -124,7 +109,7 @@ export default function ZedToolCard({ tool, isExpanded, onToggle, baseUrl, apiKe
         setMessage({
           type: "success",
           text: (data.message || "Zed settings applied!")
-            + " Restart Zed or run `zed --reload-settings` to pick up the changes.",
+            + " Set AFROUTER_API_KEY env var or enter the key in Zed's AI panel.",
         });
         checkStatus();
       } else {
@@ -176,15 +161,13 @@ export default function ZedToolCard({ tool, isExpanded, onToggle, baseUrl, apiKe
   const getManualConfigs = () => {
     const modelsToShow = selectedModels.length > 0 ? selectedModels : ["provider/model-id"];
     const config = {
-      ai: {
-        provider: "custom",
-        custom_providers: [
-          buildProviderEntry({
+      language_models: {
+        openai_compatible: {
+          afrouter: buildProviderEntry({
             baseUrl: getEffectiveBaseUrl(),
-            apiKey: getKeyToUse() || "<API_KEY_FROM_DASHBOARD>",
             models: modelsToShow,
           }),
-        ],
+        },
       },
     };
     return [{
@@ -278,12 +261,6 @@ export default function ZedToolCard({ tool, isExpanded, onToggle, baseUrl, apiKe
                     </span>
                   </div>
                 )}
-
-                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr] sm:items-center sm:gap-2">
-                  <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">API Key</span>
-                  <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
-                  <ApiKeySelect value={selectedApiKey} onChange={setSelectedApiKey} apiKeys={apiKeys} cloudEnabled={cloudEnabled} />
-                </div>
 
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr] sm:items-start sm:gap-2">
                   <span className="w-32 shrink-0 text-sm font-semibold text-text-main text-right pt-1">Models</span>
