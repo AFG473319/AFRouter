@@ -503,6 +503,32 @@ amp --model "{{model}}"
       },
     ],
   },
+  zed: {
+    id: "zed",
+    name: "Zed",
+    image: "/providers/zed.png",
+    color: "#000000",
+    description: "Zed AI code editor",
+    configType: "custom",
+    notes: [
+      {
+        type: "info",
+        text: "AFRouter writes an AFRouter custom provider into ~/.config/zed/settings.json so Zed's AI panel offers AFRouter models.",
+      },
+      {
+        type: "info",
+        text: "Zed shows custom providers in its AI panel dropdown — pick AFRouter and select a model.",
+      },
+      {
+        type: "warning",
+        text: "Config path: Linux ~/.config/zed/settings.json • macOS ~/Library/Application Support/Zed/settings.json • Windows %APPDATA%\\Zed\\settings.json",
+      },
+      {
+        type: "warning",
+        text: "Zed loads settings at startup — restart Zed or run `zed --reload-settings` after Apply.",
+      },
+    ],
+  },
   workbuddy: {
     id: "workbuddy",
     name: "WorkBuddy",
