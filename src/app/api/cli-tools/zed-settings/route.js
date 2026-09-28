@@ -7,7 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import {
-  ZED_PROVIDER_NAME,
+  ZED_PROVIDER_ID,
   readZedModelIds,
   readZedProvider,
   removeZedProvider,
@@ -31,6 +31,46 @@ const getConfigDir = () => {
 
 const getConfigPath = () => path.join(getConfigDir(), "settings.json");
 
+// Zed's settings.json is JSONC — it supports // and /* */ comments and
+// trailing commas as an extension. Strip both before JSON.parse so a
+// hand-edited or Zed-written file doesn't read as corrupt.
+const stripJsonComments = (text) => {
+  let result = "";
+  let i = 0;
+  const len = text.length;
+  while (i < len) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === "/" && next === "/") {
+      while (i < len && text[i] !== "\n") i++;
+    } else if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < len && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i += 2;
+    } else if (ch === '"') {
+      result += ch;
+      i++;
+      while (i < len) {
+        result += text[i];
+        if (text[i] === "\\") {
+          i++;
+          if (i < len) result += text[i];
+        } else if (text[i] === '"') {
+          break;
+        }
+        i++;
+      }
+      i++;
+    } else {
+      result += ch;
+      i++;
+    }
+  }
+  return result;
+};
+
+const stripTrailingCommas = (text) => text.replace(/,(\s*[}\]])/g, "$1");
+
 // Safe JSON read: missing -> { missing: true }; unparseable -> { corrupt: true }.
 // Never throws to the handler — the UI must never see a 500 for a bad user file.
 const readJson = async (filePath) => {
@@ -42,7 +82,8 @@ const readJson = async (filePath) => {
     return { corrupt: true };
   }
   try {
-    const data = JSON.parse(raw);
+    const cleaned = stripTrailingCommas(stripJsonComments(raw));
+    const data = JSON.parse(cleaned);
     if (!data || typeof data !== "object" || Array.isArray(data)) return { corrupt: true };
     return { data };
   } catch {
@@ -151,10 +192,10 @@ export async function GET() {
       configPath,
       zed: {
         models,
-        baseURL: provider?.url || null,
-        // Never the key itself.
-        hasApiKey: typeof provider?.headers?.Authorization === "string" && provider.headers.Authorization.length > 0,
-        providerCount: Array.isArray(settings?.ai?.custom_providers) ? settings.ai.custom_providers.length : 0,
+        baseURL: provider?.api_url || null,
+        providerCount: isObject(settings?.language_models?.openai_compatible)
+          ? Object.keys(settings.language_models.openai_compatible).length
+          : 0,
       },
     });
   } catch (error) {
@@ -163,10 +204,10 @@ export async function GET() {
   }
 }
 
-// POST - merge the AFRouter custom provider into settings.json
+// POST - merge the AFRouter provider into settings.json
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, models } = await request.json();
+    const { baseUrl, models } = await request.json();
     const modelsArray = Array.isArray(models) ? models.filter((m) => typeof m === "string" && m) : [];
     if (!baseUrl || modelsArray.length === 0) {
       return NextResponse.json({ error: "baseUrl and at least one model are required" }, { status: 400 });
@@ -182,12 +223,12 @@ export async function POST(request) {
     }
 
     const current = result.data || {};
-    const next = upsertZedProvider(current, { baseUrl, apiKey, models: modelsArray });
+    const next = upsertZedProvider(current, { baseUrl, models: modelsArray });
     const { backupPath } = await writeAtomic(configPath, stringifyJsonDocument(next));
 
     return NextResponse.json({
       success: true,
-      message: "Zed settings applied! Restart Zed or run `zed --reload-settings` to pick up the changes.",
+      message: "Zed settings applied! Set AFROUTER_API_KEY env var or enter the key in Zed's AI panel, then restart Zed.",
       configPath,
       backupPath,
       written: modelsArray,
