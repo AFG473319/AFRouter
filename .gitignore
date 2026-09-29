@@ -127,3 +127,6 @@ prs_raw.json
 cli/app/
 .freebuff/
 
+
+# beta-zip scratch must never live inside the repo (download/unzip elsewhere)
+downloads/

@@ -1,0 +1,52 @@
+name: Lint
+
+# Laptop-offload: `npx eslint .` on this repo is minutes-slow on the dev
+# machine while producing zero artifacts worth keeping locally — so it runs
+# HERE on every change. The laptop only needs eslint when it's about to push
+# anyway (and even that is optional now).
+#
+# Advisory by default (continue-on-error): the repo carries pre-existing
+# lint noise; the goal is surfacing drift per-change, not blocking work.
+# When the error count reaches zero, drop continue-on-error and this
+# becomes a hard gate.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eslint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-root-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-root-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: ESLint (advisory until errors hit zero)
+        continue-on-error: true
+        run: npx eslint . --format github
