@@ -19,6 +19,7 @@ import { GET as zcodeGet } from "../zcode-settings/route";
 import { GET as zedGet } from "../zed-settings/route";
 import { GET as workbuddyGet } from "../workbuddy-settings/route";
 import { GET as deepseekHarnessGet } from "../deepseek-harness-settings/route";
+import { GET as ompGet } from "../omp-settings/route";
 import { GET as mimocodeGet } from "../mimocode-settings/route";
 
 const STATUS_GETTERS = {
@@ -41,6 +42,7 @@ const STATUS_GETTERS = {
   workbuddy: workbuddyGet,
   "deepseek-harness": deepseekHarnessGet,
   mimocode: mimocodeGet,
+  omp: ompGet,
 };
 
 // Batch endpoint: gather all CLI tool statuses in one round-trip

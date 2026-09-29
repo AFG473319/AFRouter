@@ -1,3 +1,8 @@
+# v0.5.88 (2026-09-29)
+
+## Features
+- **Oh My Pi**: new CLI tool integration. AFRouter registers itself as an `afrouter` provider in Oh My Pi's agent directory — `~/.omp/agent/models.yml`, or `$PI_CODING_AGENT_DIR` when set — with `api: "openai-completions"`, so Oh My Pi's `/model` picker offers AFRouter models. Real per-model specs are resolved from the live `/v1/models` catalog (`contextWindow`, `maxTokens`, `input`, `reasoning`), which is what Oh My Pi uses to size its compaction budget, image encoding and the `/thinking` picker. An optional **Startup** toggle pins `modelRoles.default` in `config.yml` — with an optional thinking level appended as `:off`…`:max` — so `omp` starts on AFRouter with no `/model` step. Model ids keep their slashes: Oh My Pi splits a `provider/modelId` selector on the **first** `/`, so `afrouter/kilo/stealth/space-bunny-alpha` resolves to the right model, verified end-to-end against the real `omp` binary (the gateway receives `"model": "kilo/stealth/space-bunny-alpha"` with `Authorization: Bearer …`). `cost` and `promptCache` are deliberately left unset — a gateway publishes no per-model tariff or cache lifetime, and a wrong value would make Oh My Pi misprice tokens or keep warming a cold cache. Ownership is ledger-only (`<DATA_DIR>/omp-model-ownership.json`), so Reset never deletes a model a user typed in by hand, and an unrecorded one is only adopted on an explicit flag. Shared pure shapes live in `src/lib/ompConfig.js`. Tests: `tests/unit/omp-settings.test.js`.
+
 # v0.5.87 (2026-09-26)
 
 ## Fixes

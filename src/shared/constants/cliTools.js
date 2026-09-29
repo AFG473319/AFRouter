@@ -182,6 +182,42 @@ export const CLI_TOOLS = {
       },
     ],
   },
+  omp: {
+    id: "omp",
+    name: "Oh My Pi",
+    image: "/providers/omp.png",
+    color: "#A34DF9",
+    description: "Oh My Pi — terminal coding agent with the IDE wired in (omp.sh)",
+    configType: "custom",
+    docsUrl: "https://github.com/can1357/oh-my-pi/blob/main/docs/models.md",
+    defaultCommand: "omp",
+    notes: [
+      {
+        type: "info",
+        text: "AFRouter writes an `afrouter` provider into ~/.omp/agent/models.yml with api \"openai-completions\", so Oh My Pi's /model picker lists AFRouter models.",
+      },
+      {
+        type: "info",
+        text: "Real specs are written per model (contextWindow, maxTokens, input, reasoning) — Oh My Pi sizes its compaction budget and /thinking picker from them.",
+      },
+      {
+        type: "info",
+        text: "Model ids keep their slashes: Oh My Pi splits a selector on the FIRST '/', so afrouter/kilo/stealth/space-bunny-alpha resolves to the right model.",
+      },
+      {
+        type: "info",
+        text: "Optionally pins modelRoles.default in ~/.omp/agent/config.yml so omp starts on AFRouter with no /model step, with an optional thinking level (off…max).",
+      },
+      {
+        type: "warning",
+        text: "Config path: ~/.omp/agent (or $PI_CODING_AGENT_DIR). Oh My Pi reads models.yml at launch, so restart omp (or use /model) to pick up changes.",
+      },
+      {
+        type: "warning",
+        text: "Cost and promptCache are intentionally left unset: a gateway publishes no per-model tariff or cache lifetime, and a wrong value makes Oh My Pi price tokens wrongly or keep warming a cold cache.",
+      },
+    ],
+  },
   mimocode: {
     id: "mimocode",
     name: "MiMo Code / Desktop",
