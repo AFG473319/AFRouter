@@ -7,8 +7,21 @@ import BaseUrlSelect from "./BaseUrlSelect";
 import { rememberEndpoint } from "./cliEndpointPresets";
 import ApiKeySelect from "./ApiKeySelect";
 import { matchKnownEndpoint } from "./cliEndpointMatch";
+import { buildModelEntry, FALLBACK_SPEC } from "@/lib/dshModelSpecs.js";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { stringifyYAML } from "confbox/yaml";
 
 const ENDPOINT = "/api/cli-tools/deepseek-harness-settings";
+
+// The card has no live catalog, so the Manual Config preview resolves specs from
+// the static capability tables and falls back exactly like the route does.
+const resolveCaps = (id) => {
+  const slash = id.indexOf("/");
+  const provider = slash > 0 ? id.slice(0, slash) : null;
+  const bare = slash > 0 ? id.slice(slash + 1) : id;
+  const caps = getCapabilitiesForModel(provider, bare);
+  return Number.isFinite(caps?.contextWindow) && Number.isFinite(caps?.maxOutput) ? caps : FALLBACK_SPEC;
+};
 
 export default function DeepSeekHarnessToolCard({
   tool,
@@ -192,16 +205,17 @@ export default function DeepSeekHarnessToolCard({
     }
   };
 
+  // Snippet mirrors exactly what the route writes, through the same shared
+  // builder, so a remotely-pasted config behaves identically under a later
+  // dashboard Apply/Reset. Specs resolve from the static capability tables.
   const getManualConfigs = () => {
     const key = keyToUse() || "<API_KEY_FROM_DASHBOARD>";
     const models = selectedModels.length > 0 ? selectedModels : ["provider/model-id"];
-    const modelLines = models
-      .map(
-        (id) => `        - id: ${id}
-          name: ${id}
-          contextWindow: 200000
-          maxTokens: 32000`,
-      )
+    const modelEntries = models.map((id) => buildModelEntry(id, resolveCaps(id)));
+    const modelLines = stringifyYAML({ models: modelEntries })
+      .trim()
+      .split("\n")
+      .map((line) => `      ${line}`)
       .join("\n");
 
     const settingsYaml = `# ~/.dsh/settings.yaml (or $DSH_HOME/settings.yaml)
@@ -212,7 +226,6 @@ llm-pi-ai:
       apiKeyEnv: AFROUTER_API_KEY
       api: openai-completions
       baseURL: ${getNormalizedBaseUrl()}
-      models:
 ${modelLines}
 `;
 

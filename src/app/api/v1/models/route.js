@@ -8,7 +8,6 @@ import {
 import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
 import { parseModel } from "@/sse/services/model.js";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
-import { buildRetiredModelIndex, isRetiredInListing } from "@/lib/retiredModelsList.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
@@ -412,13 +411,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     Object.entries(disabledByAlias || {}).map(([alias, ids]) => [alias, new Set(Array.isArray(ids) ? ids : [])]),
   );
   const isDisabled = (alias, modelId) => disabledModelSets.get(alias)?.has(modelId) === true;
-
-  // Models the upstream retired (NVIDIA NIM sunsets hosted ids after a fixed
-  // window) are hidden here as well. Routing already bypasses them, so
-  // advertising them only hands clients an id that is guaranteed to 404.
-  const retiredModelIndex = buildRetiredModelIndex(connections);
-  const isHidden = (alias, modelId) =>
-    isDisabled(alias, modelId) || isRetiredInListing(retiredModelIndex, alias, modelId);
+  const isHidden = (alias, modelId) => isDisabled(alias, modelId);
 
   // Build per-call indexes once instead of rescanning every custom/alias row for
   // every active provider. These remain request-local so dashboard changes are

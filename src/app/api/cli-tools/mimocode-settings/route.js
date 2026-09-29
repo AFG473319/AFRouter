@@ -6,6 +6,15 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { resolveProviderAlias } from "open-sse/services/model.js";
+import {
+  AFROUTER_PROVIDER_ID,
+  FALLBACK_SPEC,
+  buildProviderEntry,
+  mergeModelEntry,
+  modelSelection,
+} from "@/lib/mimocodeConfig.js";
 
 const execAsync = promisify(exec);
 
@@ -90,7 +99,76 @@ const readConfig = async () => {
 
 const hasAFRouterConfig = (config) => {
   if (!config?.provider) return false;
-  return !!config.provider["afrouter"];
+  return !!config.provider[AFROUTER_PROVIDER_ID];
+};
+
+// Self-fetch must target the port this instance actually listens on. The
+// request URL carries it; PORT is only a fallback because the Next server may
+// be started with --port and no PORT env.
+const resolveSelfOrigin = (request) => {
+  try {
+    const url = new URL(request?.url || "");
+    if (url.port) return `http://127.0.0.1:${url.port}`;
+  } catch {
+    // fall through
+  }
+  return `http://127.0.0.1:${process.env.PORT || 20128}`;
+};
+
+// Live catalog first: our own /v1/models, indexed by exact id and by the
+// alias-translated spelling (a config may use `oc/…` where the catalog says
+// `opencode/…`).
+const resolveLiveCatalog = async (origin) => {
+  try {
+    const res = await fetch(`${origin}/v1/models`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const models = Array.isArray(json?.data) ? json.data : [];
+    const byId = new Map();
+    const byAliasId = new Map();
+    for (const m of models) {
+      if (!m?.id || !m.capabilities) continue;
+      byId.set(m.id, m.capabilities);
+      const bare = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
+      const owner = m.owned_by || (m.id.includes("/") ? m.id.slice(0, m.id.indexOf("/")) : null);
+      if (bare && owner) byAliasId.set(`${owner}/${bare}`, m.capabilities);
+    }
+    return { byId, byAliasId };
+  } catch {
+    return null;
+  }
+};
+
+// Resolve model IDs -> full capability spec. Catalog first (exact id, then
+// alias-translated id), static registry second, conservative fallback last.
+const resolveModelSpecs = async (ids, catalog) => {
+  const specs = new Map();
+  const unverified = [];
+  for (const id of ids) {
+    const slash = id.indexOf("/");
+    const prefix = slash > 0 ? id.slice(0, slash) : null;
+    const bare = slash > 0 ? id.slice(slash + 1) : id;
+
+    let caps = catalog?.byId?.get(id) || null;
+    if (!caps && prefix) {
+      const translated = resolveProviderAlias(prefix);
+      caps =
+        catalog?.byAliasId?.get(`${translated}/${bare}`) ||
+        catalog?.byAliasId?.get(`${prefix}/${bare}`) ||
+        null;
+    }
+    if (!caps) {
+      const staticCaps = getCapabilitiesForModel(prefix, bare);
+      if (staticCaps && Number.isFinite(staticCaps.contextWindow)) caps = staticCaps;
+    }
+    if (caps && Number.isFinite(caps.contextWindow) && Number.isFinite(caps.maxOutput)) {
+      specs.set(id, caps);
+    } else {
+      specs.set(id, { ...FALLBACK_SPEC });
+      unverified.push(id);
+    }
+  }
+  return { specs, unverified };
 };
 
 const desktopAppInstalled = async () => {
@@ -155,7 +233,7 @@ export async function GET() {
       });
     }
 
-    const providerConfig = config?.provider?.["afrouter"];
+    const providerConfig = config?.provider?.[AFROUTER_PROVIDER_ID];
     const modelMap = providerConfig?.models || {};
 
     return NextResponse.json({
@@ -166,7 +244,9 @@ export async function GET() {
       configPath,
       mimocode: {
         models: Object.keys(modelMap),
-        activeModel: config?.model?.startsWith("afrouter/") ? config.model.replace(/^afrouter\//, "") : null,
+        activeModel: config?.model?.startsWith(`${AFROUTER_PROVIDER_ID}/`)
+          ? config.model.slice(AFROUTER_PROVIDER_ID.length + 1)
+          : null,
         baseURL: providerConfig?.options?.baseURL || null,
       },
     });
@@ -181,7 +261,9 @@ export async function POST(request) {
   try {
     const { baseUrl, apiKey, model, models, activeModel } = await request.json();
 
-    const modelsArray = Array.isArray(models) ? models.slice() : (typeof model === "string" ? [model] : []);
+    const modelsArray = Array.isArray(models)
+      ? models.filter((m) => typeof m === "string" && m)
+      : (typeof model === "string" && model ? [model] : []);
 
     if (!baseUrl || modelsArray.length === 0) {
       return NextResponse.json({ error: "baseUrl and at least one model are required" }, { status: 400 });
@@ -198,50 +280,30 @@ export async function POST(request) {
 
     await fs.mkdir(configDir, { recursive: true });
 
-    const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    const keyToUse = apiKey || "sk_afrouter";
+    const sourceProvider = config.provider?.[AFROUTER_PROVIDER_ID] || {};
+    const provider = buildProviderEntry({ baseUrl, apiKey, source: sourceProvider });
 
-    if (!config.provider) config.provider = {};
-
-    const existingProvider = config.provider["afrouter"] || {
-      name: "AFRouter",
-      npm: "@ai-sdk/openai-compatible",
-      only_configured_models: true,
-      options: {},
-      models: {},
-    };
-
-    existingProvider.options = {
-      ...existingProvider.options,
-      baseURL: normalizedBaseUrl,
-      apiKey: keyToUse,
-    };
-
-    existingProvider.models = existingProvider.models || {};
+    // Resolve real specs (live catalog → static registry → conservative
+    // fallback) and rewrite every requested id so a re-Apply after a capability
+    // update propagates correct limits/modalities. A display `name` the user
+    // set (anything other than the bare id) is preserved.
+    const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
+    const { specs, unverified } = await resolveModelSpecs(modelsArray, catalog);
 
     for (const m of modelsArray) {
-      if (!m || typeof m !== "string") continue;
-      const existing = existingProvider.models[m];
-      // Additively merge: preserve user-tuned fields (name, tool_call,
-      // reasoning, limit) on already-present entries (mirrors FR-005).
-      if (existing && typeof existing === "object") {
-        existingProvider.models[m] = {
-          ...existing,
-          modalities: existing.modalities || { input: ["text", "image"], output: ["text"] },
-        };
-      } else {
-        existingProvider.models[m] = { name: m, modalities: { input: ["text", "image"], output: ["text"] } };
-      }
+      const caps = specs.get(m) || FALLBACK_SPEC;
+      provider.models[m] = mergeModelEntry(m, caps, provider.models[m]);
     }
 
-    config.provider["afrouter"] = existingProvider;
+    if (!config.provider) config.provider = {};
+    config.provider[AFROUTER_PROVIDER_ID] = provider;
 
     if (activeModel === "") {
       config.model = "";
     } else {
       const finalActive = activeModel || modelsArray[0];
       if (finalActive) {
-        config.model = `afrouter/${finalActive}`;
+        config.model = modelSelection(finalActive);
       }
     }
 
@@ -251,6 +313,8 @@ export async function POST(request) {
       success: true,
       message: "MiMo Code settings applied successfully!",
       configPath,
+      written: modelsArray,
+      unverified,
     });
   } catch (error) {
     console.log("Error applying mimocode settings:", error);
@@ -275,7 +339,7 @@ export async function PATCH(request) {
     const config = existing.data && typeof existing.data === "object" ? existing.data : {};
 
     if (clearActiveModel === true) {
-      if (config.model?.startsWith("afrouter/")) {
+      if (config.model?.startsWith(`${AFROUTER_PROVIDER_ID}/`)) {
         config.model = "";
       }
     }
@@ -309,19 +373,19 @@ export async function DELETE(request) {
       return NextResponse.json({ success: true, message: "No config file to reset" });
     }
 
-    if (modelToRemove && config.provider?.["afrouter"]?.models) {
-      delete config.provider["afrouter"].models[modelToRemove];
+    if (modelToRemove && config.provider?.[AFROUTER_PROVIDER_ID]?.models) {
+      delete config.provider[AFROUTER_PROVIDER_ID].models[modelToRemove];
 
-      if (Object.keys(config.provider["afrouter"].models).length === 0) {
-        delete config.provider["afrouter"];
-        if (config.model?.startsWith("afrouter/")) delete config.model;
-      } else if (config.model === `afrouter/${modelToRemove}`) {
-        const remainingModels = Object.keys(config.provider["afrouter"].models);
-        config.model = `afrouter/${remainingModels[0]}`;
+      if (Object.keys(config.provider[AFROUTER_PROVIDER_ID].models).length === 0) {
+        delete config.provider[AFROUTER_PROVIDER_ID];
+        if (config.model?.startsWith(`${AFROUTER_PROVIDER_ID}/`)) delete config.model;
+      } else if (config.model === modelSelection(modelToRemove)) {
+        const remainingModels = Object.keys(config.provider[AFROUTER_PROVIDER_ID].models);
+        config.model = modelSelection(remainingModels[0]);
       }
     } else {
-      if (config.provider) delete config.provider["afrouter"];
-      if (config.model?.startsWith("afrouter/")) delete config.model;
+      if (config.provider) delete config.provider[AFROUTER_PROVIDER_ID];
+      if (config.model?.startsWith(`${AFROUTER_PROVIDER_ID}/`)) delete config.model;
     }
 
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));

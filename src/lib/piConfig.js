@@ -104,12 +104,16 @@ export const sanitizeModelInput = (input) => {
  * is self-describing; `reasoning` is omitted when false because that is Pi's
  * documented default and a bare `false` reads as "verified non-reasoning".
  * Pi only supports "text" and "image" in input (never video, audio, or pdf).
+ *
+ * Accepts either the Pi spec shape (`maxTokens`) or raw capability tables
+ * (`maxOutput`) so the card can pass `getCapabilitiesForModel` output directly.
  */
 export const buildModelEntry = (id, caps = {}) => {
+  const maxTokens = Math.floor(Number(caps.maxTokens ?? caps.maxOutput));
   const entry = {
     id,
-    contextWindow: Math.floor(caps.contextWindow ?? FALLBACK_SPEC.contextWindow),
-    maxTokens: Math.floor(caps.maxTokens ?? FALLBACK_SPEC.maxTokens),
+    contextWindow: Math.floor(Number(caps.contextWindow ?? FALLBACK_SPEC.contextWindow)),
+    maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : FALLBACK_SPEC.maxTokens,
     input: ["text"],
   };
   if (caps.name && typeof caps.name === "string" && caps.name !== id) {

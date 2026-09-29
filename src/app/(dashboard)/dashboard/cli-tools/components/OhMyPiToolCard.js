@@ -7,10 +7,21 @@ import BaseUrlSelect from "./BaseUrlSelect";
 import { rememberEndpoint } from "./cliEndpointPresets";
 import ApiKeySelect from "./ApiKeySelect";
 import { matchKnownEndpoint } from "./cliEndpointMatch";
-import { buildProviderEntry, buildModelSelector, OMP_DEFAULT_API_KEY } from "@/lib/ompConfig.js";
+import { buildProviderEntry, buildModelSelector, OMP_DEFAULT_API_KEY, FALLBACK_SPEC } from "@/lib/ompConfig.js";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { stringifyYAML } from "confbox/yaml";
 
 const ENDPOINT = "/api/cli-tools/omp-settings";
+
+// The card has no live catalog, so the Manual Config preview resolves specs from
+// the static capability tables and falls back exactly like the route does.
+const resolveCaps = (id) => {
+  const slash = id.indexOf("/");
+  const provider = slash > 0 ? id.slice(0, slash) : null;
+  const bare = slash > 0 ? id.slice(slash + 1) : id;
+  const caps = getCapabilitiesForModel(provider, bare);
+  return Number.isFinite(caps?.contextWindow) && Number.isFinite(caps?.maxOutput) ? caps : FALLBACK_SPEC;
+};
 
 // OMP's `splitThinkingSuffix` vocabulary. "auto"/"" = no suffix, which leaves
 // the model at whatever effort the session is already on.
@@ -237,12 +248,14 @@ export default function OhMyPiToolCard({ tool, isExpanded, onToggle, baseUrl, ap
   // dashboard Reset. Conservative specs (no catalog here) keep it honest.
   const getManualConfigs = () => {
     const modelsToShow = selectedModels.length > 0 ? selectedModels : ["provider/model-id"];
+    const specs = Object.fromEntries(modelsToShow.map((id) => [id, resolveCaps(id)]));
     const modelsDoc = {
       providers: {
         afrouter: buildProviderEntry({
           baseUrl: getEffectiveBaseUrl(),
           apiKey: getKeyToUse() || "<API_KEY_FROM_DASHBOARD>",
           models: modelsToShow,
+          specs,
         }),
       },
     };

@@ -135,13 +135,15 @@ export const sanitizeModelInput = (input) => {
  *
  * `contextWindow` drives OMP's local context budget (compaction threshold),
  * and `maxTokens` its default max-output, so both are resolved from real specs
- * rather than guessed.
+ * rather than guessed. Accepts either the OMP spec shape (`maxTokens`) or raw
+ * capability tables (`maxOutput`).
  */
 export const buildModelEntry = (id, caps = {}) => {
+  const maxTokens = Math.floor(Number(caps.maxTokens ?? caps.maxOutput));
   const entry = {
     id,
-    contextWindow: Math.floor(caps.contextWindow ?? FALLBACK_SPEC.contextWindow),
-    maxTokens: Math.floor(caps.maxTokens ?? FALLBACK_SPEC.maxTokens),
+    contextWindow: Math.floor(Number(caps.contextWindow ?? FALLBACK_SPEC.contextWindow)),
+    maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : FALLBACK_SPEC.maxTokens,
     input: ["text"],
   };
   if (caps.name && typeof caps.name === "string" && caps.name !== id) {
