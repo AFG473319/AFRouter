@@ -1,0 +1,168 @@
+name: Tests — full suite & baselines
+
+# Laptop-offload companion to beta.yml: beta builds only run on feature
+# branches/PRs, so pushes to master and mainline health had no cheap remote
+# test path — this does that without any production build or release step.
+# The laptop is slow and disk-starved (multi-GB .next caches), so tests,
+# baseline guards and lint belong HERE, never in a local terminal loop.
+#
+# Triggers: push to master, every PR, manual dispatch.
+# Jobs:
+#   core      gate — the small verified-green set (same list as beta.yml)
+#   full      advisory — whole suite vs known-fails baseline, JSON artifact
+#   baselines gate — provider/alias/oauth-urls snapshots (registry drift)
+#
+# Explicitly NOT here: builds, benchmarks (bench.yml), releases (release.yml).
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core tests (gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22 (matches Dockerfile node:22-alpine)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-root-${{ hashFiles('package-lock.json') }}-tests-${{ hashFiles('tests/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-root-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Install test deps (tests/ is an independent package)
+        run: npm ci --no-audit --no-fund
+        working-directory: tests
+
+      - name: Core tests (gate)
+        run: npx vitest run unit/standalone-assets.test.js unit/custom-server-peer-headers.test.js unit/capabilities.test.js unit/db-driver-chain.test.js
+        working-directory: tests
+
+  full:
+    name: Full suite (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-root-${{ hashFiles('package-lock.json') }}-tests-${{ hashFiles('tests/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-root-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Install test deps
+        run: npm ci --no-audit --no-fund
+        working-directory: tests
+
+      # Live/credential-dependent files excluded outright; remaining failures
+      # diffed against tests/__baseline__/known-fails.txt so only NEW failures
+      # count as regressions. Same policy as beta.yml: advisory signal only.
+      - name: Full test suite (advisory)
+        id: fullsuite
+        continue-on-error: true
+        run: npx vitest run --reporter=json --outputFile="$RUNNER_TEMP/vitest-results.json" --exclude='**/translator/real/**' --exclude='**/embeddings.cloud.test.js' --exclude='**/xai-oauth-service.test.js' --exclude='**/mimo-free.live.test.js'
+        working-directory: tests
+
+      - name: Check for regressions vs known-fails baseline (advisory)
+        if: always()
+        continue-on-error: true
+        run: node __baseline__/verify-no-regression.mjs "$RUNNER_TEMP/vitest-results.json"
+        working-directory: tests
+
+      - name: Summarize full suite counts
+        if: always()
+        run: |
+          node -e "try{const r=require(process.env.RUNNER_TEMP+'/vitest-results.json');console.log('### Full suite '+r.numPassedTests+' passed, '+r.numFailedTests+' failed, '+r.numTotalTests+' total')}catch(e){console.log('### Full suite - no results file, suite did not run')}" >> "$GITHUB_STEP_SUMMARY"
+        working-directory: tests
+
+      - name: Upload full test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-results-${{ github.sha }}
+          path: ${{ runner.temp }}/vitest-results.json
+          retention-days: 7
+
+  baselines:
+    name: Baseline guards (registry drift)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-root-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-root-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      # AGENTS.md: run these after touching the provider registry or alias
+      # logic — now they run on every change instead of being remembered.
+      # ADVISORY: the committed snapshots drift (providers get added without
+      # re-snapshotting), so verify-providers/verify-alias are red even on a
+      # plain master checkout. The step output is the drift report itself;
+      # refresh snapshots with tests/__baseline__/snapshot-providers.mjs when
+      # a registry change is intentional, and only then should this flip to
+      # a hard gate.
+      - name: verify-providers (advisory)
+        continue-on-error: true
+        run: node tests/__baseline__/verify-providers.mjs
+
+      - name: verify-alias (advisory)
+        continue-on-error: true
+        run: node tests/__baseline__/verify-alias.mjs
+
+      - name: verify-oauth-urls (advisory)
+        continue-on-error: true
+        run: node tests/__baseline__/verify-oauth-urls.mjs
