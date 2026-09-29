@@ -1,0 +1,541 @@
+"use server";
+
+import { NextResponse } from "next/server";
+import { exec } from "child_process";
+import { promisify } from "util";
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
+import { parseYAML, stringifyYAML } from "confbox/yaml";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { resolveProviderAlias } from "open-sse/services/model.js";
+import { readOwnership, writeOwnership } from "@/lib/ompModelOwnership.js";
+import {
+  FALLBACK_SPEC,
+  OMP_CONFIG_FILE,
+  OMP_MODELS_FILE,
+  clearOmpDefaults,
+  readOmpDefaults,
+  readOmpModelIds,
+  readOmpProvider,
+  readOmpThinkingLevel,
+  removeOmpProvider,
+  upsertOmpDefaults,
+  upsertOmpProvider,
+} from "@/lib/ompConfig.js";
+
+const execAsync = promisify(exec);
+
+// Oh My Pi resolves the agent dir from $PI_CODING_AGENT_DIR and otherwise uses
+// ~/.omp/agent. Resolved per call so the test suite can redirect it.
+const getAgentDir = () =>
+  process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".omp", "agent");
+
+const getModelsPath = () => path.join(getAgentDir(), OMP_MODELS_FILE);
+const getConfigPath = () => path.join(getAgentDir(), OMP_CONFIG_FILE);
+
+/**
+ * Safe YAML read: missing -> { missing: true }; unparseable -> { corrupt: true }.
+ * Never throws to the handler — the UI must never see a 500 for a bad user file.
+ *
+ * A document that parses but is not a mapping (an array, a bare scalar) is
+ * corrupt too: treating it as `{}` would silently overwrite whatever the user
+ * actually had there. OMP itself rejects a non-mapping root the same way — it
+ * moves the file to `.broken-*` and exits — so refusing to write over one is
+ * strictly friendlier than racing it.
+ */
+const readYamlDocument = async (filePath) => {
+  let raw;
+  try {
+    raw = await fs.readFile(filePath, "utf-8");
+  } catch (error) {
+    if (error.code === "ENOENT") return { missing: true };
+    return { corrupt: true };
+  }
+  try {
+    const data = parseYAML(raw);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return { corrupt: true };
+    return { data };
+  } catch {
+    return { corrupt: true };
+  }
+};
+
+// Timestamped backup -> temp file -> atomic rename with EPERM/EACCES retries
+// (Windows file-lock races with OMP/AV). Skips the backup when the target does
+// not exist, which is the normal first-apply case.
+const timestamp = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${d.getHours()}${p(d.getMinutes())}${p(d.getSeconds())}`;
+};
+
+const writeAtomic = async (filePath, content) => {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  let backupPath = null;
+  try {
+    backupPath = `${filePath}.bak-${timestamp()}`;
+    await fs.copyFile(filePath, backupPath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    backupPath = null;
+  }
+  const tmpPath = `${filePath}.tmp`;
+  await fs.writeFile(tmpPath, content, "utf-8");
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rename(tmpPath, filePath);
+      break;
+    } catch (error) {
+      if ((error.code === "EPERM" || error.code === "EACCES") && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 150));
+        continue;
+      }
+      throw error;
+    }
+  }
+  return { backupPath };
+};
+
+const npmPathEnv = () => {
+  const isWindows = process.platform === "win32";
+  return isWindows && process.env.APPDATA
+    ? { ...process.env, PATH: `${process.env.APPDATA}\\npm;${process.env.PATH || ""}` }
+    : process.env;
+};
+
+/**
+ * Detection: the agent dir, either of its config files, or an `omp` binary on
+ * PATH. A config file may not exist yet on a fresh install — that is "installed,
+ * not configured", not "not installed".
+ */
+const checkInstalled = async () => {
+  for (const candidate of [getAgentDir(), getModelsPath(), getConfigPath()]) {
+    try {
+      await fs.access(candidate);
+      return true;
+    } catch {
+      /* try next */
+    }
+  }
+  try {
+    const isWindows = process.platform === "win32";
+    await execAsync(isWindows ? "where omp" : "which omp", {
+      windowsHide: true,
+      env: npmPathEnv(),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// Self-fetch must target the port this instance actually listens on. The request
+// URL carries it; `process.env.PORT` is only a fallback because the Next server
+// may be started with --port and no PORT env.
+const resolveSelfOrigin = (request) => {
+  try {
+    const url = new URL(request?.url || "");
+    if (url.port) return `http://127.0.0.1:${url.port}`;
+  } catch {
+    // fall through
+  }
+  return `http://127.0.0.1:${process.env.PORT || 20128}`;
+};
+
+// Live catalog first: our own /v1/models, indexed by exact id and by the
+// alias-translated spelling (a config may use `oc/…` where the catalog says
+// `opencode/…`).
+const resolveLiveCatalog = async (origin) => {
+  try {
+    const res = await fetch(`${origin}/v1/models`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const models = Array.isArray(json?.data) ? json.data : [];
+    const byId = new Map();
+    const byAliasId = new Map();
+    for (const m of models) {
+      if (!m?.id || !m.capabilities) continue;
+      const caps = { ...m.capabilities, name: m.name || m.id };
+      byId.set(m.id, caps);
+      const bare = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
+      const owner = m.owned_by || (m.id.includes("/") ? m.id.slice(0, m.id.indexOf("/")) : null);
+      if (bare && owner) byAliasId.set(`${owner}/${bare}`, caps);
+    }
+    return { byId, byAliasId };
+  } catch {
+    return null;
+  }
+};
+
+const capsToSpec = (caps) => ({
+  name: caps.name || undefined,
+  contextWindow: Math.floor(Number(caps.contextWindow)),
+  maxTokens: Math.floor(Number(caps.maxOutput)),
+  vision: caps.vision === true,
+  reasoning: caps.reasoning === true,
+});
+
+// Catalog (exact, then alias-translated) -> static registry -> conservative
+// fallback. Never invent values: an unresolved id is reported `unverified` and
+// gets the documented conservative defaults. OMP's `contextWindow` is its local
+// context budget, so over-declaring would let a session run past what the
+// gateway's real model can accept.
+const resolveModelSpecs = async (ids, catalog) => {
+  const specs = {};
+  const unverified = [];
+  for (const id of ids) {
+    const slash = id.indexOf("/");
+    const prefix = slash > 0 ? id.slice(0, slash) : null;
+    const bare = slash > 0 ? id.slice(slash + 1) : id;
+
+    let caps = catalog?.byId?.get(id) || null;
+    if (!caps && prefix) {
+      const translated = resolveProviderAlias(prefix);
+      caps =
+        catalog?.byAliasId?.get(`${translated}/${bare}`) ||
+        catalog?.byAliasId?.get(`${prefix}/${bare}`) ||
+        null;
+    }
+    if (!caps) {
+      const staticCaps = getCapabilitiesForModel(prefix, bare);
+      if (staticCaps && Number.isFinite(staticCaps.contextWindow)) caps = staticCaps;
+    }
+    if (caps && Number.isFinite(caps.contextWindow) && Number.isFinite(caps.maxOutput)) {
+      specs[id] = capsToSpec(caps);
+    } else {
+      specs[id] = { ...FALLBACK_SPEC };
+      unverified.push(id);
+    }
+  }
+  return { specs, unverified };
+};
+
+/**
+ * Ownership classification. Once a ledger record exists it is authoritative:
+ * owned = recorded ids that are still present, and anything else in the entry
+ * is a `candidate` (typed in by hand) that DELETE never touches and Apply only
+ * adopts with an explicit flag.
+ *
+ * Before any ledger record exists — a fresh install, or a config the user
+ * pasted from another machine's Manual Config — every id in `providers.afrouter`
+ * counts as ours. Like Pi, OMP's AFRouter provider block is a provider entry we
+ * own outright rather than a shared entry with hand-added models, and OMP offers
+ * no per-model marker we can safely inject, so "everything under our provider id"
+ * is the correct pre-ledger reading and it lets a pasted config still be reset
+ * cleanly.
+ */
+const classifyOwnership = async (models) => {
+  const ids = readOmpModelIds(models);
+  const { known, models: recorded } = await readOwnership(getModelsPath());
+  if (known) {
+    const ownedSet = new Set(recorded);
+    const owned = ids.filter((id) => ownedSet.has(id));
+    const ownedOnly = new Set(owned);
+    return { known, owned, candidates: ids.filter((id) => !ownedOnly.has(id)) };
+  }
+  return { known, owned: ids, candidates: [] };
+};
+
+// GET - install + AFRouter routing status
+export async function GET(request) {
+  try {
+    const installed = await checkInstalled();
+    const configPath = getModelsPath();
+    const settingsPath = getConfigPath();
+    if (!installed) {
+      return NextResponse.json({
+        installed: false,
+        hasAFRouter: false,
+        configPath,
+        settingsPath,
+        omp: null,
+        message: "Oh My Pi is not installed",
+      });
+    }
+
+    const modelsResult = await readYamlDocument(configPath);
+    if (modelsResult.corrupt) {
+      return NextResponse.json({
+        installed: true,
+        corrupt: true,
+        hasAFRouter: false,
+        configPath,
+        settingsPath,
+        omp: null,
+      });
+    }
+
+    const models = modelsResult.data || {};
+    const provider = readOmpProvider(models);
+    const ids = readOmpModelIds(models);
+    const { owned, candidates } = await classifyOwnership(models);
+
+    let unverified = [];
+    if (ids.length > 0) {
+      const catalog =
+        (await resolveLiveCatalog(resolveSelfOrigin(request))) ||
+        // The batch `all-statuses` endpoint calls GET with no request, so fall
+        // back to the dashboard default port before giving up on the catalog.
+        (await resolveLiveCatalog(`http://127.0.0.1:${process.env.PORT || 20128}`));
+      const resolved = await resolveModelSpecs(ids, catalog);
+      unverified = ids.filter((id) => resolved.unverified.includes(id));
+    }
+
+    // config.yml is optional: OMP creates it on first run, and a missing file
+    // simply means no startup pin exists yet. It also holds all the user's other
+    // settings (theme, shellPath, tools), so only `modelRoles.default` is ours.
+    const configResult = await readYamlDocument(settingsPath);
+    const config = configResult.corrupt || configResult.missing ? {} : configResult.data;
+    const defaults = readOmpDefaults(config);
+
+    return NextResponse.json({
+      installed: true,
+      corrupt: false,
+      hasAFRouter: !!provider,
+      configPath,
+      settingsPath,
+      agentDir: getAgentDir(),
+      settingsCorrupt: configResult.corrupt === true,
+      omp: {
+        models: ids,
+        afrouterModels: owned,
+        unverified,
+        bootstrapCandidates: candidates,
+        baseURL: provider?.baseUrl || null,
+        api: provider?.api || null,
+        // Never the key itself.
+        hasApiKey: typeof provider?.apiKey === "string" && provider.apiKey.length > 0,
+        defaultModel: defaults.model,
+        defaultSelector: defaults.selector,
+        thinkingLevel: readOmpThinkingLevel(config),
+        isDefault: defaults.isAFRouter,
+      },
+    });
+  } catch (error) {
+    console.log("Error checking omp settings:", error);
+    return NextResponse.json({ error: "Failed to check omp settings" }, { status: 500 });
+  }
+}
+
+// POST - merge the `afrouter` provider into models.yml, and optionally pin it
+// as OMP's startup `modelRoles.default` in config.yml
+export async function POST(request) {
+  try {
+    const { baseUrl, apiKey, models, adoptBootstrap, setDefault, defaultModel, thinkingLevel } =
+      await request.json();
+    const modelsArray = Array.isArray(models) ? models.filter((m) => typeof m === "string" && m) : [];
+    if (!baseUrl || modelsArray.length === 0) {
+      return NextResponse.json({ error: "baseUrl and at least one model are required" }, { status: 400 });
+    }
+
+    const modelsPath = getModelsPath();
+    const modelsResult = await readYamlDocument(modelsPath);
+    if (modelsResult.corrupt) {
+      return NextResponse.json(
+        { success: false, error: "Oh My Pi models.yml is unreadable — fix or restore it before applying" },
+        { status: 409 },
+      );
+    }
+
+    const configPath = getConfigPath();
+    const configResult = await readYamlDocument(configPath);
+    if (configResult.corrupt) {
+      return NextResponse.json(
+        { success: false, error: "Oh My Pi config.yml is unreadable — fix or restore it before applying" },
+        { status: 409 },
+      );
+    }
+
+    const current = modelsResult.data || {};
+    const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
+    const { specs, unverified } = await resolveModelSpecs(modelsArray, catalog);
+
+    // Writability is "owned OR brand-new OR explicitly adopted candidate".
+    // Merely re-sending the whole hydrated chip list must never convert a
+    // hand-added model into a deletable one, so candidates need the flag.
+    const { owned, candidates } = await classifyOwnership(current);
+    const existing = new Set(readOmpModelIds(current));
+    const ownedSet = new Set(owned);
+    const adopted =
+      adoptBootstrap === true ? modelsArray.filter((id) => existing.has(id)) : [];
+    const writable = new Set([
+      ...ownedSet,
+      ...modelsArray.filter((id) => !existing.has(id)),
+      ...adopted,
+    ]);
+
+    // Restrict the write to what we may touch, then re-add every previously
+    // owned id that is still on the card so Apply is idempotent per model.
+    const nextModels = upsertOmpProvider(current, {
+      baseUrl,
+      apiKey,
+      models: [...writable],
+      specs,
+    });
+    // Preserve hand-added entries verbatim: upsert merged the whole previous
+    // list, so nothing of theirs was dropped or rewritten.
+    const present = new Set(readOmpModelIds(nextModels));
+    const { backupPath } = await writeAtomic(modelsPath, stringifyYAML(nextModels));
+
+    // Record exactly what we now manage. `writable` already contains every
+    // previously-owned id that is still present, so filtering it by what
+    // survived the merge is both the update and the adoption set; a candidate
+    // the user did not adopt is never recorded and therefore never deleted.
+    await writeOwnership(modelsPath, [...writable].filter((id) => present.has(id)));
+
+    // config.yml: pin the startup model when asked (setDefault:true), drop our
+    // pin when explicitly asked off (setDefault:false), and leave the file
+    // untouched when the flag is absent (API callers that never cared). Reading
+    // it as optional means a missing file is created on demand.
+    let defaultWritten = null;
+    let defaultCleared = false;
+    if (setDefault === true) {
+      const pinned = defaultModel && modelsArray.includes(defaultModel) ? defaultModel : modelsArray[0];
+      const nextConfig = upsertOmpDefaults(configResult.data || {}, {
+        modelId: pinned,
+        thinkingLevel: thinkingLevel || null,
+      });
+      const configBackup = await writeAtomic(configPath, stringifyYAML(nextConfig));
+      defaultWritten = { model: pinned, backupPath: configBackup.backupPath };
+    } else if (setDefault === false) {
+      // Only clear what still points at us — a pin the user repointed at
+      // another provider is theirs and must survive an Apply.
+      const defaults = readOmpDefaults(configResult.data || {});
+      if (defaults.isAFRouter) {
+        const nextConfig = clearOmpDefaults(configResult.data || {});
+        const configBackup = await writeAtomic(configPath, stringifyYAML(nextConfig));
+        defaultCleared = true;
+        defaultWritten = { model: null, backupPath: configBackup.backupPath };
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: defaultCleared
+        ? "Oh My Pi settings applied. AFRouter is no longer the startup model."
+        : defaultWritten
+          ? "Oh My Pi settings applied. It is now the startup model — run omp to use it."
+          : "Oh My Pi settings applied! Open /model in Oh My Pi to pick an AFRouter model.",
+      configPath: modelsPath,
+      settingsPath: configPath,
+      backupPath,
+      written: [...writable],
+      unverified,
+      defaultModel: defaultWritten,
+      defaultCleared,
+      skippedCandidates: candidates.filter((id) => !writable.has(id)),
+    });
+  } catch (error) {
+    console.log("Error applying omp settings:", error);
+    return NextResponse.json({ error: "Failed to apply omp settings" }, { status: 500 });
+  }
+}
+
+// DELETE - ownership-scoped removal from models.yml, plus the config.yml
+// startup pin when it still points at us
+export async function DELETE(request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const modelToRemove = searchParams.get("model");
+
+    const modelsPath = getModelsPath();
+    const modelsResult = await readYamlDocument(modelsPath);
+    if (modelsResult.missing || modelsResult.corrupt) {
+      return NextResponse.json({
+        success: true,
+        message: "No Oh My Pi models.yml to reset",
+        removed: 0,
+        entryRemoved: false,
+        skippedCandidates: [],
+      });
+    }
+
+    const current = modelsResult.data || {};
+    if (!readOmpProvider(current)) {
+      return NextResponse.json({
+        success: true,
+        message: "No AFRouter provider in Oh My Pi models.yml",
+        removed: 0,
+        entryRemoved: false,
+        skippedCandidates: [],
+      });
+    }
+
+    const { owned, candidates } = await classifyOwnership(current);
+    const ownedSet = new Set(owned);
+
+    // Count only the ids we are actually allowed to delete.
+    const targets = readOmpModelIds(current).filter(
+      (id) => ownedSet.has(id) && (!modelToRemove || id === modelToRemove),
+    );
+    if (targets.length === 0) {
+      return NextResponse.json({
+        success: true,
+        message: modelToRemove
+          ? `"${modelToRemove}" is not an AFRouter-managed model — left untouched`
+          : "No AFRouter-managed models to reset",
+        removed: 0,
+        entryRemoved: false,
+        skippedCandidates: modelToRemove ? [] : candidates,
+      });
+    }
+
+    let removed = 0;
+    let nextModels = current;
+    for (const id of targets) {
+      const result = removeOmpProvider(nextModels, id);
+      nextModels = result.models;
+      removed += result.removed;
+    }
+    const entryRemoved = !readOmpProvider(nextModels);
+
+    await writeAtomic(modelsPath, stringifyYAML(nextModels));
+    const remaining = readOmpModelIds(nextModels);
+    await writeOwnership(modelsPath, owned.filter((id) => remaining.includes(id)));
+
+    // Clear or repoint the startup pin while it still names an AFRouter model.
+    // Settings are only touched when a model was actually removed, so a no-op
+    // DELETE is inert.
+    let defaultCleared = false;
+    const configPath = getConfigPath();
+    const configResult = await readYamlDocument(configPath);
+    if (!configResult.missing && !configResult.corrupt) {
+      const defaults = readOmpDefaults(configResult.data);
+      if (entryRemoved) {
+        if (defaults.isAFRouter) {
+          await writeAtomic(configPath, stringifyYAML(clearOmpDefaults(configResult.data)));
+          defaultCleared = true;
+        }
+      } else if (modelToRemove && defaults.model === modelToRemove) {
+        // Only the specific removed model was pinned. Repoint the role at the
+        // first surviving AFRouter model, preserving the level it was pinned
+        // at; when nothing is left, the role goes entirely.
+        const level = readOmpThinkingLevel(configResult.data);
+        const nextConfig =
+          remaining.length > 0
+            ? upsertOmpDefaults(configResult.data, {
+                modelId: remaining[0],
+                thinkingLevel: level,
+              })
+            : clearOmpDefaults(configResult.data);
+        if (remaining.length === 0) defaultCleared = true;
+        await writeAtomic(configPath, stringifyYAML(nextConfig));
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: entryRemoved
+        ? "AFRouter provider removed from Oh My Pi"
+        : `Removed ${removed} AFRouter model${removed === 1 ? "" : "s"} from Oh My Pi`,
+      removed,
+      entryRemoved,
+      defaultCleared,
+      skippedCandidates: modelToRemove ? [] : candidates.filter((id) => remaining.includes(id)),
+    });
+  } catch (error) {
+    console.log("Error resetting omp settings:", error);
+    return NextResponse.json({ error: "Failed to reset omp settings" }, { status: 500 });
+  }
+}
