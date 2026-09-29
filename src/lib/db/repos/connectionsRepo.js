@@ -11,10 +11,9 @@ const OPTIONAL_FIELDS = [
 ];
 
 const MODEL_LOCK_PREFIX = "modelLock_";
-// Retirement markers are the long-horizon form of a model lock (upstream sunsets
-// a model id). Re-enabling a connection is a deliberate "use this again", so it
-// clears them exactly like it clears modelLock_* — otherwise a manually
-// re-enabled connection would keep bypassing a model the user just restored.
+// Leftover fields from the removed NVIDIA auto-retire feature. Clearing them on
+// activation cleans stale DB rows so a manually re-enabled connection is not
+// stuck with inert retirement markers.
 const RETIRED_MODEL_PREFIX = "retiredModel_";
 const RETIRED_STRIKES_PREFIX = "retiredStrikes_";
 
