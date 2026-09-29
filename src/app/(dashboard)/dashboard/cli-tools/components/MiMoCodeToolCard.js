@@ -7,8 +7,25 @@ import BaseUrlSelect from "./BaseUrlSelect";
 import { rememberEndpoint } from "./cliEndpointPresets";
 import ApiKeySelect from "./ApiKeySelect";
 import { matchKnownEndpoint } from "./cliEndpointMatch";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import {
+  FALLBACK_SPEC,
+  buildModelEntry,
+  modelSelection,
+  normalizeBaseUrl,
+} from "@/lib/mimocodeConfig.js";
 
 const ENDPOINT = "/api/cli-tools/mimocode-settings";
+
+// The card has no live catalog, so the Manual Config preview resolves specs from
+// the static capability tables and falls back exactly like the route does.
+const resolveCaps = (id) => {
+  const slash = id.indexOf("/");
+  const provider = slash > 0 ? id.slice(0, slash) : null;
+  const bare = slash > 0 ? id.slice(slash + 1) : id;
+  const caps = getCapabilitiesForModel(provider, bare);
+  return Number.isFinite(caps?.contextWindow) && Number.isFinite(caps?.maxOutput) ? caps : FALLBACK_SPEC;
+};
 
 export default function MiMoCodeToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
   const [status, setStatus] = useState(initialStatus || null);
@@ -175,6 +192,9 @@ export default function MiMoCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
     }
   };
 
+  // Snippet mirrors exactly what the route writes, through the same shared
+  // builder, so a remotely-pasted config behaves identically under a later
+  // dashboard Apply/Reset.
   const getManualConfigs = () => {
     const keyToUse = (selectedApiKey && selectedApiKey.trim())
       ? selectedApiKey
@@ -185,7 +205,7 @@ export default function MiMoCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
 
     const modelsObj = {};
     modelsToShow.forEach(m => {
-      modelsObj[m] = { name: m, modalities: { input: ["text", "image"], output: ["text"] } };
+      modelsObj[m] = buildModelEntry(m, resolveCaps(m));
     });
 
     const configPath = status?.configPath || "~/.config/mimocode/mimocode.jsonc";
@@ -199,11 +219,11 @@ export default function MiMoCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
             name: "AFRouter",
             npm: "@ai-sdk/openai-compatible",
             only_configured_models: true,
-            options: { baseURL: getEffectiveBaseUrl(), apiKey: keyToUse },
+            options: { baseURL: normalizeBaseUrl(getEffectiveBaseUrl()), apiKey: keyToUse },
             models: modelsObj,
           },
         },
-        model: `afrouter/${activeModelToShow}`,
+        model: modelSelection(activeModelToShow),
       }, null, 2),
     }];
   };

@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { parseYAML, stringifyYAML } from "confbox/yaml";
+import { FALLBACK_SPEC, buildModelEntry } from "./dshModelSpecs.js";
 
 // DeepSeek Harness (dsh) integration helpers.
 //
@@ -10,6 +11,11 @@ import { parseYAML, stringifyYAML } from "confbox/yaml";
 // AFRouter owns exactly one route (`llm-pi-ai.providers.afrouter`) and one
 // credential ref (`AFROUTER_API_KEY`); everything else in both documents is
 // preserved verbatim. See specs/002-deepseek-harness-integration/.
+//
+// Pure model-entry shapes live in `./dshModelSpecs.js` so the client card can
+// import them without this module's Node builtins.
+
+export { FALLBACK_SPEC, buildModelEntry };
 
 export const ROUTE_KEY = "afrouter";
 export const CREDENTIAL_REF = "AFROUTER_API_KEY";
@@ -91,34 +97,6 @@ const normalizeBaseUrl = (baseUrl) => {
 
 export const getAfrouterRoute = (settings) =>
   settings?.[SETTINGS_SECTION]?.providers?.[ROUTE_KEY] || null;
-
-// Build a single dsh model entry from resolved specs. `input` is declared only
-// for vision models and `reasoningEfforts` only when the model reasons — a
-// hand-declared model is text-only and reasoning-less by default.
-export const buildModelEntry = (id, spec = {}, compat = null) => {
-  const entry = {
-    id,
-    name: spec.name || id,
-    contextWindow: spec.contextWindow,
-    maxTokens: spec.maxTokens,
-  };
-  if (spec.vision) entry.input = ["text", "image"];
-  if (spec.reasoning) {
-    entry.reasoningEfforts = {
-      off: null,
-      low: "low",
-      medium: "medium",
-      high: "high",
-      max: "max",
-    };
-    // A DeepSeek-family model behind the gateway thinks unless told otherwise,
-    // so `off` must send thinking:{type:disabled}. Opt-in only.
-    if (compat?.thinkingFormat === "deepseek") {
-      entry.compat = { thinkingFormat: "deepseek" };
-    }
-  }
-  return entry;
-};
 
 // Upsert the AFRouter route, merging models additively by id. Every other
 // section, provider and route field is preserved (FR-005).

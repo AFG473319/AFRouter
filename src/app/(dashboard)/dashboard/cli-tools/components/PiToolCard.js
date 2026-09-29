@@ -7,9 +7,20 @@ import BaseUrlSelect from "./BaseUrlSelect";
 import { rememberEndpoint } from "./cliEndpointPresets";
 import ApiKeySelect from "./ApiKeySelect";
 import { matchKnownEndpoint } from "./cliEndpointMatch";
-import { buildProviderEntry, PI_DEFAULT_API_KEY } from "@/lib/piConfig.js";
+import { buildProviderEntry, PI_DEFAULT_API_KEY, FALLBACK_SPEC } from "@/lib/piConfig.js";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 
 const ENDPOINT = "/api/cli-tools/pi-settings";
+
+// The card has no live catalog, so the Manual Config preview resolves specs from
+// the static capability tables and falls back exactly like the route does.
+const resolveCaps = (id) => {
+  const slash = id.indexOf("/");
+  const provider = slash > 0 ? id.slice(0, slash) : null;
+  const bare = slash > 0 ? id.slice(slash + 1) : id;
+  const caps = getCapabilitiesForModel(provider, bare);
+  return Number.isFinite(caps?.contextWindow) && Number.isFinite(caps?.maxOutput) ? caps : FALLBACK_SPEC;
+};
 
 export default function PiToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
   const [status, setStatus] = useState(initialStatus || null);
@@ -214,10 +225,12 @@ export default function PiToolCard({ tool, isExpanded, onToggle, baseUrl, apiKey
   // dashboard Reset. Conservative specs (no catalog here) keep it honest.
   const getManualConfigs = () => {
     const modelsToShow = selectedModels.length > 0 ? selectedModels : ["provider/model-id"];
+    const specs = Object.fromEntries(modelsToShow.map((id) => [id, resolveCaps(id)]));
     const modelsDoc = { providers: { afrouter: buildProviderEntry({
       baseUrl: getEffectiveBaseUrl(),
       apiKey: getKeyToUse() || "<API_KEY_FROM_DASHBOARD>",
       models: modelsToShow,
+      specs,
     }) } };
     const configs = [
       {

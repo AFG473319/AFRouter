@@ -1,14 +1,25 @@
 /**
  * Unit tests for /api/cli-tools/mimocode-settings (MiMo Code / Desktop integration).
  *
- * Covers the config-write paths against a temp MIMOCODE_HOME:
+ * The regression this suite exists to pin down: the route used to write every
+ * model as `{ name, modalities: { input: ["text","image"] } }`, which (a) lied
+ * about vision support on text-only models, (b) omitted pdf/audio/video that
+ * MiMoCode's `/modalities` TUI does support, and (c) left `limit`/`reasoning`/
+ * `tool_call` unset so MiMoCode could not size context or gate thinking/tools.
+ * Model specs must now be resolved from the capability tables and written in
+ * MiMoCode's documented shape (limit/reasoning/tool_call/modalities).
+ *
+ * Also covers:
  *  - GET never 500s on missing/corrupt config (SC-004)
  *  - GET detects AFRouter provider + active model
  *  - POST writes provider.afrouter + preserves unrelated sections (FR-005)
- *  - POST merges models additively
- *  - POST rejects JSONC (trailing commas, comments) without corrupting the file
+ *  - POST preserves a custom display `name` while refreshing machine-readable specs
+ *  - POST reports unverified ids
  *  - PATCH clearActiveModel
  *  - DELETE removes the provider; DELETE ?model= removes one model
+ *
+ * os.homedir / MIMOCODE_HOME are redirected to a per-test temp dir; global.fetch
+ * is rejected so spec resolution takes the deterministic static-registry path.
  */
 
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
@@ -40,6 +51,36 @@ vi.mock("child_process", async (importOriginal) => {
   return { exec, promisify: util.promisify };
 });
 
+// Only ids in this table resolve; everything else takes the fallback path.
+// vision:false on the first is deliberate — the old route claimed image support.
+vi.mock("open-sse/providers/capabilities.js", () => ({
+  getCapabilitiesForModel: (provider, model) => {
+    const key = provider ? `${provider}/${model}` : model;
+    if (key === "cl/z-ai/glm-5.3-flash") {
+      return {
+        contextWindow: 1000000,
+        maxOutput: 131072,
+        reasoning: true,
+        vision: true,
+        pdf: true,
+        videoInput: true,
+        tools: true,
+      };
+    }
+    if (key === "cl/text-only-model") {
+      return { contextWindow: 200000, maxOutput: 32000, reasoning: false, vision: false, tools: true };
+    }
+    return { contextWindow: Number.NaN, maxOutput: Number.NaN };
+  },
+}));
+
+vi.mock("open-sse/services/model.js", () => ({
+  resolveProviderAlias: (alias) => alias,
+}));
+
+const realFetch = global.fetch;
+global.fetch = () => Promise.reject(new Error("offline test"));
+
 const { GET, POST, PATCH, DELETE } = await import(
   "../../src/app/api/cli-tools/mimocode-settings/route.js"
 );
@@ -60,7 +101,7 @@ function readConfig() {
 }
 
 function post(body) {
-  return POST({ json: async () => body });
+  return POST({ url: "http://127.0.0.1:20128/api/cli-tools/mimocode-settings", json: async () => body });
 }
 
 function patch(body) {
@@ -79,6 +120,7 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  global.fetch = realFetch;
   delete process.env.MIMOCODE_HOME;
   delete process.env.APPDATA;
 });
@@ -149,8 +191,8 @@ describe("POST", () => {
     const res = await post({
       baseUrl: "http://localhost:20128",
       apiKey: "sk-abc",
-      models: ["cc/claude-sonnet-5", "cl/longcat-2.0"],
-      activeModel: "cl/longcat-2.0",
+      models: ["cl/text-only-model", "cl/z-ai/glm-5.3-flash"],
+      activeModel: "cl/z-ai/glm-5.3-flash",
     });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -159,25 +201,80 @@ describe("POST", () => {
     expect(config.provider.afrouter.npm).toBe("@ai-sdk/openai-compatible");
     expect(config.provider.afrouter.only_configured_models).toBe(true);
     expect(config.provider.afrouter.options.baseURL).toBe("http://localhost:20128/v1");
-    expect(config.model).toBe("afrouter/cl/longcat-2.0");
-    expect(Object.keys(config.provider.afrouter.models)).toEqual(["cc/claude-sonnet-5", "cl/longcat-2.0"]);
+    expect(config.model).toBe("afrouter/cl/z-ai/glm-5.3-flash");
+    expect(Object.keys(config.provider.afrouter.models)).toEqual(["cl/text-only-model", "cl/z-ai/glm-5.3-flash"]);
   });
 
-  it("preserves unrelated provider sections and model entries (FR-005)", async () => {
+  it("writes full model specs (limit/reasoning/tool_call/modalities)", async () => {
+    const res = await post({
+      baseUrl: "http://localhost:20128",
+      models: ["cl/z-ai/glm-5.3-flash"],
+      activeModel: "cl/z-ai/glm-5.3-flash",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.unverified).toEqual([]);
+
+    const entry = readConfig().provider.afrouter.models["cl/z-ai/glm-5.3-flash"];
+    expect(entry.limit).toEqual({ context: 1000000, output: 131072 });
+    expect(entry.reasoning).toBe(true);
+    expect(entry.tool_call).toBe(true);
+    expect(entry.modalities.input).toEqual(["text", "image", "pdf", "video"]);
+    expect(entry.modalities.output).toEqual(["text"]);
+  });
+
+  it("does not claim image support on text-only models", async () => {
+    await post({
+      baseUrl: "http://localhost:20128",
+      models: ["cl/text-only-model"],
+      activeModel: "cl/text-only-model",
+    });
+
+    const entry = readConfig().provider.afrouter.models["cl/text-only-model"];
+    expect(entry.modalities.input).toEqual(["text"]);
+    expect(entry.reasoning).toBe(false);
+    expect(entry.tool_call).toBe(true);
+    expect(entry.limit).toEqual({ context: 200000, output: 32000 });
+  });
+
+  it("reports unverified ids and writes conservative specs", async () => {
+    const res = await post({
+      baseUrl: "http://localhost:20128",
+      models: ["unknown/never-heard-of-it"],
+      activeModel: "unknown/never-heard-of-it",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.unverified).toEqual(["unknown/never-heard-of-it"]);
+
+    const entry = readConfig().provider.afrouter.models["unknown/never-heard-of-it"];
+    expect(entry.limit.context).toBeGreaterThan(0);
+    expect(entry.modalities.input).toEqual(["text"]);
+  });
+
+  it("preserves unrelated provider sections and a custom display name (FR-005)", async () => {
     writeConfig({
       model: "9router/cc/claude-sonnet-5",
       provider: {
         userprovider: { npm: "@ai-sdk/x", options: { baseURL: "https://x/y" }, models: { "m/1": { name: "Keep" } } },
-        afrouter: { npm: "@ai-sdk/openai-compatible", options: {}, models: { "cc/claude-sonnet-5": { name: "keep-me" } } },
+        afrouter: {
+          npm: "@ai-sdk/openai-compatible",
+          options: {},
+          models: { "cl/text-only-model": { name: "keep-me", limit: { context: 1, output: 1 } } },
+        },
       },
     });
-    await post({ baseUrl: "http://localhost:20128", models: ["cc/claude-sonnet-5", "gemini/gemini-3-pro"], activeModel: "gemini/gemini-3-pro" });
+    await post({
+      baseUrl: "http://localhost:20128",
+      models: ["cl/text-only-model", "cl/z-ai/glm-5.3-flash"],
+      activeModel: "cl/z-ai/glm-5.3-flash",
+    });
 
     const config = readConfig();
     expect(config.provider.userprovider).toBeDefined();
     expect(config.provider.userprovider.models["m/1"].name).toBe("Keep");
-    expect(config.provider.afrouter.models["cc/claude-sonnet-5"].name).toBe("keep-me");
-    expect(Object.keys(config.provider.afrouter.models).sort()).toEqual(["cc/claude-sonnet-5", "gemini/gemini-3-pro"]);
+    expect(config.provider.afrouter.models["cl/text-only-model"].name).toBe("keep-me");
+    // Machine-readable specs are refreshed even when the display name is kept.
+    expect(config.provider.afrouter.models["cl/text-only-model"].limit).toEqual({ context: 200000, output: 32000 });
+    expect(Object.keys(config.provider.afrouter.models).sort()).toEqual(["cl/text-only-model", "cl/z-ai/glm-5.3-flash"]);
   });
 
   it("rejects when baseUrl or models are missing", async () => {
@@ -188,7 +285,7 @@ describe("POST", () => {
   it("accepts a JSONC existing file and writes clean JSON", async () => {
     fs.mkdirSync(path.dirname(configPath()), { recursive: true });
     fs.writeFileSync(configPath(), `{\n  // comment\n  "model": "x/y",\n}`);
-    const res = await post({ baseUrl: "http://localhost:20128", models: ["cc/claude-sonnet-5"], activeModel: "cc/claude-sonnet-5" });
+    const res = await post({ baseUrl: "http://localhost:20128", models: ["cl/text-only-model"], activeModel: "cl/text-only-model" });
     expect(res.status).toBe(200);
     const parsed = readConfig();
     expect(parsed.provider.afrouter.options.baseURL).toBe("http://localhost:20128/v1");
