@@ -1,9 +1,7 @@
 import crypto from "node:crypto";
 import { DefaultExecutor } from "./default.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
-import { modelTargetFormat } from "../providers/models/schema.js";
-import { getProviderModels, getModelTargetFormat } from "../config/providerModels.js";
-import { resolveTransport } from "../services/provider.js";
+import { getModelTargetFormat } from "../config/providerModels.js";
 import { FORMATS } from "../translator/formats.js";
 import {
   normalizeResponsesInput,
@@ -43,16 +41,10 @@ function translatedSession(sessionId, clientTool) {
   return `ses_${digest}`;
 }
 
-// Strip the thinking suffix "model(level)" so checks hit the base id.
-function baseModelId(model) {
-  return String(model || "").replace(/\([^()]+\)\s*$/, "").trim();
-}
-
-// Responses-only per the provider registry (grok-4.6, gpt-5.6-luna, muse-spark, …).
-// Reading the registry keeps this in sync with config — never hardcode model ids here.
+// Responses-only per the provider registry (grok-4.6, gpt-5.6-luna, muse-spark, …),
+// including the family-regex fallback for passthrough ids — never hardcode model ids here.
 function isResponsesModel(model) {
-  const entry = getProviderModels("opencode-go").find((m) => m.id === baseModelId(model));
-  return modelTargetFormat(entry) === "openai-responses";
+  return getModelTargetFormat("opencode-go", model) === FORMATS.OPENAI_RESPONSES;
 }
 
 // Flatten Chat Completions tool declarations into the Responses flat shape and
@@ -123,17 +115,10 @@ export class OpenCodeGoExecutor extends DefaultExecutor {
     super("opencode-go");
   }
 
-  // Messages-only models need matching endpoint/auth after translation too,
-  // when chatCore has no source-matched transport.
-  modelCredentials(model, credentials) {
-    if (getModelTargetFormat(this.provider, model) !== FORMATS.CLAUDE) return credentials;
-    return { ...credentials, runtimeTransport: resolveTransport(this.provider, FORMATS.CLAUDE) };
-  }
-
   buildUrl(model, stream, urlIndex = 0, credentials = null) {
     // Muse Spark lives on /responses even when a stale runtimeTransport leaks in.
     if (isResponsesModel(model)) return RESPONSES_BASE_URL;
-    return super.buildUrl(model, stream, urlIndex, this.modelCredentials(model, credentials));
+    return super.buildUrl(model, stream, urlIndex, credentials);
   }
 
   prepareRequestCredentials({ body, credentials, providerSessionId, clientTool } = {}) {
@@ -158,7 +143,7 @@ export class OpenCodeGoExecutor extends DefaultExecutor {
   }
 
   buildHeaders(credentials, stream = true, url, model) {
-    const headers = super.buildHeaders(this.modelCredentials(model, credentials) || {}, stream, url, model);
+    const headers = super.buildHeaders(credentials || {}, stream, url, model);
     const prepared = credentials?.[SESSION_FIELD];
     if (prepared) {
       headers[SESSION_HEADER] = prepared;

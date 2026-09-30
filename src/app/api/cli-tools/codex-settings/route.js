@@ -1,5 +1,3 @@
-"use server";
-
 import { NextResponse } from "next/server";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -8,6 +6,8 @@ import { applyCodexSettings, getCodexPaths, readCodexFiles, resetCodexSettings, 
 import { normalizeCodexBaseUrl } from "@/shared/codexCatalog.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
+
+export const dynamic = "force-dynamic";
 
 const execAsync = promisify(exec);
 const validModel = (value) => typeof value === "string" && value.length > 0 && value.length <= 300 && !/[\s\x00-\x1f]/.test(value);

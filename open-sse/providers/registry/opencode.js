@@ -14,29 +14,30 @@ export default {
   noAuth: true,
   transport: {
     baseUrl: "https://opencode.ai",
-    // Upstream free-tier gate rejects stream:false with 403 FreeTierError
-    // (verified live). Force SSE upstream; chatCore converts back to JSON
-    // for non-streaming clients via the existing forced-SSE path.
-    forceStream: true,
     headers: {
       "x-opencode-client": "desktop",
     },
+    forceStream: true,
     noAuth: true,
+    quirks: {
+      forceAutoToolChoiceModels: ["muse-spark-1.3-contributor-free"],
+    },
   },
   models: [
-    // Muse Spark models are served by /zen/v1/responses; other passthrough
-    // models default to /chat/completions. Declare special formats per-model.
+    // Endpoint formats differ per model, so declare non-chat models explicitly.
     { id: "muse-spark-1.2-contributor-free", name: "Muse Spark 1.2 Contributor Free", targetFormat: "openai-responses" },
     { id: "muse-spark-1.3-contributor-free", name: "Muse Spark 1.3 Contributor Free", targetFormat: "openai-responses" },
-    // Jev is a decisions-only System One model (TypeSafe): upstream serves it on
-    // POST /zen/v1/systemone with {model, state, questions} and returns typed
-    // {answers} — there is no chat/completions or responses shape for it, so
-    // chat requests are rejected with a clear 400 (see chatCore guard).
-    // Only the free id lives here: this provider is noAuth (Bearer public),
-    // and the paid jev-1.13 needs a Zen API key with balance, so advertising
-    // it under "OpenCode Free" would only produce auth/billing failures.
-    { id: "jev-1.13-free", name: "Jev 1.13 Free", targetFormat: "systemone" },
+    { id: "union-alpha", name: "Union Alpha Free", targetFormat: "claude" },
+    { id: "jev-1.13-free", name: "Jev 1.13 Free", kind: "systemone" },
   ],
+  serviceKinds: ["llm", "systemone"],
+  systemoneConfig: {
+    baseUrl: "https://opencode.ai/zen/v1/systemone",
+    headers: {
+      "x-opencode-client": "desktop",
+      "User-Agent": "opencode/1.18.31",
+    },
+  },
   modelsFetcher: { url: "https://opencode.ai/zen/v1/models", type: "opencode-free" },
   passthroughModels: true,
 };

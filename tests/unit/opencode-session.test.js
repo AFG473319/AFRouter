@@ -11,9 +11,12 @@ vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
 import { getExecutor } from "../../open-sse/executors/index.js";
 import {
   OPENCODE_SESSION_RE,
+  OPENCODE_REQUEST_RE,
   generateSessionId,
   generateRequestId,
   translateSessionId,
+  stableSessionId,
+  deriveRequestId,
 } from "../../open-sse/executors/opencode.js";
 
 function makeCredentials(overrides = {}) {
@@ -201,69 +204,145 @@ describe("OpenCode Free User-Agent Validation", () => {
   });
 });
 
-describe("OpenCode Free Upstream Gates (stream + tool fingerprint)", () => {
-  it("forces stream:true upstream on chat bodies even for non-stream clients", () => {
+describe("OpenCode Stable Session Reuse (429 follow-up)", () => {
+  function anonymousCredentials(auth) {
+    return makeCredentials({ connectionId: undefined, rawHeaders: { authorization: `Bearer ${auth}` } });
+  }
+
+  it("reuses one stable upstream session instead of minting a new one per request", () => {
     const executor = getExecutor("opencode");
-    const out = executor.transformRequest(
-      "mimo-v2.5-free",
-      { model: "mimo-v2.5-free", messages: [{ role: "user", content: "hi" }] },
-      false,
-      { rawHeaders: {} },
-    );
-    expect(out.stream).toBe(true);
+    const body = { messages: [{ role: "user", content: "hello" }] };
+    const first = executor.prepareRequestCredentials({
+      body,
+      credentials: anonymousCredentials("stable-key-1"),
+      providerSessionId: null,
+      clientTool: "claude",
+    });
+    const second = executor.prepareRequestCredentials({
+      body,
+      credentials: anonymousCredentials("stable-key-1"),
+      providerSessionId: null,
+      clientTool: "claude",
+    });
+
+    expect(first._opencodeSession).toMatch(OPENCODE_SESSION_RE);
+    expect(second._opencodeSession).toBe(first._opencodeSession);
   });
 
-  it("injects the file-search quartet into chat bodies without tools", () => {
+  it("isolates stable sessions by downstream identity", () => {
     const executor = getExecutor("opencode");
-    const out = executor.transformRequest(
-      "mimo-v2.5-free",
-      { model: "mimo-v2.5-free", messages: [{ role: "user", content: "hi" }] },
-      true,
-      { rawHeaders: {} },
-    );
-    const names = out.tools.map((t) => t.function?.name);
-    for (const required of ["bash", "glob", "grep", "read"]) {
-      expect(names).toContain(required);
-    }
+    const body = { messages: [{ role: "user", content: "hello" }] };
+    const forKey = (auth) => executor.prepareRequestCredentials({
+      body,
+      credentials: anonymousCredentials(auth),
+      providerSessionId: null,
+      clientTool: "claude",
+    })._opencodeSession;
+
+    expect(forKey("user-A")).not.toBe(forKey("user-B"));
+    expect(forKey("user-A")).toMatch(OPENCODE_SESSION_RE);
   });
 
-  it("preserves caller chat tools and only appends the missing fingerprint names", () => {
-    const executor = getExecutor("opencode");
-    const out = executor.transformRequest(
-      "mimo-v2.5-free",
-      {
-        model: "mimo-v2.5-free",
-        messages: [{ role: "user", content: "hi" }],
-        tools: [{ type: "function", function: { name: "my_tool", description: "m", parameters: { type: "object", properties: {} } } }],
-      },
-      true,
-      { rawHeaders: {} },
-    );
-    const names = out.tools.map((t) => t.function?.name);
-    expect(names[0]).toBe("my_tool");
-    for (const required of ["bash", "glob", "grep", "read"]) {
-      expect(names).toContain(required);
-    }
+  it("exposes the stable session helper directly", () => {
+    const first = stableSessionId({ connectionId: "direct-conn" });
+    expect(stableSessionId({ connectionId: "direct-conn" })).toBe(first);
+    expect(first).toMatch(OPENCODE_SESSION_RE);
   });
 
-  it("injects the fingerprint into Responses bodies and keeps stream/store gates", () => {
+  it("derives deterministic, canonical request ids per message", () => {
+    const session = stableSessionId({ connectionId: "req-conn" });
+    const body = { messages: [{ role: "user", content: "ping" }] };
+    const first = deriveRequestId(session, body);
+    expect(first).toMatch(OPENCODE_REQUEST_RE);
+    expect(deriveRequestId(session, body)).toBe(first);
+    expect(
+      deriveRequestId(session, { messages: [{ role: "user", content: "a different question" }] }),
+    ).not.toBe(first);
+  });
+
+  it("preserves a valid downstream x-opencode-request header", () => {
     const executor = getExecutor("opencode");
-    const out = executor.transformRequest(
-      "muse-spark-1.3-contributor-free",
-      { input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }] },
-      false,
-      { rawHeaders: {} },
-    );
-    expect(out.stream).toBe(true);
-    expect(out.store).toBe(false);
-    const names = out.tools.map((t) => t.name);
-    for (const required of ["bash", "glob", "grep", "read"]) {
-      expect(names).toContain(required);
-    }
+    const validReq = "msg_0ae8d9cd3001swxaFbM248jcIF";
+    const { prepared } = prepare(executor, {
+      credentials: makeCredentials({ rawHeaders: { "x-opencode-request": validReq } }),
+    });
+    expect(prepared._opencodeRequest).toBe(validReq);
+  });
+
+  it("keeps the standalone buildHeaders session stable across calls", () => {
+    const executor = getExecutor("opencode");
+    const first = executor.buildHeaders({})["x-opencode-session"];
+    const second = executor.buildHeaders({})["x-opencode-session"];
+    expect(first).toMatch(OPENCODE_SESSION_RE);
+    expect(second).toBe(first);
+  });
+
+  it("applies the full lowercase free-tier fingerprint quartet", () => {
+  const executor = getExecutor("opencode");
+
+  const chatNoTools = executor.transformRequest("nemotron-3-ultra-free", {
+    messages: [{ role: "user", content: "hi" }],
+  });
+  expect(chatNoTools.stream).toBe(true);
+  expect(chatNoTools.tool_choice).toBe("none");
+  expect(chatNoTools.tools.map((t) => t.function?.name)).toEqual([
+    "bash", "glob", "grep", "read",
+  ]);
+
+  const chatWithTools = executor.transformRequest("nemotron-3-ultra-free", {
+    messages: [{ role: "user", content: "hi" }],
+    tools: [
+      { type: "function", function: { name: "Bash", description: "Claude Code tool" } },
+      { type: "function", function: { name: "Glob", description: "Claude Code tool" } },
+      { type: "function", function: { name: "Grep", description: "Claude Code tool" } },
+      { type: "function", function: { name: "Read", description: "Claude Code tool" } },
+    ],
+    tool_choice: "auto",
+  });
+  expect(chatWithTools.tool_choice).toBe("auto");
+  expect(chatWithTools.tools.map((t) => t.function?.name)).toEqual([
+    "bash", "glob", "grep", "read",
+  ]);
+
+  const chatPartial = executor.transformRequest("nemotron-3-ultra-free", {
+    messages: [{ role: "user", content: "hi" }],
+    tools: [
+      { type: "function", function: { name: "bash", description: "existing" } },
+      { type: "function", function: { name: "read", description: "existing" } },
+    ],
+  });
+  expect(chatPartial.tools.map((t) => t.function?.name)).toEqual([
+    "bash", "read", "glob", "grep",
+  ]);
+  expect(chatPartial.tools[0].function.description).toBe("existing");
+});
+
+  it("cloaks Muse Responses requests even when the client already supplies tools", () => {
+    const executor = getExecutor("opencode");
+    const transformed = executor.transformRequest("muse-spark-1.3-contributor-free(xhigh)", {
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      tools: [{
+        type: "function",
+        name: "zcode_search",
+        description: "client-provided tool",
+        parameters: { type: "object", properties: {} },
+      }],
+      tool_choice: "auto",
+      reasoning_effort: "xhigh",
+    }, true, {});
+
+    expect(transformed.stream).toBe(true);
+    expect(transformed.reasoning?.effort).toBe("xhigh");
+    const names = transformed.tools.map((tool) => tool.name);
+    expect(names).toContain("zcode_search");
+    expect(names).toContain("bash");
+    expect(names).toContain("read");
+    expect(names.filter((name) => name === "bash")).toHaveLength(1);
+    expect(names.filter((name) => name === "read")).toHaveLength(1);
   });
 
   it("declares forceStream on the opencode transport so chatCore serves SSE upstream", async () => {
     const { PROVIDERS } = await import("../../open-sse/config/providers.js");
-    expect(PROVIDERS["opencode"]?.forceStream).toBe(true);
+    expect(PROVIDERS.opencode?.forceStream).toBe(true);
   });
 });

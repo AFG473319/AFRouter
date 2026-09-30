@@ -1,36 +1,13 @@
 /**
- * Command Code usage — credit balances, plan windows and billing-period totals.
- *
- * Auth: Bearer <apiKey> (the CLI's `user_...` key). This talks to the same
- * alpha API the `/alpha/generate` endpoint uses; the CLI is only one client of
- * it, so the data is reachable without shelling out to `cmdc`.
- *
- * Endpoints (all GET):
- *   /alpha/whoami             → { user, org }   (org.id feeds ?orgId= below)
- *   /alpha/billing/credits    → { credits, windowLimits }
- *   /alpha/usage/summary      → billing-period totals
- *
- * Cloudflare fronting this API fingerprints requests and answers
- * `403 error code: 1010` when the CLI identity headers are absent, so the
- * version/user-agent headers below are required, not cosmetic.
+ * Command Code usage — billing credits + 5h/weekly rate windows.
+ * Mirrors ~/cc-usage.mjs: whoami → credits + subscriptions.
  */
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { parseResetTime, toFiniteNumber } from "./shared.js";
 
-const API_BASE = "https://api.commandcode.ai";
-const WHOAMI_URL = `${API_BASE}/alpha/whoami`;
-const CREDITS_URL = `${API_BASE}/alpha/billing/credits`;
-const SUMMARY_URL = `${API_BASE}/alpha/usage/summary`;
-const SUBSCRIPTIONS_URL = `${API_BASE}/alpha/billing/subscriptions`;
+const BASE = (process.env.COMMAND_CODE_API_BASE_URL || "https://api.commandcode.ai").replace(/\/$/, "");
 
-// Announced CLI version. Kept in sync with the provider registry transport
-// header so upstream sees one consistent client identity.
-const CLI_VERSION = "0.25.7";
-
-// Upstream plan ids → friendly dashboard labels (from the 9Router Quota
-// Tracker contribution). The raw planId is still shown alongside so
-// quota-table snapshots stay greppable.
 const PLAN_NAMES = {
   "individual-go": "Go",
   "individual-goat": "GOAT",
@@ -42,68 +19,35 @@ const PLAN_NAMES = {
   "teams-pro": "Teams Pro",
 };
 
-function buildHeaders(apiKey) {
+const PLAN_CAPS = {
+  "individual-go": 10,
+  "individual-goat": 70,
+  "individual-pro": 30,
+  "individual-pro-v1": 80,
+  "individual-provider": 15,
+  "individual-max": 150,
+  "individual-ultra": 300,
+  "teams-pro": 40,
+};
+
+function qs(route, params) {
+  const s = new URLSearchParams(
+    Object.entries(params || {}).filter(([, v]) => v != null),
+  ).toString();
+  return s ? `${route}?${s}` : route;
+}
+
+function windowQuota(win) {
+  if (!win || typeof win !== "object") return null;
+  const used = toFiniteNumber(win.used, 0);
+  const total = toFiniteNumber(win.cap, 0);
+  if (total <= 0 && used <= 0) return null;
   return {
-    Authorization: `Bearer ${apiKey}`,
-    Accept: "application/json",
-    "x-command-code-version": CLI_VERSION,
-    "x-cli-environment": "cli",
-    "user-agent": `command-code/${CLI_VERSION}`,
-  };
-}
-
-function buildUrl(endpoint, orgId) {
-  if (!orgId) return endpoint;
-  return `${endpoint}?orgId=${encodeURIComponent(orgId)}`;
-}
-
-async function getJson(url, apiKey, proxyOptions) {
-  const response = await proxyAwareFetch(
-    url,
-    { method: "GET", headers: buildHeaders(apiKey) },
-    proxyOptions,
-  );
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    return { error: { status: response.status, body: errText.slice(0, 160) } };
-  }
-  const data = await response.json().catch(() => null);
-  if (!data || typeof data !== "object") {
-    return { error: { status: response.status, body: "non-JSON response" } };
-  }
-  return { data };
-}
-
-function toPercent(used, total) {
-  if (!(total > 0)) return 0;
-  return Math.max(0, Math.min(100, Math.round(((total - used) / total) * 100)));
-}
-
-// Credit amounts are fractional USD (e.g. 1.261 of a 16 cap). The dashboard
-// renders `used`/`total` with the viewer's own locale, and in most of
-// Europe/Indonesia a comma is the decimal separator — so a numeric 1.261 is
-// shown as "1,261" and reads as one thousand two hundred sixty-one against a
-// cap of 16. Formatting here (dot decimal, fixed 2dp) keeps the figure
-// unambiguous regardless of the viewer's locale.
-function formatCredit(value, decimals = 2) {
-  return toFiniteNumber(value, 0).toFixed(decimals);
-}
-
-/**
- * Build a window quota entry from the upstream windowLimits shape.
- * `used`/`cap` are USD credits. The dashboard renders `remainingPercentage`
- * (0–100) — an absolute `remaining` would be read as a percentage, so it is
- * deliberately never set here.
- */
-function windowQuota(window) {
-  if (!window || typeof window !== "object") return null;
-  const used = Math.max(0, toFiniteNumber(window.used, 0));
-  const cap = Math.max(0, toFiniteNumber(window.cap, 0));
-  return {
-    used: formatCredit(used),
-    total: formatCredit(cap),
-    remainingPercentage: toPercent(used, cap),
-    resetAt: parseResetTime(window.resetAt),
+    used,
+    total,
+    remaining: Math.max(0, total - used),
+    unlimited: false,
+    resetAt: parseResetTime(win.resetAt),
   };
 }
 
@@ -111,107 +55,79 @@ function windowQuota(window) {
  * @param {string|null|undefined} apiKey
  * @param {object|null} proxyOptions
  */
-export async function getCommandCodeUsage(apiKey = null, proxyOptions = null) {
+export async function getCommandCodeUsage(apiKey, proxyOptions = null) {
   if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
-    return {
-      message: "Command Code API key not available. Add a key to view usage.",
-    };
+    return { message: "Command Code API key not available. Add a key to view usage." };
   }
 
-  const key = apiKey.trim();
+  const headers = {
+    Authorization: `Bearer ${apiKey.trim()}`,
+    Accept: "application/json",
+  };
 
-  try {
-    // whoami is best-effort: it only supplies the optional orgId scope.
-    const whoami = await getJson(WHOAMI_URL, key, proxyOptions);
-    if (whoami.error && whoami.error.status === 401) {
-      return {
-        plan: "Command Code",
-        message: "Command Code authentication failed. Check the API key.",
-      };
-    }
-    const orgId = whoami.data?.org?.id ?? null;
-
-    const credits = await getJson(
-      buildUrl(CREDITS_URL, orgId),
-      key,
+  const get = async (route) => {
+    const response = await proxyAwareFetch(
+      BASE + route,
+      { method: "GET", headers },
       proxyOptions,
     );
-    if (credits.error) {
-      const { status, body } = credits.error;
-      if (status === 401 || status === 403) {
-        return {
-          plan: "Command Code",
-          message:
-            "Command Code rejected the request. Check the API key (Cloudflare blocks requests without the CLI identity headers).",
-        };
-      }
-      return {
-        plan: "Command Code",
-        message: `Command Code credits API error (${status})${body ? `: ${body}` : ""}`,
-      };
+    return response;
+  };
+
+  try {
+    const whoamiRes = await get(qs("/alpha/whoami", { limits: "1" }));
+    if (whoamiRes.status === 401 || whoamiRes.status === 403) {
+      return { plan: "Command Code", message: "Command Code authentication failed. Check the API key." };
+    }
+    if (!whoamiRes.ok) {
+      return { plan: "Command Code", message: `Command Code usage API error (${whoamiRes.status})` };
+    }
+    const whoami = await whoamiRes.json().catch(() => ({}));
+    const orgId = whoami?.org?.id ?? null;
+
+    const [creditsRes, subsRes] = await Promise.all([
+      get(qs("/alpha/billing/credits", { orgId })),
+      get(qs("/alpha/billing/subscriptions", { orgId })),
+    ]);
+
+    if (creditsRes.status === 401 || creditsRes.status === 403 || subsRes.status === 401 || subsRes.status === 403) {
+      return { plan: "Command Code", message: "Command Code authentication failed. Check the API key." };
+    }
+    if (!creditsRes.ok) {
+      return { plan: "Command Code", message: `Command Code credits API error (${creditsRes.status})` };
+    }
+    if (!subsRes.ok) {
+      return { plan: "Command Code", message: `Command Code subscriptions API error (${subsRes.status})` };
     }
 
-    const quotaMap = {};
-    const windowLimits = credits.data?.windowLimits || null;
+    const creditsBody = await creditsRes.json().catch(() => ({}));
+    const subsBody = await subsRes.json().catch(() => ({}));
+    const planId = subsBody?.data?.planId ?? null;
+    const plan = (planId && PLAN_NAMES[planId]) || planId || "Command Code";
+    const cap = planId ? (PLAN_CAPS[planId] || 0) : 0;
+    const c = creditsBody?.credits || {};
+    const remaining =
+      toFiniteNumber(c.monthlyCredits, 0) +
+      toFiniteNumber(c.purchasedCredits, 0) +
+      toFiniteNumber(c.freeCredits, 0);
+    const used = cap > 0 ? Math.max(0, cap - remaining) : 0;
+    const total = cap > 0 ? cap : remaining;
 
-    const fiveHour = windowQuota(windowLimits?.fiveHour);
-    if (fiveHour) quotaMap["5-hour"] = fiveHour;
-
-    const weekly = windowQuota(windowLimits?.weekly);
-    if (weekly) quotaMap["Weekly"] = weekly;
-
-    // Plan + current billing period. Best-effort: failures must not hide the
-    // window quotas above.
-    const subscription = await getJson(SUBSCRIPTIONS_URL, key, proxyOptions);
-    if (subscription.error && subscription.error.status === 401) {
-      return {
-        plan: "Command Code",
-        message: "Command Code authentication failed. Check the API key.",
-      };
-    }
-
-    const balance = credits.data?.credits;
-    if (balance) {
-      // `monthlyCredits` is the plan's REMAINING allowance for the current
-      // billing period (not a cap), so usage is `allowance - remaining`.
-      const remaining = Math.max(0, toFiniteNumber(balance.monthlyCredits, 0));
-      const sum = await getJson(buildUrl(SUMMARY_URL, orgId), key, proxyOptions);
-      const spent = sum.error
-        ? 0
-        : Math.max(0, toFiniteNumber(sum.data?.totalCost, 0));
-      const allowance = remaining + spent;
-      if (allowance > 0) {
-        quotaMap["Monthly credits"] = {
-          used: formatCredit(spent),
-          total: formatCredit(allowance),
-          remainingPercentage: toPercent(spent, allowance),
-          resetAt: parseResetTime(
-            subscription.data?.data?.currentPeriodEnd ??
-              subscription.data?.currentPeriodEnd,
-          ),
-        };
-      }
-    }
-
-    if (Object.keys(quotaMap).length === 0) {
-      return {
-        plan: "Command Code",
-        message: "Command Code connected. No credit or window data returned.",
-      };
-    }
-
-    const exceeded = windowLimits?.exceeded;
-    const limited = windowLimits?.limited === true;
-    const planId = subscription.data?.data?.planId || null;
-
-    const friendlyPlan = (planId && PLAN_NAMES[planId]) || null;
-    const planLabel = planId
-      ? `Command Code (${friendlyPlan ? `${friendlyPlan} · ` : ""}${planId})`
-      : "Command Code";
-    return {
-      plan: limited && exceeded ? `${planLabel} — limit exceeded` : planLabel,
-      quotas: quotaMap,
+    const quotas = {};
+    quotas.Credits = {
+      used,
+      total,
+      remaining,
+      unlimited: cap <= 0,
+      resetAt: parseResetTime(subsBody?.data?.currentPeriodEnd),
     };
+
+    const fiveHour = windowQuota(creditsBody?.windowLimits?.fiveHour);
+    if (fiveHour) quotas["Session (5h)"] = fiveHour;
+    const weekly = windowQuota(creditsBody?.windowLimits?.weekly);
+    if (weekly) quotas.Weekly = weekly;
+
+    return { plan, quotas };
   } catch (error) {
     return { message: `Command Code error: ${error.message}` };
   }

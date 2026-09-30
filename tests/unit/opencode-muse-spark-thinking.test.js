@@ -63,6 +63,39 @@ describe("OpenCode Free Muse Spark thinking", () => {
     expect(out.max_tokens).toBeUndefined();
   });
 
+  it("routes Union Alpha through Anthropic Messages", () => {
+    const caps = getCapabilitiesForModel(PROVIDER, "union-alpha");
+    expect(caps.vision).toBe(true);
+    expect(caps.contextWindow).toBe(262144);
+    expect(caps.maxOutput).toBe(131072);
+
+    const executor = new OpenCodeExecutor();
+
+    expect(getModelTargetFormat("oc", "union-alpha")).toBe(FORMATS.CLAUDE);
+    const url = executor.buildUrl("union-alpha");
+    expect(url).toBe("https://opencode.ai/zen/v1/messages");
+    expect(executor.buildHeaders({}, true, url)).toMatchObject({
+      "anthropic-version": "2023-06-01",
+    });
+    expect(executor.buildHeaders({}, true, executor.buildUrl("big-pickle")))
+      .not.toHaveProperty("anthropic-version");
+
+    const translated = translateRequest(
+      FORMATS.OPENAI,
+      FORMATS.CLAUDE,
+      "union-alpha",
+      { messages: [{ role: "user", content: "ping" }], max_tokens: 1 },
+      false,
+      {},
+      PROVIDER,
+    );
+    expect(translated).toMatchObject({
+      model: "union-alpha",
+      messages: [{ role: "user", content: [{ type: "text", text: "ping" }] }],
+      max_tokens: 1,
+    });
+  });
+
   it("leaves the other free models on Chat Completions", () => {
     const executor = new OpenCodeExecutor();
     const body = { messages: [{ role: "user", content: "hi" }], max_tokens: 1024 };
@@ -181,37 +214,12 @@ describe("OpenCode Free Muse Spark thinking", () => {
     // User message, function_call, function_call_output, and next user message survive
     const types = out.input.map((item) => item.type);
     expect(types).toEqual(["message", "function_call", "function_call_output", "message"]);
-    // Tools flattened and empty properties added; the upstream-mandated
-    // file-search quartet is merged in so free-tier requests pass the gate.
+    // Tools flattened and empty properties added
     expect(out.tools).toEqual([
       {
         type: "function",
         name: "shell",
         description: "Run shell command",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        type: "function",
-        name: "bash",
-        description: "OpenCode built-in bash tool",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        type: "function",
-        name: "glob",
-        description: "OpenCode built-in glob tool",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        type: "function",
-        name: "grep",
-        description: "OpenCode built-in grep tool",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        type: "function",
-        name: "read",
-        description: "OpenCode built-in read tool",
         parameters: { type: "object", properties: {} },
       },
     ]);

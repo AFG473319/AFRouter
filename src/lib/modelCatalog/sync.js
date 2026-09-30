@@ -19,7 +19,7 @@ const MODALITY_BY_INPUT = { image: "vision", pdf: "pdf", audio: "audioInput", vi
 // Ignore limit differences below this: gateways round 200000 vs 202752.
 const LIMIT_TOLERANCE = 0.1;
 
-// Provider id -> models.dev provider id: the same gateway under another
+// 9router provider id -> models.dev provider id: the same gateway under another
 // name. Both halves of the catalog are stored against the local id, so this runs
 // while building rather than on every lookup. Providers absent here keep whatever
 // the local pattern table resolves; names that already match need no entry.

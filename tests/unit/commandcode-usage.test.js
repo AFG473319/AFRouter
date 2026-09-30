@@ -1,161 +1,135 @@
-// Command Code usage: alpha-API mapping (upstream payload shape) and the
-// dashboard's rendering path for the emitted quotas.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const CREDITS_PAYLOAD = {
-  credits: {
-    belowThreshold: false,
-    creditThreshold: 0,
-    monthlyCredits: 67.6466882615,
-    purchasedCredits: 0,
-    freeCredits: 0,
-  },
-  windowLimits: {
-    limited: true,
-    exceeded: null,
-    fiveHour: {
-      used: 1.1026089261,
-      cap: 16,
-      exceeded: false,
-      resetAt: 1789295134827,
-    },
-    weekly: {
-      used: 12.3532497601,
-      cap: 40,
-      exceeded: false,
-      resetAt: 1789646219303,
-    },
-  },
-};
-
-const SUBSCRIPTION_PAYLOAD = {
-  success: true,
-  data: {
-    status: "active",
-    planId: "individual-pro-v1",
-    currentPeriodStart: "2026-09-10T11:39:53.000Z",
-    currentPeriodEnd: "2026-10-10T11:39:53.000Z",
-  },
-};
-
-const SUMMARY_PAYLOAD = {
-  totalCount: 4148,
-  totalCost: 12.3759038402,
-  completedCount: 4148,
-  failedCount: 0,
-  totalTokensIn: 448000000,
-  totalTokensOut: 800000,
-  totalTokens: 448800000,
-  periodBasis: "billing-period",
-};
-
-const requests = [];
-
 vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
-  proxyAwareFetch: async (url) => {
-    requests.push(url);
-    let body;
-    if (url.includes("/alpha/whoami")) body = { success: true, user: {}, org: null };
-    else if (url.includes("/alpha/billing/credits")) body = CREDITS_PAYLOAD;
-    else if (url.includes("/alpha/billing/subscriptions")) body = SUBSCRIPTION_PAYLOAD;
-    else if (url.includes("/alpha/usage/summary")) body = SUMMARY_PAYLOAD;
-    else return { ok: false, status: 404, text: async () => "not found" };
-    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
-  },
+  proxyAwareFetch: vi.fn(),
 }));
 
-const { getCommandCodeUsage } = await import(
-  "../../open-sse/services/usage/commandcode.js"
-);
-const { parseQuotaData, getRemainingPercentage } = await import(
-  "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js"
-);
-const { default: commandCodeRegistry } = await import(
-  "../../open-sse/providers/registry/commandcode.js"
-);
-const { USAGE_SUPPORTED_PROVIDERS, USAGE_APIKEY_PROVIDERS } = await import(
-  "../../src/shared/constants/providers.js"
-);
+import { proxyAwareFetch } from "../../open-sse/utils/proxyFetch.js";
+import { getUsageForProvider } from "../../open-sse/services/usage.js";
+import {
+  USAGE_SUPPORTED_PROVIDERS,
+  USAGE_APIKEY_PROVIDERS,
+} from "../../src/shared/constants/providers.js";
+import { parseQuotaData } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js";
 
-describe("getCommandCodeUsage", () => {
-  beforeEach(() => {
-    requests.length = 0;
+const BASE = "https://api.commandcode.ai";
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
   });
+}
 
-  it("maps credit windows and the monthly allowance to quotas", async () => {
-    const out = await getCommandCodeUsage("user_test_key", null);
+const WHOAMI = {
+  user: { name: "Hieu", email: "hieu@example.com" },
+  org: { id: "org_1", name: "personal" },
+};
+const CREDITS = {
+  credits: { monthlyCredits: 12.5, purchasedCredits: 1, freeCredits: 0.5 },
+  windowLimits: {
+    fiveHour: { used: 2, cap: 10, resetAt: Date.now() + 3_600_000, exceeded: false },
+    weekly: { used: 20, cap: 70, resetAt: Date.now() + 86_400_000, exceeded: false },
+  },
+};
+const SUBS = {
+  data: {
+    planId: "individual-goat",
+    currentPeriodStart: "2026-09-01T00:00:00.000Z",
+    currentPeriodEnd: "2026-10-01T00:00:00.000Z",
+  },
+};
 
-    expect(out.plan).toContain("individual-pro-v1");
-
-    // 5-hour: 1.10 used of 16 → 93% remaining
-    expect(out.quotas["5-hour"].total).toBe("16.00");
-    expect(out.quotas["5-hour"].remainingPercentage).toBe(93);
-    expect(out.quotas["5-hour"].resetAt).toBe("2026-09-13T10:25:34.827Z");
-
-    // Weekly: 12.35 used of 40 → 69% remaining
-    expect(out.quotas.Weekly.total).toBe("40.00");
-    expect(out.quotas.Weekly.remainingPercentage).toBe(69);
-
-    // Monthly allowance = remaining (67.65) + billing-period spend (12.38)
-    const monthly = out.quotas["Monthly credits"];
-    expect(monthly.used).toBe("12.38");
-    expect(monthly.total).toBe("80.02");
-    expect(monthly.remainingPercentage).toBe(85);
-    expect(monthly.resetAt).toBe("2026-10-10T11:39:53.000Z");
+function mockHappyPath() {
+  proxyAwareFetch.mockImplementation(async (url) => {
+    const u = String(url);
+    if (u.includes("/alpha/whoami")) return jsonResponse(WHOAMI);
+    if (u.includes("/alpha/billing/credits")) return jsonResponse(CREDITS);
+    if (u.includes("/alpha/billing/subscriptions")) return jsonResponse(SUBS);
+    return jsonResponse({ error: "unexpected " + u }, 404);
   });
+}
 
-  it("formats credit amounts with a dot decimal so no locale reads them as thousands", async () => {
-    const out = await getCommandCodeUsage("user_test_key", null);
-    for (const quota of Object.values(out.quotas)) {
-      // e.g. "1.26" must never reach the UI as a comma-decimal locale's "1,26"
-      expect(String(quota.used)).not.toContain(",");
-      expect(String(quota.total)).not.toContain(",");
-      expect(String(quota.used)).toMatch(/^\d+\.\d{2}$/);
-      expect(String(quota.total)).toMatch(/^\d+\.\d{2}$/);
-    }
-  });
-
-  it("never emits an absolute `remaining` (the table reads it as a percentage)", async () => {
-    const out = await getCommandCodeUsage("user_test_key", null);
-    for (const quota of Object.values(out.quotas)) {
-      expect(quota.remaining).toBeUndefined();
-    }
-  });
-
-  it("sends the CLI identity headers Cloudflare requires", async () => {
-    // Exercised through the mocked fetch, which records the URLs only; the
-    // header contract is asserted in the handler source via the version pin.
-    await getCommandCodeUsage("user_test_key", null);
-    expect(requests.some((u) => u.includes("/alpha/billing/credits"))).toBe(true);
-    expect(requests.some((u) => u.includes("/alpha/usage/summary"))).toBe(true);
-  });
-
-  it("reports a message instead of throwing when no key is configured", async () => {
-    const out = await getCommandCodeUsage(null, null);
-    expect(out.quotas).toBeUndefined();
-    expect(out.message).toMatch(/API key not available/);
-  });
-
-  it("is polled by the dashboard for api-key connections", async () => {
-    // /api/usage/[connectionId] answers "Usage not available for this
-    // connection" unless the provider is in both lists, and Command Code is
-    // configured with authType "apikey".
-    expect(commandCodeRegistry.features.usage).toBe(true);
-    expect(commandCodeRegistry.features.usageApikey).toBe(true);
+describe("commandcode registry usage flags", () => {
+  it("is listed for apikey quota dashboard", () => {
     expect(USAGE_SUPPORTED_PROVIDERS).toContain("commandcode");
     expect(USAGE_APIKEY_PROVIDERS).toContain("commandcode");
   });
+});
 
-  it("renders through the dashboard parser with the right percentages", async () => {
-    const raw = await getCommandCodeUsage("user_test_key", null);
-    const rows = parseQuotaData("commandcode", raw);
+describe("getUsageForProvider(commandcode)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-    const byName = Object.fromEntries(rows.map((r) => [r.name, r]));
-    expect(Object.keys(byName)).toEqual(
-      expect.arrayContaining(["5-hour", "Weekly", "Monthly credits"]),
-    );
-    expect(getRemainingPercentage(byName["5-hour"])).toBe(93);
-    expect(getRemainingPercentage(byName.Weekly)).toBe(69);
-    expect(getRemainingPercentage(byName["Monthly credits"])).toBe(85);
+  it("returns a message when apiKey is missing", async () => {
+    const usage = await getUsageForProvider({ provider: "commandcode" });
+    expect(usage.message).toMatch(/api key/i);
+    expect(proxyAwareFetch).not.toHaveBeenCalled();
+  });
+
+  it("GETs whoami, credits, and subscriptions with Bearer apiKey", async () => {
+    mockHappyPath();
+    const usage = await getUsageForProvider({
+      provider: "commandcode",
+      apiKey: "user_test",
+    });
+
+    expect(usage.message).toBeUndefined();
+    expect(usage.plan).toBe("GOAT");
+    const urls = proxyAwareFetch.mock.calls.map(([url]) => String(url));
+    expect(urls.some((u) => u.startsWith(`${BASE}/alpha/whoami`))).toBe(true);
+    expect(urls.some((u) => u.includes("/alpha/billing/credits") && u.includes("orgId=org_1"))).toBe(true);
+    expect(urls.some((u) => u.includes("/alpha/billing/subscriptions") && u.includes("orgId=org_1"))).toBe(true);
+    expect(proxyAwareFetch.mock.calls[0][1].headers.Authorization).toBe("Bearer user_test");
+  });
+
+  it("maps remaining credits vs plan cap and rate windows", async () => {
+    mockHappyPath();
+    const usage = await getUsageForProvider({
+      provider: "commandcode",
+      apiKey: "user_test",
+    });
+
+    // remaining = 12.5 + 1 + 0.5 = 14; cap GOAT = 70; used = 56
+    expect(usage.quotas.Credits).toMatchObject({
+      used: 56,
+      total: 70,
+      unlimited: false,
+    });
+    expect(usage.quotas["Session (5h)"]).toMatchObject({
+      used: 2,
+      total: 10,
+      unlimited: false,
+    });
+    expect(usage.quotas.Weekly).toMatchObject({
+      used: 20,
+      total: 70,
+    });
+    expect(new Date(usage.quotas.Credits.resetAt).toISOString()).toBe("2026-10-01T00:00:00.000Z");
+  });
+
+  it("returns an auth message on 401", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(jsonResponse({ error: "unauthorized" }, 401));
+    const usage = await getUsageForProvider({
+      provider: "commandcode",
+      apiKey: "bad",
+    });
+    expect(usage.message).toMatch(/auth|key|login/i);
+  });
+});
+
+describe("parseQuotaData(commandcode)", () => {
+  it("forwards used/total/resetAt for the dashboard table", () => {
+    const rows = parseQuotaData("commandcode", {
+      plan: "GOAT",
+      quotas: {
+        Credits: { used: 56, total: 70, resetAt: "2026-10-01T00:00:00.000Z" },
+        "Session (5h)": { used: 2, total: 10, resetAt: "2026-09-16T10:00:00.000Z" },
+      },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ name: "Credits", used: 56, total: 70 });
+    expect(rows[1]).toMatchObject({ name: "Session (5h)", used: 2, total: 10 });
   });
 });
