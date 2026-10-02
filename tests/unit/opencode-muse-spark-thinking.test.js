@@ -214,14 +214,18 @@ describe("OpenCode Free Muse Spark thinking", () => {
     // User message, function_call, function_call_output, and next user message survive
     const types = out.input.map((item) => item.type);
     expect(types).toEqual(["message", "function_call", "function_call_output", "message"]);
-    // Tools flattened and empty properties added
-    expect(out.tools).toEqual([
-      {
-        type: "function",
-        name: "shell",
-        description: "Run shell command",
-        parameters: { type: "object", properties: {} },
-      },
-    ]);
+    // Tools flattened and empty properties added. The Free-tier Responses lane
+    // also appends the fingerprint tools (bash/glob/grep/read) after the
+    // client's own — skipping them triggers 403 FreeTierError (upstream v0.5.91).
+    const shell = out.tools.find((t) => t?.name === "shell");
+    expect(shell).toEqual({
+      type: "function",
+      name: "shell",
+      description: "Run shell command",
+      parameters: { type: "object", properties: {} },
+    });
+    for (const name of ["bash", "glob", "grep", "read"]) {
+      expect(out.tools.some((t) => t?.name === name)).toBe(true);
+    }
   });
 });

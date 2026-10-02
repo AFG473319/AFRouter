@@ -151,7 +151,10 @@ describe("catalog schema", () => {
     invalidateCatalog();
   });
 
-  it("rebuilds an older-schema file instead of trusting its etag", async () => {
+    // collectEntries() snapshots the whole provider registry (126 entries), so
+  // under a parallel suite these two run well past the 5s default. The work is
+  // real, not a hang — give them room instead of flaking the gate.
+  it("rebuilds an older-schema file instead of trusting its etag", { timeout: 30000 }, async () => {
     fs.writeFileSync(catalogFile, JSON.stringify({ v: 1, etag: 'W/"old"', models: {}, providers: {} }));
     invalidateCatalog();
     startModelCatalogSync();   // picks the file's etag + schema version back up
@@ -173,7 +176,7 @@ describe("catalog schema", () => {
     expect(written.models["glm:glm-4.6v"]).toEqual({ vision: true });
   });
 
-  it("asks upstream for a 304 once the file is current", async () => {
+  it("asks upstream for a 304 once the file is current", { timeout: 30000 }, async () => {
     const sent = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = async (_url, options) => {
