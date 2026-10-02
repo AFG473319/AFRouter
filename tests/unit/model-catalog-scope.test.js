@@ -73,8 +73,23 @@ describe("model catalog", () => {
   it("does not hand a router mode another vendor's modalities", () => {
     // kilo's "efficient" is a real model; another gateway's "efficient" is a mode
     expect(getCatalogModalities("kilo", "kilo-auto/efficient")).toEqual({ vision: true });
-    expect(getCatalogModalities("kilo-gateway", "kilo-auto/efficient")).toBeNull();
+    expect(getCatalogModalities("orcarouter", "kilo-auto/efficient")).toBeNull();
     expect(getCatalogModalities("qoder", "efficient")).toBeNull();
+  });
+
+  it("claims an aliased upstream for every registry id that maps to it", () => {
+    // PROVIDER_ALIASES sends kilocode and kilo-gateway at models.dev's `kilo`.
+    // Claiming them only from `entries` would skip a passthrough provider that
+    // seeds no models at all — so the registry has to drive the claim too.
+    const { models } = build(
+      { kilo: { models: { "kilo-auto/efficient": { modalities: { input: ["text", "image"] } } } } },
+      [],
+      [{ id: "kilocode" }, { id: "kilo-gateway" }],
+    );
+    expect(models["kilocode:efficient"]).toEqual({ vision: true });
+    expect(models["kilo-gateway:efficient"]).toEqual({ vision: true });
+    // the upstream spelling stays resolvable too (custom provider nodes)
+    expect(models["kilo:efficient"]).toEqual({ vision: true });
   });
 
   it("resolves a gateway the file was written for, and nobody else", () => {
@@ -172,7 +187,11 @@ describe("catalog schema", () => {
     }
     expect(sent[0]["if-none-match"]).toBeUndefined();
     const written = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
-    expect(written.v).toBe(3);
+    // The schema version is what makes a sync distrust a current-looking etag;
+    // assert against the constant so a bump rebuilds this file rather than
+    // silently pinning the old number.
+    const { CATALOG_VERSION } = await import("../../open-sse/providers/catalogOverride.js");
+    expect(written.v).toBe(CATALOG_VERSION);
     expect(written.models["glm:glm-4.6v"]).toEqual({ vision: true });
   });
 

@@ -23,6 +23,11 @@ const LIMIT_TOLERANCE = 0.1;
 // name. Both halves of the catalog are stored against the local id, so this runs
 // while building rather than on every lookup. Providers absent here keep whatever
 // the local pattern table resolves; names that already match need no entry.
+//
+// Add an entry ONLY when models.dev's record really is the same gateway — the
+// tell is that its model ids overlap ours. A wrong mapping does not fail loudly:
+// it files another service's effort ladder under our id and we send levels that
+// provider rejects.
 export const PROVIDER_ALIASES = {
   "glm": "zai",
   "glm-cn": "zhipuai",
@@ -36,6 +41,16 @@ export const PROVIDER_ALIASES = {
   "hunyuan": "tencent",
   "doubao": "volcengine",
   "cloudflare-ai": "cloudflare-workers-ai",
+  // Cline's free-passage catalog is filed upstream as `cline-pass`; its ids
+  // (cline-free/mimo-v2.6-flash, cline-free/deepseek-v4.1-flash, …) normalize to
+  // the same base ids it publishes.
+  "cline": "cline-pass",
+  // Both Kilo providers (`kilocode` the free view, `kilo-gateway` the paid one)
+  // fetch the very endpoint models.dev catalogs as `kilo`
+  // (https://api.kilo.ai/api/gateway/models), and the ids match verbatim:
+  // kilo-auto/free, stealth/space-bunny-alpha, stepfun/step-3.7-flash:free.
+  "kilocode": "kilo",
+  "kilo-gateway": "kilo",
 };
 
 let state = { running: false, lastSync: null, lastError: null, lastResult: null, etag: null, fileVersion: null };
@@ -100,20 +115,49 @@ function reasoningLevels(model) {
   return { levels, canDisable: levels.includes("none") };
 }
 
-export function build(catalog, entries) {
+// What one upstream model contributes to the catalog's reasoning rows.
+//
+//   { reasoning: { levels, canDisable } }  discrete effort ladder — the picker's
+//                                          vocabulary comes from this
+//   { reasons: true }                     reasons, but only toggle/budget (or
+//                                          nothing) — records the fact without
+// inventing a level set the tables should own
+//   null                                  does not reason
+function reasoningRecord(model) {
+  const ladder = reasoningLevels(model);
+  if (ladder) return { reasoning: ladder };
+  if (model?.reasoning === true) return { reasons: true };
+  return null;
+}
+
+function putReasoning(into, provider, id, record) {
+  const bucket = into[provider] || (into[provider] = {});
+  if (bucket[id]) return;
+  bucket[id] = record;
+}
+
+export function build(catalog, entries, registry = null) {
   // Upstream provider id -> the local ids it belongs to, taken from the registry
   // snapshot so a gateway listed upstream under another name is still filed
   // under the name requests arrive with. One upstream name can back more than one
   // local id (glm-cn and zhipu are both zhipuai) and each has to resolve; the
   // snapshot only covers the built-in registry, so an upstream provider it does
   // not mention keeps its own name.
+  //
+  // The whole registry is preferred over the model entries when the caller has
+  // it: a `passthroughModels` provider can seed an empty `models` list, and
+  // without it its upstream name would never be claimed — its ladders would then
+  // be filed under the upstream spelling only and never reached by a request
+  // arriving as our id.
   const localIds = new Map();
-  for (const { provider } of entries) {
+  const claimLocal = (provider) => {
     const upstreamId = PROVIDER_ALIASES[provider] || provider;
     let locals = localIds.get(upstreamId);
     if (!locals) localIds.set(upstreamId, (locals = []));
     if (!locals.includes(provider)) locals.push(provider);
-  }
+  };
+  if (Array.isArray(registry)) for (const provider of registry) claimLocal(provider?.id);
+  for (const { provider } of entries) claimLocal(provider);
 
   // Index once: the raw upstream record per provider+model for limits, and the
   // modalities each gateway declares for it.
@@ -124,6 +168,11 @@ export function build(catalog, entries) {
   // "free" and "efficient" are router modes in one catalog and model names in
   // another, so a router mode inherited a stranger's vision.
   const models = {};
+  // Reasoning rows for every model the upstream catalogs, not just the ones a
+  // registry seeds. A `passthroughModels` gateway serves its real list through a
+  // modelsFetcher, so those ids never appear in `entries` — which is exactly why
+  // the picker kept landing on a fixed fallback ladder for them.
+  const reasoningRows = {};
   for (const [providerId, provider] of Object.entries(catalog)) {
     const locals = localIds.get(providerId) || [providerId];
     const modelsById = {};
@@ -131,6 +180,16 @@ export function build(catalog, entries) {
     for (const [modelId, model] of Object.entries(provider?.models || {})) {
       const id = baseId(modelId);
       modelsById[id] = model;
+
+      // Reasoning first, before the dedup below: several upstream ids can
+      // normalize to the same model (claude-opus-4-thinking:1024, :8192, …) and
+      // the first one wins, exactly like the modalities it sits next to.
+      const record = reasoningRecord(model);
+      if (record) {
+        for (const local of locals) putReasoning(reasoningRows, local, id, record);
+        if (!locals.includes(providerId)) putReasoning(reasoningRows, providerId, id, record);
+      }
+
       // One entry per provider+model: several upstream ids can normalize to the
       // same model (claude-opus-4-thinking:1024, :8192, :32768 …) and must not
       // stack their modalities.
@@ -180,6 +239,17 @@ export function build(catalog, entries) {
     if (Object.keys(delta).length) (providers[provider] || (providers[provider] = {}))[model] = delta;
   }
 
+  // Merge the gateway-wide reasoning rows in over the delta rows. A registry
+  // model's row may already carry its own ladder, and its limits live on that
+  // same object — spread, never replace, or contextWindow/maxOutput would be
+  // erased by a bare assignment.
+  for (const [provider, rows] of Object.entries(reasoningRows)) {
+    const bucket = providers[provider] || (providers[provider] = {});
+    for (const [id, record] of Object.entries(rows)) {
+      bucket[id] = { ...bucket[id], ...record };
+    }
+  }
+
   return { models, providers };
 }
 
@@ -207,7 +277,9 @@ async function collectEntries() {
       });
     }
   }
-  return entries;
+  // The registry rides along so build() can claim every local id — including
+  // passthrough providers that seed no models at all.
+  return { entries, registry };
 }
 
 // Run one sync. Returns a summary, or null when it could not complete.
@@ -231,8 +303,8 @@ export async function syncModelCatalog() {
       // point — not worth a worker thread.
       const catalog = await response.json();
       const etag = response.headers.get("etag") || null;
-      const entries = await collectEntries();
-      const { models, providers } = build(catalog, entries);
+      const { entries, registry } = await collectEntries();
+      const { models, providers } = build(catalog, entries, registry);
       const serialized = JSON.stringify({ v: CATALOG_VERSION, etag, syncedAt: Date.now(), models, providers });
 
       writeAtomic(CATALOG_FILE, serialized);

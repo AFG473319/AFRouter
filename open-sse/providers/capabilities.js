@@ -614,14 +614,23 @@ export function getCapabilitiesForModel(provider, model) {
   // Toggle/budget-only models keep the tables answer (no field).
   const source = getCatalogSource();
   const discovered = source?.getReasoning?.(provider, model);
+  const reasoned = result.reasoning;
   if (discovered?.levels?.length) {
     result.reasoning = true;
     result.reasoningLevels = discovered.levels;
     if (result.thinkingFormat === "zai" || EFFORT_WIRE_FORMATS.has(result.thinkingFormat)) {
       result.thinkingEffortSupported = true;
     }
-  } else if (result.reasoning && EFFORT_WIRE_FORMATS.has(result.thinkingFormat)) {
-    result.thinkingEffortSupported = true;
+  } else {
+    // Upstream positively says the model reasons but publishes no ladder (it is
+    // toggle/budget only). Turn the capability on — "does not reason" would be
+    // wrong — and leave everything else at the tables' answer: a toggle is not
+    // effort control, so neither the wire flag nor the level set may be inferred
+    // from it.
+    if (!reasoned && source?.getReasons?.(provider, model)) result.reasoning = true;
+    if (reasoned && EFFORT_WIRE_FORMATS.has(result.thinkingFormat)) {
+      result.thinkingEffortSupported = true;
+    }
   }
   return result;
 }

@@ -122,6 +122,18 @@ const resolveModelSpecs = (ids, catalog) => {
       if (staticCaps && Number.isFinite(staticCaps.contextWindow)) caps = staticCaps;
     }
     if (caps && Number.isFinite(caps.contextWindow) && Number.isFinite(caps.maxOutput)) {
+      // A live /v1/models row can come from a gateway's own resolver and carry no
+      // effort ladder, while the static resolution (which reads the synced
+      // catalog) does know one. Never let the live row blank out what we know:
+      // that is how every model ended up on the same fallback picker.
+      if (!Array.isArray(caps.reasoningLevels) || caps.reasoningLevels.length === 0) {
+        const staticCaps = getCapabilitiesForModel(prefix, bare);
+        if (Array.isArray(staticCaps?.reasoningLevels) && staticCaps.reasoningLevels.length) {
+          caps = { ...caps, reasoningLevels: staticCaps.reasoningLevels };
+        } else if (!caps.reasoning && staticCaps?.reasoning) {
+          caps = { ...caps, reasoning: true };
+        }
+      }
       specs[id] = capsToSpec(caps, id);
     } else {
       specs[id] = { ...FALLBACK_SPEC, name: id };
