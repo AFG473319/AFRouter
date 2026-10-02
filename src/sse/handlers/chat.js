@@ -129,7 +129,7 @@ export async function handleChat(request, clientRawRequest = null) {
       body,
       models: augmentedModels,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings, true),
         adapterAdded
       ),
       log,
@@ -149,7 +149,7 @@ export async function handleChat(request, clientRawRequest = null) {
       body,
       models: soloAugmented,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings, true),
         adapterAdded
       ),
       log,
@@ -164,7 +164,7 @@ export async function handleChat(request, clientRawRequest = null) {
 /**
  * Handle single model chat request
  */
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, requestSettings = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, requestSettings = null, coerceLevels = false) {
   const modelInfo = await getModelInfo(modelStr);
   const settings = requestSettings || await getSettings();
 
@@ -207,7 +207,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         body,
         models: augmentedModels,
         handleSingleModel: withCapacityAdapterStripping(
-          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings),
+          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings, true),
           adapterAdded
         ),
         log,
@@ -298,6 +298,10 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       providerThinking,
       // Detect source format by endpoint + body
       sourceFormatOverride,
+      // Reconcile the requested thinking level against this candidate's own
+      // levels. True only for combo/fallback dispatch (a capacity-adapter retry
+      // within a single model is NOT a different reasoning vocabulary).
+      coerceLevels,
       onCredentialsRefreshed: async (newCreds) => {
         await updateProviderCredentials(credentials.connectionId, {
           ...newCreds,

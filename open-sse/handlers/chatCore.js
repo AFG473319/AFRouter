@@ -60,7 +60,7 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, coerceLevels = false }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
   // Stable per-session color so all lines of one CLI conversation share a tag
@@ -207,7 +207,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     translatedBody = { ...body, model: stripThinkingSuffix(upstreamModel) };
     if (provider === "codex") {
       const suffixThinking = {};
-      applyThinking(sourceFormat, upstreamModel, suffixThinking, provider);
+      applyThinking(sourceFormat, upstreamModel, suffixThinking, provider, undefined, { coerceLevels });
       if (suffixThinking.reasoning_effort) {
         const reasoning = translatedBody.reasoning;
         translatedBody.reasoning = {
@@ -229,7 +229,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       if (Object.keys(translatedBody.output_config).length === 0) delete translatedBody.output_config;
     }
   } else {
-    translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
+    translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool, coerceLevels);
     if (!translatedBody) {
       trackPendingRequest(model, provider, connectionId, false, true);
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);

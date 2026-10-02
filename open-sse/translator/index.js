@@ -50,7 +50,13 @@ function stripContentTypes(body, stripList = []) {
 }
 
 // Translate request: source -> openai -> target
-export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null) {
+// `coerceLevels` opts into reconciling the requested thinking level against the
+// resolved candidate's own levels. Leave it false for a plain single-model
+// request (the level was chosen for that model); set it true when the request is
+// being dispatched to a candidate the level was NOT chosen for — a combo member
+// or a fallback account — so the user's intent is re-encoded onto that
+// candidate's nearest supported level. See thinkingUnified.applyThinking.
+export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null, coerceLevels = false) {
   ensureInitialized();
   let result = body;
 
@@ -117,7 +123,7 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
     targetFormat === FORMATS.KIRO &&
     (sourceFormat === FORMATS.OPENAI || sourceFormat === FORMATS.CLAUDE);
   if (!kiroThinkingMappedByTranslator) {
-    applyThinking(targetFormat, model, result, provider, thinkingIntent);
+    applyThinking(targetFormat, model, result, provider, thinkingIntent, { coerceLevels });
   }
 
   // Always normalize to clean OpenAI format when target is OpenAI

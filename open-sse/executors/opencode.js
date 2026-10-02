@@ -3,6 +3,7 @@ import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
 import { getThinkingLevels } from "../providers/thinkingLevels.js";
+import { normalizeOpenAILevel } from "../translator/concerns/thinkingUnified.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { isMuseSparkModel } from "../providers/models/helpers.js";
@@ -382,11 +383,12 @@ function normalizeOpencodeReasoning(model, body) {
 
   const cleanModel = baseModelId(model || body.model);
   const supportedLevels = getThinkingLevels("opencode", cleanModel);
-  let effort = requestedEffort.toLowerCase().trim();
-  if ((effort === "max" || effort === "ultra") && supportedLevels?.length && !supportedLevels.includes(effort)) {
-    if (effort === "ultra" && supportedLevels.includes("max")) effort = "max";
-    else if (supportedLevels.includes("xhigh")) effort = "xhigh";
-  }
+  const effort = normalizeOpenAILevel(
+    requestedEffort.toLowerCase().trim(),
+    // The opencode `reasoning.effort` field accepts the same level vocabulary
+    // as `reasoning_effort`, so the shared projection applies unchanged.
+    supportedLevels,
+  );
 
   body.reasoning = { ...currentReasoning, effort };
   if (!body.reasoning.summary) body.reasoning.summary = "auto";
