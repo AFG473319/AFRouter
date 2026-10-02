@@ -5,7 +5,7 @@
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 import { getThinkingLevels } from "../../providers/thinkingLevels.js";
 import { PROVIDERS } from "../../providers/index.js";
-import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
+import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel, levelRank, nearestLevel, resolveLevelFor } from "./thinking.js";
 
 // Map a target wire-format to its native thinking format (when capability has none).
 const FORMAT_TO_NATIVE = {
@@ -102,9 +102,28 @@ export function extractThinking(body) {
   return null;
 }
 
-// Capture thinking intent from a body. Alias of extractThinking, named for clarity
-// at the call-site where intent is snapshotted before format translation.
-export const captureThinking = extractThinking;
+// Capture thinking intent from a body before format translation strips it.
+// Besides the effort, records whether an OpenAI-shaped client wants the thinking
+// text itself: Claude returns it only with thinking.display "summarized", a field
+// OpenAI has no equivalent for, so the intent cannot survive translation on its own.
+export function captureThinking(body) {
+  const cfg = extractThinking(body);
+  if (!cfg || cfg.mode === "none") return cfg;
+  const display = openAIThinkingDisplay(body);
+  return display ? { ...cfg, display } : cfg;
+}
+
+function openAIThinkingDisplay(body) {
+  // Responses API: reasoning.summary is the explicit request for reasoning text.
+  if (body.reasoning && typeof body.reasoning === "object") {
+    const summary = body.reasoning.summary;
+    return typeof summary === "string" && summary && summary !== "none" ? "summarized" : undefined;
+  }
+  // Chat Completions has no summary knob. A client setting reasoning_effort is
+  // asking for reasoning, and reasoning_content is how it would receive it.
+  if (typeof body.reasoning_effort === "string") return "summarized";
+  return undefined;
+}
 
 const NATIVE_ONLY_FORMATS = new Set(["gemini-level", "gemini-budget", "claude-budget", "claude-adaptive", "kiro"]);
 
@@ -142,11 +161,36 @@ function toLevel(cfg) {
   return null;
 }
 
-function normalizeOpenAILevel(level, supportedLevels) {
+// Project `max`/`ultra` onto a candidate that does not declare them.
+//
+// `max` and `ultra` are the only levels that routinely need projecting for a
+// plain single-model request: they are declared by a handful of models (two
+// Codex ids declare `ultra`), so on anything else they name a strength the
+// upstream rejects. `ultra` degrades to a declared `max` first. Intermediate
+// levels are deliberately NOT rewritten — the offered sets are partly
+// name-pattern derived (zai declares `[none, thinking]` while its wire accepts
+// `low`/`high`), so touching them changes requests that already worked.
+//
+// When `coerce` is set the caller is dispatching to a candidate the level was
+// NOT chosen for (combo member / fallback), and every level is re-encoded onto
+// this candidate's nearest supported level — see `resolveLevelFor`.
+//
+// Shared by the wire writers AND executors with their own level-shaped fields
+// (opencode's `reasoning.effort`), so all `max`/`ultra` projections behave
+// identically. Keep it exported for those call sites.
+export function normalizeOpenAILevel(level, supportedLevels, coerce = false) {
+  if (coerce) return resolveLevelFor(level, supportedLevels, { coerce: true });
   if (level !== "max" && level !== "ultra") return level;
   if (supportedLevels?.includes(level)) return level;
   if (level === "ultra" && supportedLevels?.includes("max")) return "max";
-  return "xhigh";
+  // Rank against what this candidate declares, so a model whose ceiling sits
+  // below xhigh lands on its own ceiling instead of a level it cannot express.
+  // A declared set that ranks to nothing usable (absent, empty, or nothing on
+  // the canonical ladder) keeps the historical target.
+  const ranked = Array.isArray(supportedLevels) && supportedLevels.length > 0
+    ? nearestLevel("max", supportedLevels)
+    : null;
+  return levelRank(ranked) === null ? "xhigh" : ranked;
 }
 
 function toGeminiThinkingLevel(cfg) {
@@ -154,6 +198,9 @@ function toGeminiThinkingLevel(cfg) {
   return effortToThinkingLevel(raw);
 }
 
+// Kimi's own vocabulary is [low, medium, high, max]: it has no `minimal` or
+// `xhigh`, so those two lower/raise onto its scale. Anything else returns null
+// so the caller can reconcile rather than silently drop the setting.
 function toKimiReasoningEffort(cfg) {
   const level = toLevel(cfg);
   if (level === "auto") return "high";
@@ -161,6 +208,16 @@ function toKimiReasoningEffort(cfg) {
   if (level === "xhigh") return "max";
   if (["low", "medium", "high", "max"].includes(level)) return level;
   return null;
+}
+
+// Resolve a level onto a format's own vocabulary, then (only when reconciling
+// across differing candidates) against what this one supports. Keeps "the
+// format's scale" and "this model's declared levels" as the two separate
+// concerns they are.
+function reconciled(level, supportedLevels, toFormat, coerce = false) {
+  const mapped = toFormat(level);
+  if (mapped) return normalizeOpenAILevel(mapped, supportedLevels, coerce);
+  return normalizeOpenAILevel(level, supportedLevels, coerce);
 }
 
 const GEMINI_LEVEL_OUTPUT_FLOOR = {
@@ -232,7 +289,7 @@ function stripAll(body) {
 }
 
 // Apply unified thinking config to body in the resolved provider-native format.
-function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
+function applyFormat(fmt, body, cfg, caps, supportedLevels, display, coerce = false) {
   const none = cfg.mode === "none";
   const canDisable = caps.thinkingCanDisable !== false;
   // Model cannot disable thinking → clamp "none" to minimal effort instead.
@@ -242,7 +299,7 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
     case "openai": {
       if (none && canDisable) { body.reasoning_effort = "none"; break; }
       const level = toLevel(eff);
-      if (level) body.reasoning_effort = normalizeOpenAILevel(level, supportedLevels);
+      if (level) body.reasoning_effort = normalizeOpenAILevel(level, supportedLevels, coerce);
       break;
     }
     case "claude-adaptive": {
@@ -302,15 +359,25 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
     case "deepseek": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
       body.thinking = { type: "enabled" };
-      // DeepSeek: low/medium→high, xhigh/max→max.
-      const level = toLevel(eff);
-      body.reasoning_effort = level === "xhigh" || level === "max" ? "max" : "high";
+      // DeepSeek's own vocabulary is coarse: low/medium collapse to `high` and
+      // xhigh/max to `max`. That collapse is DeepSeek's, not a fallback — the
+      // reconciliation against what THIS candidate supports is shared with
+      // every other format, so a backend that 400s on "max" (mimo v2.5-pro on
+      // opencode-go, probed live) lands on its nearest supported level instead
+      // of a hardcoded one.
+      const level = normalizeOpenAILevel(toLevel(eff) === "max" || toLevel(eff) === "xhigh" ? "max" : "high", supportedLevels, coerce);
+      body.reasoning_effort = level;
       break;
     }
     case "kimi": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
       const effort = toKimiReasoningEffort(eff);
+      // Kimi's vocabulary has no `minimal`/`xhigh`, so a level it cannot spell
+      // reconciles onto this candidate's nearest supported level instead of
+      // being dropped. With no declared set the historical behaviour stands:
+      // omit the field and let the upstream default apply.
       if (effort) body.reasoning_effort = effort;
+      else if (coerce) body.reasoning_effort = normalizeOpenAILevel(toLevel(eff), supportedLevels, true);
       break;
     }
     case "minimax": {
@@ -327,7 +394,15 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
     case "step": {
       if (none && canDisable) break;
       const level = toLevel(eff);
-      if (level) body.reasoning_effort = level === "xhigh" || level === "max" ? "high" : level;
+      // Step's ceiling is `high`; xhigh/max land there. Under coercion the
+      // shared reconciler does the ranking so this keeps working if Step's
+      // declared set widens (it declares none/low/medium/high today), and for a
+      // plain request the original clamp is preserved verbatim.
+      if (level) {
+        body.reasoning_effort = coerce
+          ? normalizeOpenAILevel(level, supportedLevels, true)
+          : (level === "xhigh" || level === "max" ? "high" : level);
+      }
       break;
     }
     case "tokenrouter": {
@@ -362,7 +437,14 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
 // Mutates and returns body. No-op when model has no reasoning capability.
 // `intent` is a pre-captured config (from captureThinking on the original body);
 // falls back to extracting from the current body when omitted.
-export function applyThinking(targetFormat, model, body, provider = null, intent = undefined) {
+//
+// `coerceLevels` opts into reconciling the requested level against THIS model's
+// declared levels. Leave it false (the default) for a single-model request: the
+// level was chosen for that model, so it is sent verbatim. Set it true only when
+// the request is being dispatched to a candidate the level was NOT chosen for —
+// a combo member or a fallback target — where nearest-level is the correct
+// encoding of the caller's intent.
+export function applyThinking(targetFormat, model, body, provider = null, intent = undefined, { coerceLevels = false } = {}) {
   if (!body || typeof body !== "object") return body;
 
   const { cleanModel, override } = parseSuffix(model);
@@ -380,8 +462,9 @@ export function applyThinking(targetFormat, model, body, provider = null, intent
   const supportedLevels = getThinkingLevels(provider, cleanModel);
   // Anthropic's `display` (summarized | omitted) decides whether thinking text
   // comes back at all; keep what the client asked for instead of resetting it.
-  const display = typeof body.thinking?.display === "string" ? body.thinking.display : undefined;
+  // An OpenAI-shaped client's ask arrives via the captured intent instead.
+  const display = typeof body.thinking?.display === "string" ? body.thinking.display : intent?.display;
   stripAll(body);
-  applyFormat(fmt, body, cfg, caps, supportedLevels, display);
+  applyFormat(fmt, body, cfg, caps, supportedLevels, display, coerceLevels);
   return body;
 }

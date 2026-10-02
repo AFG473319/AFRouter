@@ -31,6 +31,10 @@ export async function GET() {
             vision: c.vision,
             search: c.search,
             reasoning: c.reasoning,
+            // Per-model selectable efforts, when a source (models.dev / hand
+            // tables / Kilo variants) declares them. Omitted, not `[]`, when the
+            // model exposes no choice.
+            ...(c.reasoningLevels ? { reasoningEfforts: c.reasoningLevels } : {}),
             contextWindow: c.contextWindow,
             maxOutput: c.maxOutput,
           },
@@ -57,6 +61,7 @@ export async function GET() {
           vision: c.vision,
           search: c.search,
           reasoning: c.reasoning,
+          ...(c.reasoningLevels ? { reasoningEfforts: c.reasoningLevels } : {}),
           contextWindow: c.contextWindow,
           maxOutput: c.maxOutput,
           ...(m.caps || {}),

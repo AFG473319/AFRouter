@@ -1,18 +1,35 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel } from "@/models";
-import { lookupCustomModelSpecs } from "@/lib/modelCatalog/customSpecs.js";
-import { CAPACITY_META } from "@/shared/constants/models";
+import { CAPACITY_META, REASONING_EFFORT_LEVELS, isSttTransport } from "@/shared/constants/models";
 
 export const dynamic = "force-dynamic";
 
-// Whitelist capability keys to boolean values — ignore anything else
+// Whitelist capability keys to boolean values — ignore anything else.
+// `reasoningEfforts` is the one non-boolean: the per-model selectable levels a
+// source declared (Kilo's variant map, models.dev's effort ladder). It rides in
+// `caps` so a saved model keeps the levels the picker showed, and is validated
+// against the canonical ladder rather than trusted verbatim.
 function sanitizeCaps(caps) {
   if (!caps || typeof caps !== "object") return null;
   const clean = {};
   for (const key of Object.keys(CAPACITY_META)) {
     if (typeof caps[key] === "boolean") clean[key] = caps[key];
   }
+  if (Array.isArray(caps.reasoningEfforts)) {
+    const efforts = [...new Set(caps.reasoningEfforts.filter((l) => REASONING_EFFORT_LEVELS.includes(l)))];
+    if (efforts.length) clean.reasoningEfforts = efforts;
+  }
   return Object.keys(clean).length ? clean : null;
+}
+
+// Accepted STT transport markers live in the shared whitelist
+// (src/shared/constants/models STT_TRANSPORT_META) — the dashboard transport
+// select and this validator must agree on one set, so neither owns a copy.
+// Unknown or mistyped values are silently dropped, the same policy
+// sanitizeCaps applies to capability keys.
+function sanitizeTransport(transport, type) {
+  if (type !== "stt" || !isSttTransport(transport)) return null;
+  return transport.trim();
 }
 
 // GET /api/models/custom - List all custom models
@@ -29,14 +46,13 @@ export async function GET() {
 // POST /api/models/custom - Add custom model
 export async function POST(request) {
   try {
-    const { providerAlias, id, type, name, caps } = await request.json();
+    const { providerAlias, id, type, name, caps, transport } = await request.json();
     if (!providerAlias || !id) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
-    const catalog = (type || "llm") === "llm" ? await lookupCustomModelSpecs(providerAlias, id) : null;
-    const mergedCaps = { ...sanitizeCaps(caps), ...catalog?.caps };
-    const cleanCaps = Object.keys(mergedCaps).length ? mergedCaps : null;
-    const added = await addCustomModel({ providerAlias, id, type: type || "llm", name: name || catalog?.name, ...(cleanCaps ? { caps: cleanCaps } : {}) });
+    const cleanCaps = sanitizeCaps(caps);
+    const cleanTransport = sanitizeTransport(transport, type || "llm");
+    const added = await addCustomModel({ providerAlias, id, type: type || "llm", name, ...(cleanCaps ? { caps: cleanCaps } : {}), ...(cleanTransport ? { transport: cleanTransport } : {}) });
     return NextResponse.json({ success: true, added });
   } catch (error) {
     console.log("Error adding custom model:", error);

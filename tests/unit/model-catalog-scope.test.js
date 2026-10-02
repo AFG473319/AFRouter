@@ -35,7 +35,7 @@ beforeAll(async () => {
   // rather than skip every case below
   expect(typeof build).toBe("function");
   const { models, providers } = build(upstream, entries);
-  fs.writeFileSync(catalogFile, JSON.stringify({ v: 2, models, providers }));
+  fs.writeFileSync(catalogFile, JSON.stringify({ v: 3, models, providers }));
   ({ getCatalogModalities, invalidateCatalog } = await import("../../open-sse/providers/catalogOverride.js"));
   capabilities = await import("../../open-sse/providers/capabilities.js");
 });
@@ -122,6 +122,22 @@ describe("model catalog", () => {
     }
     expect(globalThis.__9rCatalogSource).toBeNull();
   });
+
+  it("detaches the source from a copy that already resolved through it", async () => {
+    capabilities.setCatalogSource({
+      getModalities: (provider) => (provider === "gateway-a" ? { vision: true } : null),
+      getLimits: () => null,
+    });
+    const other = await import("../../open-sse/providers/capabilities.js?copy=3");
+    try {
+      expect(other.getCapabilitiesForModel("gateway-a", "laguna-9-preview").vision).toBe(true);
+    } finally {
+      capabilities.setCatalogSource(null);
+    }
+    // the sync resets the source before rebuilding; a copy that has read the
+    // slot once must not keep serving the uninstalled reader
+    expect(other.getCapabilitiesForModel("gateway-a", "laguna-9-preview").vision).toBe(false);
+  });
 });
 
 describe("catalog schema", () => {
@@ -135,7 +151,10 @@ describe("catalog schema", () => {
     invalidateCatalog();
   });
 
-  it("rebuilds an older-schema file instead of trusting its etag", async () => {
+    // collectEntries() snapshots the whole provider registry (126 entries), so
+  // under a parallel suite these two run well past the 5s default. The work is
+  // real, not a hang — give them room instead of flaking the gate.
+  it("rebuilds an older-schema file instead of trusting its etag", { timeout: 30000 }, async () => {
     fs.writeFileSync(catalogFile, JSON.stringify({ v: 1, etag: 'W/"old"', models: {}, providers: {} }));
     invalidateCatalog();
     startModelCatalogSync();   // picks the file's etag + schema version back up
@@ -153,11 +172,11 @@ describe("catalog schema", () => {
     }
     expect(sent[0]["if-none-match"]).toBeUndefined();
     const written = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
-    expect(written.v).toBe(2);
+    expect(written.v).toBe(3);
     expect(written.models["glm:glm-4.6v"]).toEqual({ vision: true });
   });
 
-  it("asks upstream for a 304 once the file is current", async () => {
+  it("asks upstream for a 304 once the file is current", { timeout: 30000 }, async () => {
     const sent = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = async (_url, options) => {

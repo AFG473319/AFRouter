@@ -19,7 +19,7 @@ const MODALITY_BY_INPUT = { image: "vision", pdf: "pdf", audio: "audioInput", vi
 // Ignore limit differences below this: gateways round 200000 vs 202752.
 const LIMIT_TOLERANCE = 0.1;
 
-// Provider id -> models.dev provider id: the same gateway under another
+// 9router provider id -> models.dev provider id: the same gateway under another
 // name. Both halves of the catalog are stored against the local id, so this runs
 // while building rather than on every lookup. Providers absent here keep whatever
 // the local pattern table resolves; names that already match need no entry.
@@ -69,11 +69,35 @@ function slim(catalog) {
         c: model?.limit?.context,
         o: model?.limit?.output,
         r: model?.reasoning || undefined,
+        // Keep the per-model reasoning controls: this trimmed file is the only
+        // place the add-models skill can read the level vocabulary from.
+        ro: model?.reasoning_options || undefined,
       };
     }
     out[providerId] = models;
   }
   return out;
+}
+
+// models.dev publishes a model's reasoning controls as `reasoning_options`:
+//   [{ type: "effort", values: ["low","medium","high","xhigh","max"] }]   ladder
+//   [{ type: "toggle" }]                                                  on/off
+//   [{ type: "budget_tokens", min, max }]                                 budget
+//
+// Only the discrete `effort` ladder is turned into a per-model level set here.
+// A toggle/budget model still reasons but exposes no selectable magnitude, and
+// the hand-authored tables describe those better than an empty list would, so
+// they are left to fall through rather than overriding with "no levels".
+function reasoningLevels(model) {
+  const options = Array.isArray(model?.reasoning_options) ? model.reasoning_options : null;
+  if (!options?.length) return null;
+  const effort = options.find((o) => o?.type === "effort" && Array.isArray(o.values));
+  if (!effort) return null;
+  const levels = effort.values.filter((v) => typeof v === "string" && v.trim() !== "");
+  if (!levels.length) return null;
+  // `none` in the ladder is the terminal disable value; its presence is what
+  // makes thinking switchable off for this model.
+  return { levels, canDisable: levels.includes("none") };
 }
 
 export function build(catalog, entries) {
@@ -148,6 +172,11 @@ export function build(catalog, entries) {
       && Math.abs(output - current.maxOutput) / current.maxOutput > LIMIT_TOLERANCE) {
       delta.maxOutput = output;
     }
+    // Per-model reasoning level set, when models.dev publishes an effort ladder.
+    // Always carried (not a "delta"): the hand-authored tables are the default,
+    // but the upstream ladder is the authority when it names discrete levels.
+    const reasoning = reasoningLevels(entry);
+    if (reasoning) delta.reasoning = reasoning;
     if (Object.keys(delta).length) (providers[provider] || (providers[provider] = {}))[model] = delta;
   }
 

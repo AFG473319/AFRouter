@@ -95,6 +95,9 @@ const capsToSpec = (caps, id) => ({
   maxTokens: Math.floor(Number(caps.maxOutput)) || FALLBACK_SPEC.maxTokens,
   vision: caps.vision === true,
   reasoning: caps.reasoning === true,
+  // Real per-model level set (models.dev discovery / hand tables). Carried so the
+  // builder writes the model's actual vocabulary, not a fixed low..max ladder.
+  ...(Array.isArray(caps.reasoningLevels) ? { reasoningLevels: caps.reasoningLevels } : {}),
 });
 
 // Catalog (exact, then alias-translated) -> static registry -> fallback.

@@ -151,17 +151,8 @@ export default function QuotaTable({
       <div className="space-y-px">
         {currentPageRows.map((quota) => {
           const isUnlimited = quota.unlimited === true;
-          // Upstream semantics (matches Antigravity CLI): a disabled window
-          // means its parent window (weekly) is exhausted — the percentage is
-          // meaningless until the weekly refresh, so render "Disabled" with
-          // the weekly's reset time instead of a misleading number.
-          const isDisabledWindow = quota.disabled === true && !isUnlimited;
-          // DeepSeek prepaid balances render as a blue credit line instead of
-          // a 0/total quota bar (upstream credit-balance display).
           const isCreditBalance = quota.isCreditBalance === true;
-          const colors = isDisabledWindow
-            ? getColorClasses(0)
-            : isCreditBalance
+          const colors = isCreditBalance
             ? { text: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500", bgLight: "bg-blue-500/10", emoji: "💰" }
             : getColorClasses(quota.remaining);
           const countdown = formatResetTime(quota.resetAt);
@@ -187,7 +178,7 @@ export default function QuotaTable({
 
               {/* Progress + used/total */}
               <div className={`min-w-0 flex-1 ${compact ? "space-y-1" : "space-y-1.5"}`}>
-                {!isUnlimited && !isDisabledWindow && !isCreditBalance && (
+                {!isUnlimited && !isCreditBalance && (
                 <div className={`${compact ? "h-1" : "h-1.5"} rounded-full overflow-hidden border ${colors.bgLight} ${
                   quota.remaining === 0 ? "border-black/10 dark:border-white/10" : "border-transparent"
                 }`}>
@@ -197,42 +188,26 @@ export default function QuotaTable({
                   />
                 </div>
                 )}
-                {isDisabledWindow && (
-                <div className={`${compact ? "h-1" : "h-1.5"} rounded-full overflow-hidden border border-black/10 dark:border-white/10 ${colors.bgLight}`}>
-                  <div className={`h-full ${colors.bg}`} style={{ width: "0%" }} />
-                </div>
-                )}
 
                 <div className={`flex items-center justify-between gap-1 min-w-0 ${compact ? "text-[10px]" : "text-xs"}`}>
-                  <div className={`min-w-0 ${compact ? "space-y-1" : "space-y-1.5"}`}>
-                    <span
-                      className="block text-text-muted truncate"
-                      title={
-                        isDisabledWindow
-                          ? "Disabled: the weekly limit is exhausted — this window does not currently apply"
-                          : isUnlimited
-                          ? `${quota.used.toLocaleString()} used · Unlimited`
-                          : isCreditBalance
-                          ? `Credit balance: ${quota.total.toFixed(2)} ${quota.currency || ""}`
-                          : `${quota.used.toLocaleString()} / ${quota.total > 0 || quota.unlimited === false ? quota.total.toLocaleString() : "∞"}`
-                      }
-                    >
-                      {isDisabledWindow
-                        ? "Weekly limit hit — window paused"
-                        : isUnlimited
+                  <span
+                    className="text-text-muted truncate"
+                    title={
+                      isUnlimited
                         ? `${quota.used.toLocaleString()} used · Unlimited`
                         : isCreditBalance
-                        ? `Credit: ${quota.total.toFixed(2)} ${quota.currency || ""}`
-                        : `${quota.used.toLocaleString()} / ${quota.total > 0 || quota.unlimited === false ? quota.total.toLocaleString() : "∞"}`}
-                    </span>
-                    {quota.creditsUsed !== undefined && (
-                      <div className="text-xs text-text-muted">
-                        {quota.creditsUsed.toLocaleString()} AI Credits used
-                      </div>
-                    )}
-                  </div>
+                        ? `Credit balance: ${quota.total.toFixed(2)} ${quota.currency || ""}`
+                        : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`
+                    }
+                  >
+                    {isUnlimited
+                      ? `${quota.used.toLocaleString()} used · Unlimited`
+                      : isCreditBalance
+                      ? `Credit: ${quota.total.toFixed(2)} ${quota.currency || ""}`
+                      : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`}
+                  </span>
                   <span className={`font-medium ${isUnlimited ? "text-green-600 dark:text-green-400" : isCreditBalance ? "text-blue-600 dark:text-blue-400" : colors.text} shrink-0`}>
-                    {isDisabledWindow ? "Disabled" : isUnlimited ? "Unlimited" : isCreditBalance ? "" : `${quota.remaining}%`}
+                    {isUnlimited ? "Unlimited" : isCreditBalance ? "" : `${quota.remaining}%`}
                   </span>
                 </div>
               </div>

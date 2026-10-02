@@ -25,13 +25,7 @@ export const buildModelEntry = (id, spec = {}, compat = null) => {
   };
   if (spec.vision) entry.input = ["text", "image"];
   if (spec.reasoning) {
-    entry.reasoningEfforts = {
-      off: null,
-      low: "low",
-      medium: "medium",
-      high: "high",
-      max: "max",
-    };
+    entry.reasoningEfforts = buildReasoningEfforts(spec.reasoningLevels ?? spec.reasoningEfforts);
     // A DeepSeek-family model behind the gateway thinks unless told otherwise,
     // so `off` must send thinking:{type:disabled}. Opt-in only.
     if (compat?.thinkingFormat === "deepseek") {
@@ -39,4 +33,24 @@ export const buildModelEntry = (id, spec = {}, compat = null) => {
     }
   }
   return entry;
+};
+
+// Turn a model's own level set into DSH's display→wire map.
+//
+// DSH requires the map to offer a picker, so a model with no known set keeps the
+// historical conservative default. When the set IS known — discovered from
+// models.dev or declared by the registry — declaring anything else would send a
+// level the model may reject, so the map is built from the real vocabulary:
+// `none` becomes the `off: null` disable, and every other level maps to itself.
+export const buildReasoningEfforts = (levels) => {
+  if (!Array.isArray(levels) || levels.length === 0) {
+    return { off: null, low: "low", medium: "medium", high: "high", max: "max" };
+  }
+  const efforts = {};
+  if (levels.includes("none")) efforts.off = null;
+  for (const level of levels) {
+    if (level === "none") continue;
+    efforts[level] = level;
+  }
+  return efforts;
 };

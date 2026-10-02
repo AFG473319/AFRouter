@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
-import { getModelsByProviderId } from "@/shared/constants/models";
+import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
-import { assembleProviderModelRows } from "@/shared/utils/providerModelRows";
+import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -73,6 +73,7 @@ export default function ProviderDetailPage() {
   const [liveModels, setLiveModels] = useState([]);
   // Live-catalog fetch warning/error (surfaced for zed only; cursor behavior unchanged).
   const [liveModelsError, setLiveModelsError] = useState(null);
+  const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
@@ -84,6 +85,7 @@ export default function ProviderDetailPage() {
   const stopOneByOneRef = useRef(false);
   const [importingQoderModels, setImportingQoderModels] = useState(false);
   const [importingClineModels, setImportingClineModels] = useState(false);
+  const [importingClineFreeModels, setImportingClineFreeModels] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -171,26 +173,22 @@ export default function ProviderDetailPage() {
   const apiKeyConnectionLabel =
     providerId === "xai" ? "xAI API Key"
     : providerId === "kimi" ? "Kimi API Key"
-    : providerId === "qoder" ? "PAT"
+    : (providerId === "qoder" || providerId === "qoder-cn") ? "PAT"
     : "API Key";
   // Resolve suffix "(level)" for a model when a thinking level is picked and the model supports it.
+  // Prefer the server's per-model set (/api/models caps.reasoningEfforts, which
+  // carries discovered levels) over the client bundle's format default.
+  const serverLevels = (modelId) =>
+    getCaps(`${providerAlias}/${modelId}`)?.reasoningEfforts
+    || getCaps(modelId)?.reasoningEfforts
+    || null;
+  const levelsFor = (modelId) => serverLevels(modelId) || getThinkingLevels(providerId, modelId);
   const resolveThinkingSuffix = (modelId) => {
     if (!thinkingMode || thinkingMode === "auto") return null;
-    const levels = getThinkingLevels(providerId, modelId);
+    const levels = levelsFor(modelId);
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
-  // One place assembles the page's model rows from every source (registry seed,
-  // live catalog, custom models, legacy aliases) and collapses them by id, so
-  // Available / Disabled / Suggested / Disable-All all agree on one row per model.
-  const modelRows = useMemo(() => assembleProviderModelRows({
-    builtInModels: models,
-    customModels,
-    modelAliases,
-    disabledIds: disabledModelIds,
-    providerStorageAlias,
-    suggestedModels,
-  }), [models, customModels, modelAliases, disabledModelIds, providerStorageAlias, suggestedModels]);
   // Union of levels across this provider's reasoning models — drives the level picker options.
   // Include custom models too (e.g. manually added gpt-5.6-sol → max).
   const providerThinkingLevels = (() => {
@@ -199,11 +197,16 @@ export default function ProviderDetailPage() {
     const addLevels = (modelId) => {
       if (!modelId || seen.has(modelId)) return;
       seen.add(modelId);
-      const lv = getThinkingLevels(providerId, modelId);
+      const lv = levelsFor(modelId);
       if (lv) lv.forEach((l) => { if (l !== "none") set.add(l); });
     };
-    for (const m of modelRows.baseRows) addLevels(m.id);
-    for (const entry of modelRows.customRows) addLevels(entry.id);
+    for (const m of models) addLevels(m.id);
+    for (const m of kiloFreeModels) addLevels(m.id);
+    for (const entry of customModels) {
+      if (entry.providerAlias !== providerStorageAlias) continue;
+      if ((entry.kind || entry.type || "llm") !== "llm") continue;
+      addLevels(entry.id);
+    }
     return set.size ? ["auto", ...[...set]] : null;
   })();
   const providerDisplayAlias = isCompatible
@@ -296,6 +299,15 @@ export default function ProviderDetailPage() {
       console.log("Error fetching custom models:", error);
     }
   }, []);
+
+  // Fetch free models from Kilo API for kilocode provider
+  useEffect(() => {
+    if (providerId !== "kilocode") return;
+    fetch("/api/providers/kilo/free-models")
+      .then((res) => res.json())
+      .then((data) => { if (data.models?.length) setKiloFreeModels(data.models); })
+      .catch(() => {});
+  }, [providerId]);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -548,12 +560,14 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, caps) => {
+  // `transport` pins a realtime STT dispatch marker (shared whitelist
+  // STT_TRANSPORT_META); the API only honours it on type "stt" records.
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, caps, transport) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, ...(caps ? { caps } : {}) }),
+        body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) }),
       });
       if (res.ok) {
         await fetchCustomModels();
@@ -608,8 +622,9 @@ export default function ProviderDetailPage() {
         const modelId = model.id || model.name;
         if (!modelId) continue;
         
-        // Qoder model ID format may be "qoder/auto" or "auto", need to remove prefix
-        const cleanModelId = modelId.replace(/^qoder\//, "");
+        // Qoder model ID format may be "qoder/auto", "qoder-cn/auto" or "auto",
+        // need to remove the provider prefix before storing.
+        const cleanModelId = modelId.replace(/^(qoder-cn|qoder)\//, "");
         const alreadyExists = customModels.some(
           (entry) => entry.providerAlias === providerStorageAlias && entry.id === cleanModelId && (entry.kind || entry.type || "llm") === "llm"
         ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${cleanModelId}`);
@@ -678,6 +693,55 @@ export default function ProviderDetailPage() {
       alert(translate("Error fetching models") + ": " + error.message);
     } finally {
       setImportingClineModels(false);
+    }
+  };
+
+  // Fetch Cline's public free-tier feed (recommended-models `free[]`, no auth)
+  // and add every free model not yet present. Cline-only: clinepass has no
+  // free tier (its catalog comes from /models instead).
+  const handleImportClineFreeModels = async () => {
+    if (importingClineFreeModels) return;
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection) {
+      alert(translate("Please add an active Cline connection first"));
+      return;
+    }
+    setImportingClineFreeModels(true);
+    try {
+      const res = await fetch("/api/providers/cline/free-models");
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || translate("Failed to fetch models"));
+        return;
+      }
+      const models = data.models || [];
+      if (models.length === 0) {
+        alert(translate("No models returned"));
+        return;
+      }
+      let importedCount = 0;
+      for (const model of models) {
+        const modelId = model.id || model.name;
+        if (!modelId) continue;
+        const alreadyExists = customModels.some(
+          (entry) => entry.providerAlias === providerStorageAlias && entry.id === modelId && (entry.kind || entry.type || "llm") === "llm"
+        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${modelId}`);
+        if (alreadyExists) {
+          continue;
+        }
+        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
+        importedCount += 1;
+      }
+      if (importedCount === 0) {
+        alert(translate("All models already exist, no new models added"));
+      } else {
+        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
+      }
+    } catch (error) {
+      console.log("Error importing Cline free models:", error);
+      alert(translate("Error fetching models") + ": " + error.message);
+    } finally {
+      setImportingClineFreeModels(false);
     }
   };
 
@@ -1159,19 +1223,27 @@ export default function ProviderDetailPage() {
         />
       );
     }
-    // Rows come from modelRows (see the memo above): one row per model id across
-    // every source, split into Available / Disabled / Suggested once for the
-    // whole page. Non-llm kinds (embedding, tts, ...) are filtered there — they
-    // have dedicated pages under media-providers.
-    const {
-      displayModels, disabledDisplayModels,
-      activeCustomRows, disabledCustomRows,
-    } = modelRows;
+    // Combine hardcoded models with Kilo free models (deduplicated)
+    // Exclude non-llm models (embedding, tts, etc.) — they have dedicated pages under media-providers
+    const allModels = [
+      ...models,
+      ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
+    ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; });
+    const disabledSet = new Set(disabledModelIds);
+    const displayModels = allModels.filter((m) => !disabledSet.has(m.id));
+    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
+    const customModelRows = getProviderCustomModelRows({
+      customModels,
+      modelAliases,
+      providerAlias: providerStorageAlias,
+      builtInModels: models,
+      type: "llm",
+    });
 
     return (
       <div className="flex flex-wrap gap-3">
         {/* Custom models first */}
-        {activeCustomRows.map((model) => (
+        {customModelRows.map((model) => (
           <ModelRow
             key={`${model.source}-${model.fullModel}`}
             model={{ id: model.id, name: model.name }}
@@ -1233,8 +1305,8 @@ export default function ProviderDetailPage() {
           Add Model
         </button>
 
-        {/* Import Qoder models button — only show for qoder provider */}
-        {providerId === "qoder" && connections.some((conn) => conn.isActive !== false) && (
+        {/* Import Qoder models button — only show for qoder/qoder-cn provider */}
+        {(providerId === "qoder" || providerId === "qoder-cn") && connections.some((conn) => conn.isActive !== false) && (
           <button
             onClick={handleImportQoderModels}
             disabled={importingQoderModels}
@@ -1261,72 +1333,59 @@ export default function ProviderDetailPage() {
           </button>
         )}
 
+        {/* Add Cline free models button — cline provider only (clinepass has no free tier) */}
+        {providerId === "cline" && connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={handleImportClineFreeModels}
+            disabled={importingClineFreeModels}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-green-500/40 px-3 py-2 text-xs text-green-600 dark:text-green-400 transition-colors hover:border-green-500 hover:bg-green-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-sm" style={importingClineFreeModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {importingClineFreeModels ? "progress_activity" : "download"}
+            </span>
+            {importingClineFreeModels ? translate("Fetching...") : translate("Add free models")}
+          </button>
+        )}
+
         {/* Suggested models from provider API — show only models not yet added */}
         {suggestedModels.length > 0 && (() => {
-          const { suggestedNotAdded: notAdded, suggestedFreeDisabled: freeDisabled } = modelRows;
-          if (notAdded.length === 0 && freeDisabled.length === 0) return null;
-          // Only fetcher types that actually filter to $0 models may claim "free"
-          // here; generic catalogs (orcarouter, tokenrouter, venice, ...) are paid.
-          // "kilo-free" is Kilo's own isFree flag, which keeps sub-200k free ids
-          // that a context floor would hide, so it must not claim one either.
-          const suggestedType = providerInfo?.modelsFetcher?.type;
-          const suggestedLabel = suggestedType === "openrouter-free"
-            ? "Suggested free models (≥200k context):"
-            : (suggestedType === "opencode-free" || suggestedType === "mimo-free" || suggestedType === "kilo-free")
-              ? "Suggested free models:"
-              : "Suggested models:";
-          const modelBtnClass = "flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors";
-          const modelTitle = (m) => m.contextLength ? `${m.name} · ${(m.contextLength / 1000).toFixed(0)}k ctx` : m.name;
+          const addedFullModels = new Set([
+            ...Object.values(modelAliases),
+            ...customModelRows.map((model) => model.fullModel),
+          ]);
+          const hardcodedIds = new Set(models.map((m) => m.id));
+          const notAdded = suggestedModels.filter(
+            (m) => !addedFullModels.has(`${providerStorageAlias}/${m.id}`) && !hardcodedIds.has(m.id)
+          );
+          if (notAdded.length === 0) return null;
           return (
             <div className="w-full mt-2">
-              {freeDisabled.length > 0 && (
-                <>
-                  <p className="text-xs text-text-muted mb-2">Suggested free models ({freeDisabled.length}):</p>
-                  <div className="flex flex-wrap gap-2">
-                    {freeDisabled.map((m) => (
-                      <button
-                        key={`free-${m.id}`}
-                        onClick={() => handleEnableModel(m.id)}
-                        className={modelBtnClass}
-                        title={modelTitle(m)}
-                      >
-                        <span className="material-symbols-outlined text-[13px]">add</span>
-                        {m.id.split("/").pop()}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-              {notAdded.length > 0 && (
-                <>
-                  <p className="text-xs text-text-muted mb-2">{suggestedLabel}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {notAdded.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={async () => {
-                          await handleAddCustomModel(m.id, "llm", providerStorageAlias);
-                        }}
-                        className={modelBtnClass}
-                        title={modelTitle(m)}
-                      >
-                        <span className="material-symbols-outlined text-[13px]">add</span>
-                        {m.id.split("/").pop()}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
+              <p className="text-xs text-text-muted mb-2">Suggested free models (≥200k context):</p>
+              <div className="flex flex-wrap gap-2">
+                {notAdded.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={async () => {
+                      await handleAddCustomModel(m.id, "llm", providerStorageAlias);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                    title={`${m.name} · ${(m.contextLength / 1000).toFixed(0)}k ctx`}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">add</span>
+                    {m.id.split("/").pop()}
+                  </button>
+                ))}
+              </div>
             </div>
           );
         })()}
 
-        {/* Disabled models — restorable (built-in + custom) */}
-        {[...disabledDisplayModels, ...disabledCustomRows].length > 0 && (
+        {/* Disabled models — restorable */}
+        {disabledDisplayModels.length > 0 && (
           <div className="w-full mt-2">
-            <p className="text-xs text-text-muted mb-2">Disabled models ({disabledDisplayModels.length + disabledCustomRows.length}):</p>
+            <p className="text-xs text-text-muted mb-2">Disabled models ({disabledDisplayModels.length}):</p>
             <div className="flex flex-wrap gap-2">
-              {[...disabledDisplayModels, ...disabledCustomRows].map((m) => (
+              {disabledDisplayModels.map((m) => (
                 <button
                   key={m.id}
                   onClick={() => handleEnableModel(m.id)}
@@ -1776,9 +1835,11 @@ export default function ProviderDetailPage() {
             )}
           </div>
           {!isCompatible && (() => {
-            // Disable-All / Active-All cover exactly the rows rendered above —
-            // one entry per model id, built-ins and custom together.
-            const activeIds = modelRows.disableAllIds;
+            const allIds = [
+              ...models,
+              ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
+            ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; }).map((m) => m.id);
+            const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
             return (
               <div className="flex gap-2">
                 {disabledModelIds.length > 0 && (
@@ -1796,7 +1857,33 @@ export default function ProviderDetailPage() {
           })()}
         </div>
         {!!modelsTestError && (
-          <p className="text-xs text-red-500 mb-3 break-words">{modelsTestError}</p>
+          <div className="mb-3">
+            <p className="text-xs text-red-500 break-words">{modelsTestError}</p>
+            {/RegionError|hosted in China|regionNotAllowed/i.test(modelsTestError) && (() => {
+              const str = typeof modelsTestError === "string" ? modelsTestError : JSON.stringify(modelsTestError);
+              const linkMatch = str.match(/https:\/\/opencode\.ai\/workspace\/[^\s"')]+/);
+              const wrkMatch = str.match(/wrk_[0-9A-Za-z]+/);
+              const targetUrl = linkMatch
+                ? (linkMatch[0].endsWith("/go") ? linkMatch[0] : `${linkMatch[0]}/go`)
+                : wrkMatch
+                  ? `https://opencode.ai/workspace/${wrkMatch[0]}/go`
+                  : "https://opencode.ai";
+
+              return (
+                <div className="mt-1.5">
+                  <a
+                    href={targetUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400 transition-colors"
+                  >
+                    <span>Allow China-hosted models</span>
+                    <span className="material-symbols-outlined text-[13px]">open_in_new</span>
+                  </a>
+                </div>
+              );
+            })()}
+          </div>
         )}
         {providerId === "zed" && !!liveModelsError && (
           <p className="text-xs text-red-500 mb-3 break-words">{liveModelsError}</p>
@@ -1817,6 +1904,13 @@ export default function ProviderDetailPage() {
       ) : providerId === "cursor" ? (
         <CursorAuthModal
           isOpen={showOAuthModal}
+          onSuccess={handleOAuthSuccess}
+          onClose={() => setShowOAuthModal(false)}
+        />
+      ) : providerId === "zed" ? (
+        <ZedAuthModal
+          isOpen={showOAuthModal}
+          providerInfo={providerInfo}
           onSuccess={handleOAuthSuccess}
           onClose={() => setShowOAuthModal(false)}
         />
@@ -1890,8 +1984,10 @@ export default function ProviderDetailPage() {
           isOpen={showAddCustomModel}
           providerAlias={providerStorageAlias}
           providerDisplayAlias={providerDisplayAlias}
-          onSave={async (modelId, caps) => {
-            await handleAddCustomModel(modelId, "llm", providerStorageAlias, caps);
+          onSave={async (modelId, caps, transport) => {
+            // caps.stt is a UI-only flag; the API accepts transports only on
+            // type "stt" records, so the save derives the type from it.
+            await handleAddCustomModel(modelId, caps?.stt ? "stt" : "llm", providerStorageAlias, caps, transport);
             setShowAddCustomModel(false);
           }}
           onClose={() => setShowAddCustomModel(false)}

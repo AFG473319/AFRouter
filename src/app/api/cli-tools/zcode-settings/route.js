@@ -6,6 +6,7 @@ import path from "path";
 import os from "os";
 import crypto from "crypto";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 import { readOwnership, writeOwnership } from "@/lib/zcodeModelOwnership.js";
 
@@ -169,6 +170,12 @@ const capsToSpec = (caps) => ({
     caps.audioInput ? "audio" : null,
   ].filter(Boolean),
   reasoning: caps.reasoning === true,
+  // Per-model selectable efforts (models.dev ladder via /v1/models, else the
+  // static tables). Carried so brand-new entries get real variants instead of
+  // the hardcoded fallback in buildModelEntry.
+  reasoningLevels: Array.isArray(caps.reasoningLevels) && caps.reasoningLevels.length
+    ? caps.reasoningLevels
+    : (Array.isArray(caps.reasoningEfforts) && caps.reasoningEfforts.length ? caps.reasoningEfforts : null),
 });
 
 // Resolve model IDs -> per-ID spec + unverified list. Catalog first (exact id,
@@ -194,7 +201,15 @@ const resolveModelSpecs = async (ids, catalog) => {
       }
     }
     if (caps && Number.isFinite(caps.contextWindow) && Number.isFinite(caps.maxOutput)) {
-      specs.set(id, { ...capsToSpec(caps), verified: true });
+      // Levels precedence: live/discovered ladder first, then the shared
+      // per-model levels (pattern quirks, then format defaults) — both
+      // dynamic, so new models self-resolve with zero table edits here.
+      const spec = { ...capsToSpec(caps), verified: true };
+      if (spec.reasoning && !spec.reasoningLevels) {
+        const levels = getThinkingLevels(prefix, bare);
+        if (levels?.length) spec.reasoningLevels = levels;
+      }
+      specs.set(id, spec);
     } else {
       specs.set(id, { ...FALLBACK_SPECS, reasoning: false, verified: false });
       unverified.push(id);
@@ -204,8 +219,10 @@ const resolveModelSpecs = async (ids, catalog) => {
 };
 
 // T007: exact ZCode model-entry shape per data-model.md. Brand-new entries get
-// the dominant reasoning convention (research D6); user-tuned fields on
-// existing entries are preserved by mergeModelEntries (FR-005).
+// the model's real selectable efforts (models.dev ladder via the live catalog,
+// else the static tables); the hardcoded set is only the last-resort fallback
+// for models with no declared levels. User-tuned fields on existing entries
+// are preserved by mergeModelEntries (FR-005).
 const buildModelEntry = (spec) => {
   const entry = {
     limit: { context: spec.context, output: spec.output },
@@ -213,7 +230,16 @@ const buildModelEntry = (spec) => {
     zcode: { modalitiesConfigured: true, afrouter: true },
   };
   if (spec.reasoning) {
-    entry.reasoning = { enabled: true, variants: ["low", "high", "max"], defaultVariant: "max" };
+    const levels = Array.isArray(spec.reasoningLevels) && spec.reasoningLevels.length
+      // "none" is the disable switch, not an effort variant.
+      ? spec.reasoningLevels.filter((l) => l !== "none")
+      : [];
+    const variants = levels.length ? [...new Set(levels)] : ["low", "high", "max"];
+    entry.reasoning = {
+      enabled: true,
+      variants,
+      defaultVariant: variants.includes("max") ? "max" : variants[variants.length - 1],
+    };
   }
   return entry;
 };

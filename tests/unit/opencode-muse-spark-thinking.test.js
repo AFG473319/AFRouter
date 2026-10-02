@@ -63,6 +63,16 @@ describe("OpenCode Free Muse Spark thinking", () => {
     expect(out.max_tokens).toBeUndefined();
   });
 
+  it("retired Union Alpha no longer routes anywhere special", () => {
+    // union-alpha is gone upstream: no registry entry, no claude target, no
+    // Messages routing. The executor's Messages branch is registry-driven, so
+    // retirement needed zero code changes beyond dropping the entries.
+    expect(PROVIDER_MODELS.oc?.some((model) => model.id === "union-alpha")).toBe(false);
+    expect(getModelTargetFormat("oc", "union-alpha")).toBeNull();
+    const executor = new OpenCodeExecutor();
+    expect(executor.buildUrl("union-alpha")).toBe("https://opencode.ai/zen/v1/chat/completions");
+  });
+
   it("leaves the other free models on Chat Completions", () => {
     const executor = new OpenCodeExecutor();
     const body = { messages: [{ role: "user", content: "hi" }], max_tokens: 1024 };
@@ -181,39 +191,18 @@ describe("OpenCode Free Muse Spark thinking", () => {
     // User message, function_call, function_call_output, and next user message survive
     const types = out.input.map((item) => item.type);
     expect(types).toEqual(["message", "function_call", "function_call_output", "message"]);
-    // Tools flattened and empty properties added; the upstream-mandated
-    // file-search quartet is merged in so free-tier requests pass the gate.
-    expect(out.tools).toEqual([
-      {
-        type: "function",
-        name: "shell",
-        description: "Run shell command",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        type: "function",
-        name: "bash",
-        description: "OpenCode built-in bash tool",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        type: "function",
-        name: "glob",
-        description: "OpenCode built-in glob tool",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        type: "function",
-        name: "grep",
-        description: "OpenCode built-in grep tool",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        type: "function",
-        name: "read",
-        description: "OpenCode built-in read tool",
-        parameters: { type: "object", properties: {} },
-      },
-    ]);
+    // Tools flattened and empty properties added. The Free-tier Responses lane
+    // also appends the fingerprint tools (bash/glob/grep/read) after the
+    // client's own — skipping them triggers 403 FreeTierError (upstream v0.5.91).
+    const shell = out.tools.find((t) => t?.name === "shell");
+    expect(shell).toEqual({
+      type: "function",
+      name: "shell",
+      description: "Run shell command",
+      parameters: { type: "object", properties: {} },
+    });
+    for (const name of ["bash", "glob", "grep", "read"]) {
+      expect(out.tools.some((t) => t?.name === name)).toBe(true);
+    }
   });
 });

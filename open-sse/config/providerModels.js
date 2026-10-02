@@ -3,9 +3,12 @@ import REGISTRY from "../providers/registry/index.js";
 // PROVIDER_MODELS now built from providers/registry (transport + models co-located)
 import { PROVIDER_MODELS } from "../providers/index.js";
 import { modelQuotaFamily, modelStrip, modelTargetFormat, modelSupportedFormats, normalizeModelId, providerDefaultTargetFormat } from "../providers/models/schema.js";
-import { CODEX_REVIEW_SUFFIX, isMuseSparkModel } from "../providers/models/helpers.js";
+import { CODEX_REVIEW_SUFFIX, isMuseSparkModel, opencodeFamilyFormats } from "../providers/models/helpers.js";
 import { FORMATS } from "../translator/formats.js";
 export { PROVIDER_MODELS };
+
+// OpenCode providers sharing the endpoint-family fallback for unknown model ids
+const isOpenCodeAlias = (aliasOrId) => !aliasOrId || ["oc", "opencode", "ocg", "opencode-go", "ocz", "opencode-zen"].includes(aliasOrId);
 
 
 // Helper functions
@@ -18,6 +21,14 @@ export function getDefaultModel(aliasOrId) {
   return models?.[0]?.id || null;
 }
 
+// Decisions-only SystemOne (TypeSafe Jev) detection. Restored after the v0.5.91
+// upstream merge dropped it: upstream has no SystemOne concept, so its version
+// of this file lost the export while our /v1/systemone route, model-test ping
+// and the typesafe registry still import it.
+export function isSystemOneModel(aliasOrId, modelId) {
+  return getModelTargetFormat(aliasOrId, modelId) === "systemone";
+}
+
 // Providers whose registry uses dots in version numbers (e.g. "claude-sonnet-4.5").
 // For these, we tolerate clients sending dashes ("claude-sonnet-4-5") by normalizing
 // digit-hyphen-digit to digit-dot-digit before lookup. Other providers are left untouched.
@@ -27,46 +38,16 @@ const DOT_VERSION_PROVIDERS = new Set(["kr", "kiro"]);
 // ("claude-sonnet-4-5" ~= "claude-sonnet-4.5"). Other providers use exact match only.
 function findModel(models, modelId, aliasOrId) {
   if (!models) return undefined;
-  const baseModelId = stripThinkingModelId(modelId);
-  const index = getModelIndex(aliasOrId);
-  const normalizedModelId = DOT_VERSION_PROVIDERS.has(aliasOrId)
-    ? normalizeModelId(baseModelId)
-    : baseModelId;
-  return index?.exact.get(modelId)
-    || index?.base.get(baseModelId)
-    || index?.normalized.get(normalizedModelId)
-    || undefined;
-}
-
-// Registry models are immutable after module initialization. Build lookup maps once
-// instead of scanning every provider's model array for each routing field lookup.
-function stripThinkingModelId(modelId) {
-  return typeof modelId === "string"
+  const baseModelId = typeof modelId === "string"
     ? modelId.replace(/\([^()]+\)\s*$/, "").trim()
     : modelId;
+  const found = models.find(m => m.id === modelId || m.id === baseModelId);
+  if (found) return found;
+  if (!DOT_VERSION_PROVIDERS.has(aliasOrId)) return undefined;
+  const normalized = normalizeModelId(baseModelId);
+  if (normalized === baseModelId) return undefined;
+  return models.find(m => m.id === normalized);
 }
-
-function getModelIndex(aliasOrId) {
-  return MODEL_INDEXES[aliasOrId];
-}
-
-const MODEL_INDEXES = Object.fromEntries(
-  Object.entries(PROVIDER_MODELS).map(([alias, models]) => {
-    const exact = new Map();
-    const base = new Map();
-    const normalized = new Map();
-    for (const model of models) {
-      if (!exact.has(model.id)) exact.set(model.id, model);
-      const modelBase = stripThinkingModelId(model.id);
-      if (!base.has(modelBase)) base.set(modelBase, model);
-      if (DOT_VERSION_PROVIDERS.has(alias)) {
-        const modelNormalized = normalizeModelId(modelBase);
-        if (!normalized.has(modelNormalized)) normalized.set(modelNormalized, model);
-      }
-    }
-    return [alias, { exact, base, normalized }];
-  }),
-);
 
 export function isValidModel(aliasOrId, modelId, passthroughProviders = new Set()) {
   if (passthroughProviders.has(aliasOrId)) return true;
@@ -82,6 +63,25 @@ export function findModelName(aliasOrId, modelId) {
   return found?.name || modelId;
 }
 
+export function getModelTargetFormat(aliasOrId, modelId) {
+  if (isOpenCodeAlias(aliasOrId) && isMuseSparkModel(modelId)) {
+    return FORMATS.OPENAI_RESPONSES;
+  }
+  const models = PROVIDER_MODELS[aliasOrId];
+  if (!models) return null;
+  const found = findModel(models, modelId, aliasOrId);
+  const explicit = modelTargetFormat(found);
+  if (explicit) return explicit;
+  // Family fallback keeps modelsFetcher/passthrough ids on their endpoint lane
+  if (isOpenCodeAlias(aliasOrId)) return opencodeFamilyFormats(modelId)?.targetFormat || null;
+  // Passthrough/unlisted ids inherit the provider's default format
+  // (TypeSafe AI: defaultTargetFormat "systemone" for every model).
+  return providerDefaultTargetFormat(findProviderDef(aliasOrId));
+}
+
+// Registry entries indexed by every key requests may arrive with. Restored after
+// the v0.5.91 upstream merge dropped it together with the defaultTargetFormat
+// fallback above.
 const PROVIDER_DEFS_BY_KEY = new Map();
 for (const entry of REGISTRY) {
   for (const key of [entry.id, entry.alias, entry.uiAlias]) {
@@ -94,35 +94,17 @@ function findProviderDef(aliasOrId) {
   return PROVIDER_DEFS_BY_KEY.get(aliasOrId);
 }
 
-export function getModelTargetFormat(aliasOrId, modelId) {
-  if ((!aliasOrId || aliasOrId === "oc" || aliasOrId === "opencode" || aliasOrId === "ocg" || aliasOrId === "opencode-go") && isMuseSparkModel(modelId)) {
-    return FORMATS.OPENAI_RESPONSES;
-  }
-  const models = PROVIDER_MODELS[aliasOrId];
-  if (!models) return null;
-  const found = findModel(models, modelId, aliasOrId);
-  const explicit = modelTargetFormat(found);
-  if (explicit) return explicit;
-  // Passthrough/unlisted ids inherit the provider's default format
-  // (TypeSafe AI: defaultTargetFormat "systemone" for every model).
-  return providerDefaultTargetFormat(findProviderDef(aliasOrId));
-}
-
-/**
- * True when provider/model is a decisions-only System One model (TypeSafe Jev,
- * OpenCode Jev free, …). Handles registered targetFormat and provider-level
- * defaultTargetFormat so passthrough ids route and log like the catalog ones.
- */
-export function isSystemOneModel(aliasOrId, modelId) {
-  return getModelTargetFormat(aliasOrId, modelId) === "systemone";
-}
-
 // Declared upstream formats for a model (registry `supportedFormats`). Drives the
 // per-model guard on the sourceFormat-matched transport; null when undeclared.
+// Unknown OpenCode ids fall back to the family regex (chat lane by default) so
+// auto-fetched models never wrongly use the sourceFormat-matched transport.
 export function getModelSupportedFormats(aliasOrId, modelId) {
   const models = PROVIDER_MODELS[aliasOrId];
   if (!models) return null;
-  return modelSupportedFormats(findModel(models, modelId, aliasOrId));
+  const found = findModel(models, modelId, aliasOrId);
+  if (found) return modelSupportedFormats(found);
+  if (isOpenCodeAlias(aliasOrId)) return opencodeFamilyFormats(modelId)?.supportedFormats || [FORMATS.OPENAI];
+  return null;
 }
 
 export function getModelType(aliasOrId, modelId) {

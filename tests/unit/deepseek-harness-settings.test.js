@@ -266,6 +266,34 @@ describe("POST", () => {
     expect(route.models[0].input).toBeUndefined();
   });
 
+  it("uses the model's real level set for reasoningEfforts when one is known", async () => {
+    // A declared per-model set (here: no `max`, no `none`) must produce exactly
+    // those keys — inventing low..max would send levels the model may reject.
+    await post(web, {
+      baseUrl: "http://x",
+      apiKey: "k",
+      models: ["deepseek/deepseek-v4-pro"],
+      modelSpecs: {
+        "deepseek/deepseek-v4-pro": { reasoning: true, reasoningLevels: ["low", "high"] },
+      },
+    });
+    const efforts = readRoute("web").models[0].reasoningEfforts;
+    expect(efforts).toEqual({ low: "low", high: "high" });
+  });
+
+  it("maps a declared `none` to the `off` disable entry", async () => {
+    await post(web, {
+      baseUrl: "http://x",
+      apiKey: "k",
+      models: ["deepseek/deepseek-v4-pro"],
+      modelSpecs: {
+        "deepseek/deepseek-v4-pro": { reasoning: true, reasoningLevels: ["none", "high", "max"] },
+      },
+    });
+    const efforts = readRoute("web").models[0].reasoningEfforts;
+    expect(efforts).toEqual({ off: null, high: "high", max: "max" });
+  });
+
   it("declares per-model compat only when the thinking toggle is on", async () => {
     await post(web, {
       baseUrl: "http://x",

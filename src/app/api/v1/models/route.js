@@ -6,7 +6,6 @@ import {
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
 import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
-import { parseModel } from "@/sse/services/model.js";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
@@ -18,7 +17,41 @@ import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
-import { capabilitiesFromServiceKind, getCapabilitiesForModel, DEFAULT_CAPABILITIES } from "open-sse/providers/capabilities.js";
+import { capabilitiesFromServiceKind, getCapabilitiesForModel, getCapabilitiesForLiveModel, aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
+
+// Qoder shares one live resolver across intl (qoder) and CN (qoder-cn); the
+// credentials carry the provider id so qoderModels picks the right region's
+// catalog endpoint.
+async function resolveQoderLiveModels(conn, provider) {
+  const result = await resolveQoderModels({
+    provider,
+    accessToken: conn.accessToken,
+    // PAT (pt-...) connections keep the token in apiKey; without it the live
+    // catalog silently fails and /v1/models falls back to the static list.
+    apiKey: conn.apiKey,
+    refreshToken: conn.refreshToken,
+    email: conn.email,
+    displayName: conn.displayName,
+    providerSpecificData: conn.providerSpecificData || {}
+  });
+  // Visible + hidden (enable:false) catalog keys — chat routes all of them.
+  // Live per-model signals (isReasoning/isVL/limits) ride along so
+  // buildModelsList can resolve capabilities dynamically instead of
+  // pattern-matching opaque gateway keys.
+  const models = routableQoderModels(result);
+  if (!models.length) return null;
+  return {
+    models: models.map((m) => ({
+      id: m.id,
+      name: m.name,
+      ...(m.isReasoning ? { isReasoning: true } : {}),
+      ...(m.isVL ? { isVL: true } : {}),
+      ...(Number.isFinite(m.contextLength) ? { contextLength: m.contextLength } : {}),
+      ...(Number.isFinite(m.maxOutputTokens) ? { maxOutputTokens: m.maxOutputTokens } : {}),
+    })),
+  };
+}
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -30,24 +63,21 @@ const LIVE_MODEL_RESOLVERS = {
       refreshToken: conn.refreshToken,
       providerSpecificData: conn.providerSpecificData || {}
     }, { log: console });
-    return result?.models?.length ? { models: result.models } : null;
+    if (!result?.models?.length) return null;
+    // Kiro items carry { thinking, agentic } variant flags as `capabilities` —
+    // the wrong shape for model.capabilities (reasoning/vision/...) and wrong
+    // for every consumer, so strip them here. Variant ids resolve through the
+    // shared kiro tables; anything new self-resolves by display name below.
+    return {
+      models: result.models.map((m) => ({
+        id: m.id,
+        ...(m?.name ? { name: m.name } : {}),
+        ...(Number.isFinite(m?.contextLength) ? { contextLength: m.contextLength } : {}),
+      })),
+    };
   },
-  qoder: async (conn) => {
-    const result = await resolveQoderModels({
-      accessToken: conn.accessToken,
-      // PAT (pt-...) connections keep the token in apiKey; without it the live
-      // catalog silently fails and /v1/models falls back to the static list.
-      apiKey: conn.apiKey,
-      refreshToken: conn.refreshToken,
-      email: conn.email,
-      displayName: conn.displayName,
-      providerSpecificData: conn.providerSpecificData || {}
-    });
-    // Visible + hidden (enable:false) catalog keys — chat routes all of them.
-    const models = routableQoderModels(result);
-    if (!models.length) return null;
-    return { models: models.map((m) => ({ id: m.id, name: m.name })) };
-  },
+  qoder: async (conn) => resolveQoderLiveModels(conn, "qoder"),
+  "qoder-cn": async (conn) => resolveQoderLiveModels(conn, "qoder-cn"),
   kimchi: async (conn) => {
     const result = await resolveKimchiModels({
       accessToken: conn.accessToken,
@@ -141,8 +171,8 @@ const parseOpenAIStyleModels = (data) => {
 };
 
 // Header sent by fetchCompatibleModelIds to detect cross-instance /models fetches
-// and break recursive loops between afrouter instances connected to each other.
-const INTERNAL_MODELS_FETCH_HEADER = "x-afr-internal-models-fetch";
+// and break recursive loops between 9router instances connected to each other.
+const INTERNAL_MODELS_FETCH_HEADER = "x-9r-internal-models-fetch";
 
 // LLM kind sentinel — combos/models with no explicit kind default to LLM
 const LLM_KIND = "llm";
@@ -248,122 +278,13 @@ function comboMatchesKinds(combo, kindFilter) {
   return kindFilter.includes(kind);
 }
 
-// Boolean capability flags are unioned across members (OR): a feature is
-// available to the combo if any member supports it.
-const COMBO_BOOLEAN_CAPS = [
-  "vision", "pdf", "audioInput", "videoInput", "imageOutput",
-  "audioOutput", "search", "tools", "reasoning",
-  "thinkingCanDisable", "thinkingEffortSupported",
-];
-
-// Custom-model rows carry `caps` captured from the provider's own catalog when
-// the model was added (POST /api/models/custom enriches from OpenRouter/Nous).
-// That snapshot is fresher and gateway-specific, so it wins over the static
-// tables for the fields it declares — but it is a partial snapshot: booleans
-// only ever turn ON (the hand-written tables carry verified flags) and
-// table-resolved extras (thinkingFormat, thinkingRange, …) survive untouched.
-const PERSISTED_LIMIT_KEYS = new Set(["contextWindow", "maxOutput"]);
-
-function mergePersistedCapabilities(base, persisted) {
-  if (!persisted || typeof persisted !== "object") return base;
-  const merged = { ...(base || DEFAULT_CAPABILITIES) };
-  for (const [key, value] of Object.entries(persisted)) {
-    if (typeof value === "boolean") {
-      if (value) merged[key] = true;
-    } else if (PERSISTED_LIMIT_KEYS.has(key)) {
-      if (Number.isSafeInteger(value) && value > 0) merged[key] = value;
-    } else if (value !== null && value !== undefined) {
-      merged[key] = value;
-    }
-  }
-  return merged;
-}
-
-// Keyed by `${alias}::${modelId}`: the same model id can exist under several
-// provider aliases with different specs, so the alias is part of the key.
-function buildCustomCapsMap(customModels) {
-  const map = new Map();
-  for (const model of customModels) {
-    const alias = model?.providerAlias;
-    const id = typeof model?.id === "string" ? model.id.trim() : "";
-    if (!alias || !id || !model?.caps || typeof model.caps !== "object") continue;
-    map.set(`${alias}::${id}`, model.caps);
-  }
-  return map;
-}
-
-function lookupCustomCaps(customCaps, aliases, modelId) {
-  if (!customCaps) return null;
-  for (const alias of aliases) {
-    const hit = customCaps.get(`${alias}::${modelId}`);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-/**
- * Aggregate capabilities across a combo's member models so the /v1/models entry
- * carries the same shape as a concrete model. Numeric limits are the MINIMUM
- * across members (a request can route to any member, so the combo is bounded by
- * the smallest window); boolean features are the UNION; format scalars take the
- * first non-null. Nested combos are flattened (mirrors the chat path, which
- * re-expands a bare combo name as a single model). `seen` guards against cycles.
- * @param {string[]} memberStrings - combo.models entries (provider/model, alias, or nested combo name)
- * @param {Map<string,object>} comboByName - name -> combo, for nested expansion
- * @param {Set<string>} [seen] - names already visited (cycle guard)
- * @returns {object|null} merged capabilities, or null if no resolvable members
- */
-function mergeComboCapabilities(memberStrings, comboByName, seen = new Set(), customCaps = null) {
-  if (!Array.isArray(memberStrings) || memberStrings.length === 0) return null;
-
-  const merged = { ...DEFAULT_CAPABILITIES };
-  let resolvedAny = false;
-  let seenFinite = false;
-
-  for (const member of memberStrings) {
-    if (typeof member !== "string") continue;
-
-    let caps;
-    if (member.includes("/")) {
-      const { provider, model } = parseModel(member);
-      caps = mergePersistedCapabilities(
-        getCapabilitiesForModel(provider, model),
-        lookupCustomCaps(customCaps, [provider, PROVIDER_ID_TO_ALIAS[provider] || provider], model),
-      );
-    } else if (comboByName.has(member)) {
-      if (seen.has(member)) continue; // cycle guard
-      seen.add(member);
-      caps = mergeComboCapabilities(comboByName.get(member).models, comboByName, seen, customCaps);
-    } else {
-      caps = getCapabilitiesForModel(null, member);
-    }
-    if (!caps) continue;
-
-    for (const key of COMBO_BOOLEAN_CAPS) {
-      if (caps[key]) merged[key] = true;
-    }
-    if (merged.thinkingFormat === null && caps.thinkingFormat != null) merged.thinkingFormat = caps.thinkingFormat;
-    if (merged.thinkingRange === null && caps.thinkingRange != null) merged.thinkingRange = caps.thinkingRange;
-    if (Number.isFinite(caps.contextWindow)) {
-      merged.contextWindow = seenFinite ? Math.min(merged.contextWindow, caps.contextWindow) : caps.contextWindow;
-    }
-    if (Number.isFinite(caps.maxOutput)) {
-      merged.maxOutput = seenFinite ? Math.min(merged.maxOutput, caps.maxOutput) : caps.maxOutput;
-    }
-    resolvedAny = true;
-    seenFinite = true;
-  }
-
-  return resolvedAny ? merged : null;
-}
-
 /**
  * Build OpenAI-format models list filtered by service kinds.
  * @param {string[]} kindFilter - List of service kinds to include (e.g. ["llm"], ["webSearch","webFetch"]).
  */
 export async function buildModelsList(kindFilter, options = {}) {
   // When this header is present, the /v1/models request came from another
-  // afrouter instance's fetchCompatibleModelIds — skip dynamic fetch to break
+  // 9router instance's fetchCompatibleModelIds — skip dynamic fetch to break
   // cross-instance recursive loops.
   const skipDynamicFetch = options.skipDynamicFetch === true;
   let connections = [];
@@ -380,8 +301,6 @@ export async function buildModelsList(kindFilter, options = {}) {
   } catch (e) {
     console.log("Could not fetch combos");
   }
-  // Name -> combo, used to flatten nested combos when merging capabilities.
-  const comboByName = new Map(combos.map((c) => [c.name, c]));
 
   let customModels = [];
   try {
@@ -389,10 +308,6 @@ export async function buildModelsList(kindFilter, options = {}) {
   } catch (e) {
     console.log("Could not fetch custom models");
   }
-  // Specs captured when each model was added. The listing prefers them over the
-  // static tables so a fresh OpenRouter/Nous entry keeps its real window,
-  // modalities, and reasoning flags instead of the DEFAULT_CAPABILITIES floor.
-  const customCapsByAliasId = buildCustomCapsMap(customModels);
 
   let modelAliases = {};
   try {
@@ -407,43 +322,7 @@ export async function buildModelsList(kindFilter, options = {}) {
   } catch (e) {
     console.log("Could not fetch disabled models");
   }
-  const disabledModelSets = new Map(
-    Object.entries(disabledByAlias || {}).map(([alias, ids]) => [alias, new Set(Array.isArray(ids) ? ids : [])]),
-  );
-  const isDisabled = (alias, modelId) => disabledModelSets.get(alias)?.has(modelId) === true;
-  const isHidden = (alias, modelId) => isDisabled(alias, modelId);
-
-  // Build per-call indexes once instead of rescanning every custom/alias row for
-  // every active provider. These remain request-local so dashboard changes are
-  // visible immediately without stale cross-request caches.
-  const customModelKindsByAlias = new Map();
-  for (const model of customModels) {
-    const alias = model?.providerAlias;
-    const id = typeof model?.id === "string" ? model.id.trim() : "";
-    if (!alias || !id) continue;
-    let rows = customModelKindsByAlias.get(alias);
-    if (!rows) {
-      rows = [];
-      customModelKindsByAlias.set(alias, rows);
-    }
-    rows.push([id, getModelKind(model) || LLM_KIND]);
-  }
-
-  const aliasModelIdsByPrefix = new Map();
-  for (const fullModel of Object.values(modelAliases || {})) {
-    if (typeof fullModel !== "string") continue;
-    const slash = fullModel.indexOf("/");
-    if (slash <= 0 || slash === fullModel.length - 1) continue;
-    const prefix = fullModel.slice(0, slash);
-    const modelId = fullModel.slice(slash + 1).trim();
-    if (!modelId) continue;
-    let ids = aliasModelIdsByPrefix.get(prefix);
-    if (!ids) {
-      ids = new Set();
-      aliasModelIdsByPrefix.set(prefix, ids);
-    }
-    ids.add(modelId);
-  }
+  const isDisabled = (alias, modelId) => Array.isArray(disabledByAlias[alias]) && disabledByAlias[alias].includes(modelId);
 
   const activeConnectionByProvider = new Map();
   for (const conn of connections) {
@@ -453,6 +332,9 @@ export async function buildModelsList(kindFilter, options = {}) {
   }
 
   const models = [];
+
+  // Lookup map so aggregateComboCapabilities can recursively resolve nested combos
+  const comboByName = Object.fromEntries(combos.map((c) => [c.name, c.models]));
 
   // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
   for (const combo of combos) {
@@ -465,14 +347,8 @@ export async function buildModelsList(kindFilter, options = {}) {
     if (combo.kind === "webSearch" || combo.kind === "webFetch") {
       entry.kind = combo.kind;
     } else {
-      // Merge capabilities from member models so clients see a context window
-      // and feature set for the combo (bounded by its smallest-window member).
-      const caps = mergeComboCapabilities(combo.models, comboByName, new Set(), customCapsByAliasId);
-      if (caps) {
-        entry.capabilities = caps;
-        entry.context_length = caps.contextWindow;
-        entry.max_completion_tokens = caps.maxOutput;
-      }
+      const comboCaps = aggregateComboCapabilities(combo.models, comboByName);
+      if (comboCaps) entry.capabilities = comboCaps;
     }
     models.push(entry);
   }
@@ -487,11 +363,12 @@ export async function buildModelsList(kindFilter, options = {}) {
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
       for (const model of providerModels) {
         if (!kindFilter.includes(modelKind(model))) continue;
-        if (isHidden(alias, model.id)) continue;
+        if (isDisabled(alias, model.id)) continue;
         models.push({
           id: `${alias}/${model.id}`,
           object: "model",
           owned_by: alias,
+          capabilities: getCapabilitiesForModel(alias, model.id),
         });
       }
     }
@@ -505,25 +382,12 @@ export async function buildModelsList(kindFilter, options = {}) {
 
       const modelId = String(customModel.id).trim();
       if (!modelId) continue;
-      // Disabled custom models follow the same hide-list as built-ins
-      if (isHidden(providerAlias, modelId)) continue;
 
-      const entry = {
+      models.push({
         id: `${providerAlias}/${modelId}`,
         object: "model",
         owned_by: providerAlias,
-      };
-      const persisted = lookupCustomCaps(customCapsByAliasId, [providerAlias], modelId);
-      if (persisted) {
-        const caps = mergePersistedCapabilities(
-          getCapabilitiesForModel(providerAlias, modelId),
-          persisted,
-        );
-        entry.capabilities = caps;
-        entry.context_length = caps.contextWindow;
-        entry.max_completion_tokens = caps.maxOutput;
-      }
-      models.push(entry);
+      });
     }
   } else {
     for (const [providerId, conn] of activeConnectionByProvider.entries()) {
@@ -548,6 +412,9 @@ export async function buildModelsList(kindFilter, options = {}) {
       );
       let liveModelKindById = new Map();
       let liveCapabilitiesById = new Map();
+      // Full live items by id (display names + gateway signals). Capabilities
+      // for opaque/new ids resolve dynamically from these in the loop below.
+      let liveById = new Map();
 
       let rawModelIds = hasExplicitEnabledModels
         ? Array.from(
@@ -572,6 +439,11 @@ export async function buildModelsList(kindFilter, options = {}) {
           const live = await liveResolver(conn);
           if (live?.models?.length) {
             rawModelIds = live.models.map((m) => m.id);
+            liveById = new Map(
+              live.models
+                .filter((m) => m?.id)
+                .map((m) => [m.id, m])
+            );
             liveModelKindById = new Map(
               live.models
                 .filter((m) => m?.id)
@@ -604,23 +476,45 @@ export async function buildModelsList(kindFilter, options = {}) {
         .filter((modelId) => typeof modelId === "string" && modelId.trim() !== "");
 
       const customModelKindById = new Map();
-      for (const alias of [outputAlias, staticAlias, providerId]) {
-        const rows = customModelKindsByAlias.get(alias);
-        if (!rows) continue;
-        for (const [modelId, kind] of rows) {
+      const customModelIds = customModels
+        .filter((m) => {
+          if (!m?.id) return false;
+          const kind = getModelKind(m) || LLM_KIND;
           // imageToText custom models are vision-capable chat models: expose them
           // both in the default LLM list and in /v1/models/image-to-text.
-          if (!kindFilter.includes(kind) && !(kind === "imageToText" && kindFilter.includes(LLM_KIND))) continue;
-          customModelKindById.set(modelId, kind);
-        }
-      }
-      const customModelIds = Array.from(customModelKindById.keys());
+          if (!kindFilter.includes(kind) && !(kind === "imageToText" && kindFilter.includes(LLM_KIND))) return false;
+          const alias = m.providerAlias;
+          return alias === staticAlias || alias === outputAlias || alias === providerId;
+        })
+        .map((m) => {
+          const modelId = String(m.id).trim();
+          if (modelId) customModelKindById.set(modelId, getModelKind(m) || LLM_KIND);
+          return modelId;
+        })
+        .filter((modelId) => modelId !== "");
 
-      const aliasModelIds = [];
-      for (const prefix of [outputAlias, staticAlias, providerId]) {
-        const ids = aliasModelIdsByPrefix.get(prefix);
-        if (ids) aliasModelIds.push(...ids);
-      }
+      const aliasModelIds = Object.values(modelAliases || {})
+        .filter((fullModel) => {
+          if (typeof fullModel !== "string" || !fullModel.includes("/")) return false;
+          return (
+            fullModel.startsWith(`${outputAlias}/`) ||
+            fullModel.startsWith(`${staticAlias}/`) ||
+            fullModel.startsWith(`${providerId}/`)
+          );
+        })
+        .map((fullModel) => {
+          if (fullModel.startsWith(`${outputAlias}/`)) {
+            return fullModel.slice(outputAlias.length + 1);
+          }
+          if (fullModel.startsWith(`${staticAlias}/`)) {
+            return fullModel.slice(staticAlias.length + 1);
+          }
+          if (fullModel.startsWith(`${providerId}/`)) {
+            return fullModel.slice(providerId.length + 1);
+          }
+          return fullModel;
+        })
+        .filter((modelId) => typeof modelId === "string" && modelId.trim() !== "");
 
       const mergedModelIds = Array.from(new Set([...modelIds, ...customModelIds, ...aliasModelIds]));
 
@@ -632,27 +526,33 @@ export async function buildModelsList(kindFilter, options = {}) {
         // imageToText custom models stay in the LLM list (vision-capable chat models)
         const allowAsLlm = kind === "imageToText" && kindFilter.includes(LLM_KIND);
         if (!kindFilter.includes(kind) && !allowAsLlm) continue;
-        if (isHidden(outputAlias, modelId) || isHidden(staticAlias, modelId)) continue;
+        if (isDisabled(outputAlias, modelId) || isDisabled(staticAlias, modelId)) continue;
 
         const model = {
           id: `${outputAlias}/${modelId}`,
           object: "model",
           owned_by: outputAlias,
         };
-        // Live-catalog resolvers (kiro/qoder/github/clinepass) mostly only return
-        // { id, name } — no per-model capability data. Fall back to the same
-        // pattern-matched capabilities the dashboard uses (useModelCaps.js) so
-        // dynamically-discovered LLM models still surface vision/reasoning/search/tools.
-        // A custom-model row's persisted specs win when present: they were
-        // captured from the provider's own catalog at add time (see
-        // mergePersistedCapabilities for the merge rules).
-        const staticCaps = kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null;
-        const persistedCaps = lookupCustomCaps(customCapsByAliasId, [outputAlias, staticAlias, providerId], modelId);
-        const caps = persistedCaps
-          ? mergePersistedCapabilities(staticCaps, persistedCaps)
-          : liveCapabilitiesById.get(modelId)
-            || capabilitiesFromServiceKind(customKind || liveKind)
-            || staticCaps;
+        // Live-catalog resolvers vary: kimchi returns real per-model
+        // capabilities, most others only { id, name } (+ gateway signals like
+        // Qoder's is_reasoning/is_vl). Opaque or brand-new ids resolve
+        // dynamically from the live display name + signals — no per-model
+        // table needed, so renames and new models self-resolve.
+        const liveCaps = liveCapabilitiesById.get(modelId);
+        const serviceCaps = capabilitiesFromServiceKind(customKind || liveKind);
+        const live = liveById.get(modelId);
+        let caps = liveCaps || serviceCaps || (kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null);
+        if (live && (kind === LLM_KIND || allowAsLlm)) {
+          caps = getCapabilitiesForLiveModel(providerId, modelId, { ...live, capabilities: caps });
+          // Selectable efforts for the picker + CLI-tool consumers (dashboard,
+          // Codex, DSH, ZCode). The live display name resolves through the
+          // shared tables (family patterns, then format defaults); unknown
+          // names honestly omit the key instead of inventing levels.
+          if (caps?.reasoning && !caps.reasoningLevels && live.name && live.name !== modelId) {
+            const levels = getThinkingLevels(providerId, live.name);
+            if (levels?.length) caps = { ...caps, reasoningLevels: levels };
+          }
+        }
         if (caps) model.capabilities = caps;
         // Token limits under the snake_case names the OpenAI/OpenRouter
         // convention uses. `capabilities.contextWindow` is camelCase and nested,
@@ -729,7 +629,7 @@ export async function OPTIONS() {
  */
 export async function GET(request) {
   try {
-    // Detect cross-instance recursive /models fetch (another afrouter fetching our /models)
+    // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
     const data = await buildModelsList([LLM_KIND], { skipDynamicFetch });
     return Response.json({ object: "list", data }, {

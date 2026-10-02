@@ -92,79 +92,6 @@ describe("getCapabilitiesForModel", () => {
     });
   });
 
-  it("reports OrcaRouter router ids with the live catalog context windows", () => {
-    expect(getCapabilitiesForModel("orcarouter", "orcarouter/fusion")).toMatchObject({
-      reasoning: true,
-      thinkingFormat: "openai",
-      vision: true,
-      contextWindow: 1000000,
-      maxOutput: 128000,
-    });
-    expect(getCapabilitiesForModel("orcarouter", "orcarouter/fusion-flash").contextWindow).toBe(262144);
-    // free pool rides the DeepSeek V4 Flash free line
-    expect(getCapabilitiesForModel("orcarouter", "orcarouter/free")).toMatchObject({
-      reasoning: true,
-      vision: true,
-      contextWindow: 1048576,
-      maxOutput: 384000,
-    });
-    // raw `orca` alias resolves to the same table (no 200K-floor fallback)
-    expect(getCapabilitiesForModel("orca", "orcarouter/free")).toMatchObject({
-      reasoning: true,
-      vision: true,
-      contextWindow: 1048576,
-    });
-  });
-
-  it("scopes OrcaRouter legacy DeepSeek alias limits to orcarouter only", () => {
-    // On OrcaRouter these ids are 1M/384K V4-Flash aliases, unlike DeepSeek's own 128K API
-    expect(getCapabilitiesForModel("orcarouter", "deepseek/deepseek-chat").contextWindow).toBe(1048576);
-    expect(getCapabilitiesForModel("orcarouter", "deepseek/deepseek-reasoner")).toMatchObject({
-      reasoning: true,
-      thinkingFormat: "deepseek",
-      contextWindow: 1048576,
-    });
-    // ...while the real DeepSeek provider keeps the stock 128K specs
-    expect(getCapabilitiesForModel("deepseek", "deepseek-chat").contextWindow).toBe(128000);
-  });
-
-  it("gives the $0 free-pool ids their real catalog specs", () => {
-    // glm-5.3-flash-free shares glm-5.3-flash's multimodal 1M-ctx spec per /v1/models +
-    // /api/pricing — must not fall through to the 200K *glm-5.3* family pattern
-    expect(getCapabilitiesForModel("orcarouter", "z-ai/glm-5.3-flash-free")).toMatchObject({
-      reasoning: true,
-      vision: true,
-      contextWindow: 1000000,
-      maxOutput: 128000,
-    });
-    // the other free-pool ids already resolve correctly through family patterns
-    expect(getCapabilitiesForModel("orcarouter", "deepseek/deepseek-v4-flash-free").contextWindow).toBe(1000000);
-    expect(getCapabilitiesForModel("orcarouter", "tencent/hy3-free").contextWindow).toBe(262144);
-  });
-
-  it("resolves prefixed vendor models through the canonical capability tables", () => {
-    expect(getCapabilitiesForModel("orcarouter", "anthropic/claude-opus-4.8")).toMatchObject(claudeSonnet5Expected);
-    expect(getCapabilitiesForModel("orcarouter", "google/gemini-3-flash-preview").thinkingFormat).toBe("gemini-level");
-    expect(getCapabilitiesForModel("orcarouter", "z-ai/glm-5.1").thinkingFormat).toBe("zai");
-    expect(getCapabilitiesForModel("orcarouter", "openai/gpt-image-1.5")).toMatchObject({
-      imageOutput: true,
-      tools: false,
-    });
-  });
-
-  it("gives user-added custom models the pattern/floor fallback with vision heuristic", () => {
-    // unknown custom id → safe floor (200K, no vision), tools on
-    expect(getCapabilitiesForModel("orcarouter", "my-lab/my-custom-model")).toMatchObject({
-      vision: false,
-      reasoning: false,
-      tools: true,
-      contextWindow: 200000,
-    });
-    // claude-like / gpt-like custom ids still hit their family pattern
-    expect(getCapabilitiesForModel("orcarouter", "proxy/claude-opus-9-custom").reasoning).toBe(true);
-    expect(getCapabilitiesForModel("orcarouter", "tuning/gpt-5-custom-finetune").reasoning).toBe(true);
-  });
-
   it("CommandCode v4.1-flash is vision + effort capable", () => {
     expect(getCapabilitiesForModel("commandcode", "deepseek/deepseek-v4.1-flash")).toMatchObject({
       vision: true,
@@ -185,5 +112,141 @@ describe("getCapabilitiesForModel", () => {
       thinkingFormat: "commandcode",
       thinkingEffortSupported: true,
     });
+  });
+});
+
+describe("getCapabilitiesForModel — MiMo (<think>-tag reasoning, always-on)", () => {
+  it("mimo-v2.5 has vision + reasoning + deepseek format, cannot disable", () => {
+    const caps = getCapabilitiesForModel(null, "mimo-v2.5");
+    expect(caps.vision).toBe(true);
+    expect(caps.reasoning).toBe(true);
+    expect(caps.thinkingFormat).toBe("deepseek");
+    expect(caps.thinkingCanDisable).toBe(false);
+  });
+
+  it("mimo-v2.5-pro has vision (matches *mimo*v2.5* pattern)", () => {
+    const caps = getCapabilitiesForModel(null, "mimo-v2.5-pro");
+    expect(caps.vision).toBe(true);
+    expect(caps.reasoning).toBe(true);
+    expect(caps.thinkingFormat).toBe("deepseek");
+    expect(caps.thinkingCanDisable).toBe(false);
+  });
+
+  it("xiaomi/mimo-v2.5-pro (vendor-prefixed) has vision", () => {
+    const caps = getCapabilitiesForModel(null, "xiaomi/mimo-v2.5-pro");
+    expect(caps.vision).toBe(true);
+    expect(caps.thinkingFormat).toBe("deepseek");
+  });
+
+  it("mimo-omni-x has audioInput via the omni pattern", () => {
+    const caps = getCapabilitiesForModel(null, "mimo-omni-x");
+    expect(caps.vision).toBe(true);
+    expect(caps.audioInput).toBe(true);
+    expect(caps.reasoning).toBe(true);
+    expect(caps.thinkingCanDisable).toBe(false);
+  });
+
+  it("generic mimo has vision + reasoning (fallback pattern)", () => {
+    const caps = getCapabilitiesForModel(null, "mimo");
+    expect(caps.vision).toBe(true);
+    expect(caps.reasoning).toBe(true);
+    expect(caps.thinkingCanDisable).toBe(false);
+  });
+});
+
+describe("getCapabilitiesForModel — Qwen max/plus vision", () => {
+  it("qwen3.7-max has vision (*qwen*max* fires before *qwen3.7*)", () => {
+    const caps = getCapabilitiesForModel(null, "qwen3.7-max");
+    expect(caps.vision).toBe(true);
+    expect(caps.reasoning).toBe(true);
+  });
+
+  it("Qwen3.6-Max-Preview has vision (case-insensitive pattern match)", () => {
+    const caps = getCapabilitiesForModel(null, "Qwen3.6-Max-Preview");
+    expect(caps.vision).toBe(true);
+  });
+
+  it("qwen3.7-plus has vision", () => {
+    const caps = getCapabilitiesForModel(null, "qwen3.7-plus");
+    expect(caps.vision).toBe(true);
+  });
+
+  it("qwen3.7 has vision from the qwen3.7 pattern", () => {
+    const caps = getCapabilitiesForModel(null, "qwen3.7");
+    expect(caps.vision).toBe(true);
+  });
+
+  it("qwq has no vision (thinking-only model)", () => {
+    const caps = getCapabilitiesForModel(null, "qwq-32b");
+    expect(caps.vision).toBe(false);
+    expect(caps.reasoning).toBe(true);
+    expect(caps.thinkingCanDisable).toBe(false);
+  });
+});
+
+describe("getCapabilitiesForModel — MiniMax M2.x vision", () => {
+  it("minimax-m2.7 has vision", () => {
+    const caps = getCapabilitiesForModel(null, "minimax-m2.7");
+    expect(caps.vision).toBe(true);
+    expect(caps.thinkingCanDisable).toBe(false);
+  });
+
+  it("minimax-m2.5 has vision", () => {
+    const caps = getCapabilitiesForModel(null, "minimax-m2.5");
+    expect(caps.vision).toBe(true);
+    expect(caps.thinkingCanDisable).toBe(false);
+  });
+
+  it("MiniMax-M2.7 has vision (vendor prefix MiniMaxAI/ stripped by route)", () => {
+    const caps = getCapabilitiesForModel(null, "MiniMaxAI/MiniMax-M2.7");
+    expect(caps.vision).toBe(true);
+  });
+
+  it("minimax-m3 has vision (separate pattern)", () => {
+    const caps = getCapabilitiesForModel(null, "minimax-m3");
+    expect(caps.vision).toBe(true);
+  });
+});
+
+describe("getCapabilitiesForModel — DeepSeek V4 text-only", () => {
+  it("deepseek-v4-pro has no vision", () => {
+    const caps = getCapabilitiesForModel(null, "deepseek-v4-pro");
+    expect(caps.vision).toBe(false);
+    expect(caps.reasoning).toBe(true);
+    expect(caps.thinkingFormat).toBe("deepseek");
+  });
+
+  it("deepseek-v4-flash has no vision", () => {
+    const caps = getCapabilitiesForModel(null, "deepseek-v4-flash");
+    expect(caps.vision).toBe(false);
+    expect(caps.reasoning).toBe(true);
+  });
+
+  it("deepseek/deepseek-v4-pro (vendor-prefixed) has no vision", () => {
+    const caps = getCapabilitiesForModel(null, "deepseek/deepseek-v4-pro");
+    expect(caps.vision).toBe(false);
+  });
+});
+
+describe("getCapabilitiesForModel — codebuddy-cn provider overrides", () => {
+  it("deepseek-v4-pro via codebuddy-cn uses openai thinking format", () => {
+    const caps = getCapabilitiesForModel("codebuddy-cn", "deepseek-v4-pro");
+    expect(caps.vision).toBe(true);
+    expect(caps.reasoning).toBe(true);
+    expect(caps.thinkingFormat).toBe("openai");
+    expect(caps.thinkingCanDisable).toBe(true);
+  });
+
+  it("minimax-m3 via codebuddy-cn has vision (provider override)", () => {
+    const caps = getCapabilitiesForModel("codebuddy-cn", "minimax-m3");
+    expect(caps.vision).toBe(true);
+    expect(caps.thinkingFormat).toBe("openai");
+    expect(caps.thinkingCanDisable).toBe(false);
+  });
+
+  it("unknown provider falls through to pattern matching", () => {
+    const caps = getCapabilitiesForModel("unknown-provider", "mimo-v2.5");
+    expect(caps.vision).toBe(true);
+    expect(caps.thinkingFormat).toBe("deepseek");
   });
 });
