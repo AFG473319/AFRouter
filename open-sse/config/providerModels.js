@@ -2,7 +2,7 @@ import { PROVIDERS } from "./providers.js";
 import REGISTRY from "../providers/registry/index.js";
 // PROVIDER_MODELS now built from providers/registry (transport + models co-located)
 import { PROVIDER_MODELS } from "../providers/index.js";
-import { modelQuotaFamily, modelStrip, modelTargetFormat, modelSupportedFormats, normalizeModelId } from "../providers/models/schema.js";
+import { modelQuotaFamily, modelStrip, modelTargetFormat, modelSupportedFormats, normalizeModelId, providerDefaultTargetFormat } from "../providers/models/schema.js";
 import { CODEX_REVIEW_SUFFIX, isMuseSparkModel, opencodeFamilyFormats } from "../providers/models/helpers.js";
 import { FORMATS } from "../translator/formats.js";
 export { PROVIDER_MODELS };
@@ -19,6 +19,14 @@ export function getProviderModels(aliasOrId) {
 export function getDefaultModel(aliasOrId) {
   const models = PROVIDER_MODELS[aliasOrId];
   return models?.[0]?.id || null;
+}
+
+// Decisions-only SystemOne (TypeSafe Jev) detection. Restored after the v0.5.91
+// upstream merge dropped it: upstream has no SystemOne concept, so its version
+// of this file lost the export while our /v1/systemone route, model-test ping
+// and the typesafe registry still import it.
+export function isSystemOneModel(aliasOrId, modelId) {
+  return getModelTargetFormat(aliasOrId, modelId) === "systemone";
 }
 
 // Providers whose registry uses dots in version numbers (e.g. "claude-sonnet-4.5").
@@ -62,10 +70,28 @@ export function getModelTargetFormat(aliasOrId, modelId) {
   const models = PROVIDER_MODELS[aliasOrId];
   if (!models) return null;
   const found = findModel(models, modelId, aliasOrId);
-  if (found) return modelTargetFormat(found);
+  const explicit = modelTargetFormat(found);
+  if (explicit) return explicit;
   // Family fallback keeps modelsFetcher/passthrough ids on their endpoint lane
   if (isOpenCodeAlias(aliasOrId)) return opencodeFamilyFormats(modelId)?.targetFormat || null;
-  return null;
+  // Passthrough/unlisted ids inherit the provider's default format
+  // (TypeSafe AI: defaultTargetFormat "systemone" for every model).
+  return providerDefaultTargetFormat(findProviderDef(aliasOrId));
+}
+
+// Registry entries indexed by every key requests may arrive with. Restored after
+// the v0.5.91 upstream merge dropped it together with the defaultTargetFormat
+// fallback above.
+const PROVIDER_DEFS_BY_KEY = new Map();
+for (const entry of REGISTRY) {
+  for (const key of [entry.id, entry.alias, entry.uiAlias]) {
+    if (key && !PROVIDER_DEFS_BY_KEY.has(key)) PROVIDER_DEFS_BY_KEY.set(key, entry);
+  }
+}
+
+function findProviderDef(aliasOrId) {
+  if (!aliasOrId) return undefined;
+  return PROVIDER_DEFS_BY_KEY.get(aliasOrId);
 }
 
 // Declared upstream formats for a model (registry `supportedFormats`). Drives the

@@ -28,7 +28,11 @@ export default {
     { id: "muse-spark-1.2-contributor-free", name: "Muse Spark 1.2 Contributor Free", targetFormat: "openai-responses" },
     { id: "muse-spark-1.3-contributor-free", name: "Muse Spark 1.3 Contributor Free", targetFormat: "openai-responses" },
     { id: "union-alpha", name: "Union Alpha Free", targetFormat: "claude" },
-    { id: "jev-1.13-free", name: "Jev 1.13 Free", kind: "systemone" },
+    // Jev is a decisions-only System One model (TypeSafe): upstream serves it on
+// /zen/v1/systemone with {model, state, questions} — chat Completions is a 400
+// (guard in chatCore). The v0.5.91 upstream merge rewrote the entry with
+// `kind:"systemone"` (its media-type field); the routing field is targetFormat.
+{ id: "jev-1.13-free", name: "Jev 1.13 Free", targetFormat: "systemone" },
   ],
   serviceKinds: ["llm", "systemone"],
   systemoneConfig: {

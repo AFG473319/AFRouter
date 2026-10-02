@@ -25,6 +25,25 @@ export function _clearWeeklyCache() {
   weeklyCache.clear();
 }
 
+// — Paid tier label from a subscription tier id ————————————————
+// Restored after the v0.5.91 upstream merge dropped it: upstream's
+// antigravity-weekly.js has no tier concept, while our usage/google.js (and the
+// quota-pool tests) still import it.
+const TIER_LABELS = [
+  [/^free/i, "Free"],
+  [/plus/i, "Plus"],
+  [/pro/i, "Pro"],
+  [/ultra/i, "Ultra"],
+];
+
+export function tierFromPaidTierId(paidTierId) {
+  if (!paidTierId || typeof paidTierId !== "string") return null;
+  for (const [pattern, label] of TIER_LABELS) {
+    if (pattern.test(paidTierId)) return label;
+  }
+  return null;
+}
+
 // — Group-name and window to stable key mapping ——————————————————————
 const GROUP_CONFIGS = [
   {

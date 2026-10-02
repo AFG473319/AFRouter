@@ -7,6 +7,7 @@ import { normalizeOpenAILevel } from "../translator/concerns/thinkingUnified.js"
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { isMuseSparkModel } from "../providers/models/helpers.js";
+import { getModelTargetFormat, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
 import { applyFingerprintTools } from "../utils/opencodeFingerprint.js";
 import { ANTHROPIC_API_VERSION } from "../providers/shared.js";
 import {
@@ -262,6 +263,15 @@ function isMessagesModel(model) {
   return MESSAGES_MODELS.has(baseModelId(model));
 }
 
+// Decisions-only SystemOne models (Jev) route to /zen/v1/systemone and take
+// {model, state, questions} — not a chat payload. Restored after the v0.5.91
+// upstream merge rewrote this executor without our SystemOne support.
+// Registry is keyed by alias ("oc", not "opencode"): alias first, raw id second.
+function isSystemOneModel(model) {
+  return (getModelTargetFormat(PROVIDER_ID_TO_ALIAS.opencode, baseModelId(model))
+    ?? getModelTargetFormat("opencode", baseModelId(model))) === "systemone";
+}
+
 function resolveOpencodeSession(body, credentials, providerSessionId, clientTool) {
   const headers = credentials?.rawHeaders || {};
   const native = nativeSession(headers);
@@ -412,6 +422,13 @@ export class OpenCodeExecutor extends BaseExecutor {
   }
 
   transformRequest(model, body, stream, credentials) {
+    // SystemOne bodies ({model, state, questions}) are not chat payloads:
+    // never inject chat fingerprint tools or force stream on them.
+    const sysModel = model || body?.model;
+    if (sysModel && isSystemOneModel(sysModel)) {
+      if (body && typeof body === "object" && model && !body.model) body.model = model;
+      return body;
+    }
     if (body && typeof body === "object" && model && !body.model) body.model = model;
     // Zen rejects non-streaming requests on free models with 403 FreeTierError;
     // always stream upstream and let the handler layer aggregate for non-stream clients.
@@ -456,6 +473,7 @@ export class OpenCodeExecutor extends BaseExecutor {
 
   buildUrl(model) {
     const base = this.config.baseUrl;
+    if (isSystemOneModel(model)) return `${base}/zen/v1/systemone`;
     if (isResponsesModel(model)) return `${base}/zen/v1/responses`;
     if (isMessagesModel(model)) return `${base}/zen/v1/messages`;
     return `${base}/zen/v1/chat/completions`;
