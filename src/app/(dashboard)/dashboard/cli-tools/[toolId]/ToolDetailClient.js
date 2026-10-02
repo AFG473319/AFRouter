@@ -170,6 +170,9 @@ export default function ToolDetailClient({ toolId, machineId }) {
       case "deepseek-tui":
         return <DeepSeekTuiToolCard {...commonProps} activeProviders={getActiveProviders()} hasActiveProviders={hasActiveProviders} cloudEnabled={cloudEnabled} />;
       case "deepseek-harness":
+      // dsh is composed per Cordis profile and the card reads tool.dshProfile to
+      // pick its endpoint + patch path, so both entries share one card.
+      case "deepseek-harness-desktop":
         return <DeepSeekHarnessToolCard {...commonProps} activeProviders={getActiveProviders()} hasActiveProviders={hasActiveProviders} cloudEnabled={cloudEnabled} />;
       case "jcode":
         return <JcodeToolCard {...commonProps} activeProviders={getActiveProviders()} hasActiveProviders={hasActiveProviders} cloudEnabled={cloudEnabled} />;

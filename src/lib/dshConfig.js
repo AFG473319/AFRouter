@@ -2,42 +2,93 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { parseYAML, stringifyYAML } from "confbox/yaml";
-import { FALLBACK_SPEC, buildModelEntry } from "./dshModelSpecs.js";
+import { DESKTOP_PROFILE, WEB_PROFILE, LLM_PI_AI_ID, isPatchList } from "./dshProfilePatch.js";
 
-// DeepSeek Harness (dsh) integration helpers.
+// DeepSeek Harness (dsh) integration helpers — file I/O side.
 //
-// dsh keeps model routes in `$DSH_HOME/settings.yaml` under the `llm-pi-ai`
-// settings section, and secrets in `$DSH_HOME/.credentials.yaml` under `refs`.
-// AFRouter owns exactly one route (`llm-pi-ai.providers.afrouter`) and one
-// credential ref (`AFROUTER_API_KEY`); everything else in both documents is
-// preserved verbatim. See specs/002-deepseek-harness-integration/.
+// Two live documents, and only one of them is per-profile:
 //
-// Pure model-entry shapes live in `./dshModelSpecs.js` so the client card can
-// import them without this module's Node builtins.
+//   $DSH_HOME/profiles/<profile>/cordis.patch.yml   the profile's loader patch
+//     (the live plugin config; `llm-pi-ai.providers.afrouter` lives here). The
+//     Desktop app runs the `desktop` profile, `dsh web` runs `web`, so each
+//     profile needs its own write.
+//   $DSH_HOME/.credentials.yaml                     the credential store, shared
+//     by every profile.
+//
+// `$DSH_HOME/settings.yaml` is NOT read any more: dsh-settings imports it once
+// into the active profile patch and renames it `settings.yaml.imported`. See
+// ./dshProfilePatch.js for the patch semantics and why a write replaces a row's
+// whole config.
 
-export { FALLBACK_SPEC, buildModelEntry };
-
-export const ROUTE_KEY = "afrouter";
 export const CREDENTIAL_REF = "AFROUTER_API_KEY";
 export const DEFAULT_API_KEY = "sk_afrouter";
 
-const SETTINGS_SECTION = "llm-pi-ai";
+export const getDshHome = () => process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 
-export const getDshHome = () =>
-  process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
-
-export const getSettingsPath = () => path.join(getDshHome(), "settings.yaml");
+export const getProfilesDir = () => path.join(getDshHome(), "profiles");
+export const getProfileDir = (profile) => path.join(getProfilesDir(), profile);
+export const getPatchPath = (profile) => path.join(getProfileDir(profile), "cordis.patch.yml");
+// The machine-local layer that outranks EVERY profile layer. Because a patch
+// replaces a row's whole config, an `llm-pi-ai` row here would erase whatever
+// the profile row sets — so we never write it, but we must report it.
+export const getHomePatchPath = () => path.join(getDshHome(), "cordis.patch.yml");
 export const getCredentialsPath = () => path.join(getDshHome(), ".credentials.yaml");
+export const getLegacySettingsPath = () => path.join(getDshHome(), "settings.yaml");
+export const getImportedSettingsPath = () => path.join(getDshHome(), "settings.yaml.imported");
+
+export { DESKTOP_PROFILE, WEB_PROFILE };
 
 const isPlainObject = (value) =>
   !!value && typeof value === "object" && !Array.isArray(value);
 
-// Read + parse a YAML document. Missing -> { missing: true }; unparseable ->
-// { corrupt: true }. Never throws to the handler (SC-004).
-const readYaml = async (filePath) => {
+// A patch file must be a top-level ARRAY of entries (cordis-plugin-include
+// rejects anything else with "config file must be a top-level array of
+// entries"). Anything else is reported as corrupt rather than repaired.
+//
+// Returns { missing } | { corrupt } | { data }. Never throws.
+export const readPatchFile = async (profile) => {
   let raw;
   try {
-    raw = await fs.readFile(filePath, "utf-8");
+    raw = await fs.readFile(getPatchPath(profile), "utf-8");
+  } catch (error) {
+    if (error.code === "ENOENT") return { missing: true };
+    return { corrupt: true };
+  }
+  try {
+    const data = parseYAML(raw);
+    if (!isPatchList(data)) return { corrupt: true };
+    return { data };
+  } catch {
+    return { corrupt: true };
+  }
+};
+
+// Does the machine-local layer declare an `llm-pi-ai` row? Layer order is
+// bundles -> profile patch -> $DSH_HOME/cordis.patch.yml, and a patch replaces a
+// row's whole config, so a home-level `llm-pi-ai` row ERASES the profile row's
+// providers — an Apply would look successful and change nothing. Report it so
+// the card can say so instead of failing silently.
+export const homePatchShadowsLlmpiAi = async () => {
+  let raw;
+  try {
+    raw = await fs.readFile(getHomePatchPath(), "utf-8");
+  } catch {
+    return false;
+  }
+  try {
+    const data = parseYAML(raw);
+    if (!isPatchList(data)) return false;
+    return data.some((row) => isPlainObject(row) && row.id === LLM_PI_AI_ID);
+  } catch {
+    return false;
+  }
+};
+
+// Same contract for the credential store, which is a mapping.
+export const readCredentialsYaml = async () => {
+  let raw;
+  try {
+    raw = await fs.readFile(getCredentialsPath(), "utf-8");
   } catch (error) {
     if (error.code === "ENOENT") return { missing: true };
     return { corrupt: true };
@@ -49,9 +100,6 @@ const readYaml = async (filePath) => {
     return { corrupt: true };
   }
 };
-
-export const readSettingsYaml = () => readYaml(getSettingsPath());
-export const readCredentialsYaml = () => readYaml(getCredentialsPath());
 
 // Timestamped backup -> temp file -> atomic rename with EPERM/EACCES retries
 // (Windows file-lock races). Skips the backup when the target does not exist.
@@ -88,81 +136,29 @@ export const writeAtomic = async (filePath, content) => {
   return { backupPath };
 };
 
-// ─── settings.yaml ──────────────────────────────────────────────────────────
-
-const normalizeBaseUrl = (baseUrl) => {
-  const trimmed = String(baseUrl || "").replace(/\/+$/, "");
-  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
+const exists = async (candidate) => {
+  try {
+    await fs.access(candidate);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
-export const getAfrouterRoute = (settings) =>
-  settings?.[SETTINGS_SECTION]?.providers?.[ROUTE_KEY] || null;
-
-// Upsert the AFRouter route, merging models additively by id. Every other
-// section, provider and route field is preserved (FR-005).
-export const upsertAfrouterRoute = (settings, { baseUrl, models = [], specs = {}, compat = null }) => {
-  const next = isPlainObject(settings) ? settings : {};
-  const section = isPlainObject(next[SETTINGS_SECTION]) ? next[SETTINGS_SECTION] : {};
-  const providers = isPlainObject(section.providers) ? section.providers : {};
-  const route = isPlainObject(providers[ROUTE_KEY]) ? providers[ROUTE_KEY] : {};
-
-  route.displayName = "AFRouter";
-  route.apiKeyEnv = CREDENTIAL_REF;
-  route.api = "openai-completions";
-  route.baseURL = normalizeBaseUrl(baseUrl);
-  if (compat && Object.keys(compat).length > 0) {
-    route.compat = { ...(isPlainObject(route.compat) ? route.compat : {}), ...compat };
-  }
-
-  const existing = Array.isArray(route.models) ? route.models : [];
-  const byId = new Map(
-    existing
-      .filter((m) => m && typeof m === "object" && m.id)
-      .map((m) => [m.id, m]),
-  );
-  for (const id of models) {
-    byId.set(id, buildModelEntry(id, specs[id] || {}, compat));
-  }
-  route.models = [...byId.values()];
-
-  providers[ROUTE_KEY] = route;
-  section.providers = providers;
-  next[SETTINGS_SECTION] = section;
-  return next;
-};
-
-// Remove the AFRouter route. Drops the `llm-pi-ai` section only when it has
-// nothing left, and preserves any other top-level section.
-export const removeAfrouterRoute = (settings) => {
-  const next = isPlainObject(settings) ? settings : {};
-  const section = next[SETTINGS_SECTION];
-  if (!isPlainObject(section) || !isPlainObject(section.providers)) {
-    return { settings: next, entryRemoved: false };
-  }
-  if (!Object.prototype.hasOwnProperty.call(section.providers, ROUTE_KEY)) {
-    return { settings: next, entryRemoved: false };
-  }
-  delete section.providers[ROUTE_KEY];
-  if (Object.keys(section.providers).length === 0) delete section.providers;
-  if (Object.keys(section).length === 0) delete next[SETTINGS_SECTION];
-  return { settings: next, entryRemoved: true };
-};
-
-// Remove a single model from the AFRouter route; deletes the route when its
-// list empties.
-export const removeModelFromRoute = (settings, modelId) => {
-  const route = getAfrouterRoute(settings);
-  if (!route || !Array.isArray(route.models)) {
-    return { settings, removed: 0, entryRemoved: false };
-  }
-  const before = route.models.length;
-  route.models = route.models.filter((m) => m?.id !== modelId);
-  const removed = before - route.models.length;
-  if (route.models.length === 0) {
-    const { settings: cleaned, entryRemoved } = removeAfrouterRoute(settings);
-    return { settings: cleaned, removed, entryRemoved };
-  }
-  return { settings, removed, entryRemoved: false };
+// A profile counts as installed once its directory exists, which happens the
+// first time that profile is launched.
+export const isProfileInstalled = async (profile) => exists(getProfileDir(profile));
+// The harness home existing at all means dsh has been used — with EITHER
+// profile. Detection must not require the specific profile's directory, because
+// the common case this integration fixes is "the Desktop app was installed and
+// configured, and the profile patch exists but has no route yet".
+export const isHarnessInstalled = async () => {
+  if (await exists(getDshHome())) return true;
+  if (await exists(getProfilesDir())) return true;
+  if (await exists(getCredentialsPath())) return true;
+  // A pre-import install may still be sitting on the legacy document.
+  if (await exists(getLegacySettingsPath())) return true;
+  return false;
 };
 
 // ─── .credentials.yaml ──────────────────────────────────────────────────────
@@ -203,3 +199,5 @@ export const removeCredentialRef = (creds, { force = false } = {}) => {
 };
 
 export const stringifyYamlDocument = (value) => stringifyYAML(value);
+
+export { isPlainObject };

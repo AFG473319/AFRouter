@@ -59,7 +59,11 @@ jobs:
         working-directory: tests
 
       - name: Core tests (gate)
-        run: npx vitest run unit/standalone-assets.test.js unit/custom-server-peer-headers.test.js unit/capabilities.test.js unit/db-driver-chain.test.js
+        # unit/deepseek-harness-settings.test.js is a self-contained config-write
+        # test (temp DSH_HOME, no network) covering the per-profile dsh patch
+        # surface — promoted here so the Desktop/CLI profile targeting is gated
+        # rather than only advisory.
+        run: npx vitest run unit/standalone-assets.test.js unit/custom-server-peer-headers.test.js unit/capabilities.test.js unit/db-driver-chain.test.js unit/deepseek-harness-settings.test.js
         working-directory: tests
 
   full:
