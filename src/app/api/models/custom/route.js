@@ -1,15 +1,23 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel } from "@/models";
-import { CAPACITY_META, isSttTransport } from "@/shared/constants/models";
+import { CAPACITY_META, REASONING_EFFORT_LEVELS, isSttTransport } from "@/shared/constants/models";
 
 export const dynamic = "force-dynamic";
 
-// Whitelist capability keys to boolean values — ignore anything else
+// Whitelist capability keys to boolean values — ignore anything else.
+// `reasoningEfforts` is the one non-boolean: the per-model selectable levels a
+// source declared (Kilo's variant map, models.dev's effort ladder). It rides in
+// `caps` so a saved model keeps the levels the picker showed, and is validated
+// against the canonical ladder rather than trusted verbatim.
 function sanitizeCaps(caps) {
   if (!caps || typeof caps !== "object") return null;
   const clean = {};
   for (const key of Object.keys(CAPACITY_META)) {
     if (typeof caps[key] === "boolean") clean[key] = caps[key];
+  }
+  if (Array.isArray(caps.reasoningEfforts)) {
+    const efforts = [...new Set(caps.reasoningEfforts.filter((l) => REASONING_EFFORT_LEVELS.includes(l)))];
+    if (efforts.length) clean.reasoningEfforts = efforts;
   }
   return Object.keys(clean).length ? clean : null;
 }

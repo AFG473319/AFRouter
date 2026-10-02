@@ -35,7 +35,7 @@ beforeAll(async () => {
   // rather than skip every case below
   expect(typeof build).toBe("function");
   const { models, providers } = build(upstream, entries);
-  fs.writeFileSync(catalogFile, JSON.stringify({ v: 2, models, providers }));
+  fs.writeFileSync(catalogFile, JSON.stringify({ v: 3, models, providers }));
   ({ getCatalogModalities, invalidateCatalog } = await import("../../open-sse/providers/catalogOverride.js"));
   capabilities = await import("../../open-sse/providers/capabilities.js");
 });
@@ -169,7 +169,7 @@ describe("catalog schema", () => {
     }
     expect(sent[0]["if-none-match"]).toBeUndefined();
     const written = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
-    expect(written.v).toBe(2);
+    expect(written.v).toBe(3);
     expect(written.models["glm:glm-4.6v"]).toEqual({ vision: true });
   });
 

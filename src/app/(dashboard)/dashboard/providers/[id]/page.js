@@ -175,9 +175,16 @@ export default function ProviderDetailPage() {
     : (providerId === "qoder" || providerId === "qoder-cn") ? "PAT"
     : "API Key";
   // Resolve suffix "(level)" for a model when a thinking level is picked and the model supports it.
+  // Prefer the server's per-model set (/api/models caps.reasoningEfforts, which
+  // carries discovered levels) over the client bundle's format default.
+  const serverLevels = (modelId) =>
+    getCaps(`${providerAlias}/${modelId}`)?.reasoningEfforts
+    || getCaps(modelId)?.reasoningEfforts
+    || null;
+  const levelsFor = (modelId) => serverLevels(modelId) || getThinkingLevels(providerId, modelId);
   const resolveThinkingSuffix = (modelId) => {
     if (!thinkingMode || thinkingMode === "auto") return null;
-    const levels = getThinkingLevels(providerId, modelId);
+    const levels = levelsFor(modelId);
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
@@ -189,7 +196,7 @@ export default function ProviderDetailPage() {
     const addLevels = (modelId) => {
       if (!modelId || seen.has(modelId)) return;
       seen.add(modelId);
-      const lv = getThinkingLevels(providerId, modelId);
+      const lv = levelsFor(modelId);
       if (lv) lv.forEach((l) => { if (l !== "none") set.add(l); });
     };
     for (const m of models) addLevels(m.id);

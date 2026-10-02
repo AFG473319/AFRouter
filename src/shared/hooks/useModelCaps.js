@@ -49,6 +49,10 @@ function resolveCaps(byFull, byId, key) {
     vision: c.vision,
     search: c.search,
     reasoning: c.reasoning,
+    // Per-model selectable efforts. The browser copy of capabilities.js has no
+    // catalog source, so this only populates from the server's /api/models
+    // `caps` map — which is exactly where discovered levels live.
+    ...(c.reasoningLevels ? { reasoningEfforts: c.reasoningLevels } : {}),
     contextWindow: c.contextWindow,
     maxOutput: c.maxOutput,
   };

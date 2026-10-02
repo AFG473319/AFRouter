@@ -77,7 +77,13 @@ export function getThinkingLevels(provider, model) {
   const hit = PATTERN_THINKING.find((entry) =>
     (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
   );
-  let levels = modelLevels || hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
+  // Precedence: an exact Codex model entry, then a name-pattern override, then
+  // the per-model DISCOVERED level set (models.dev `reasoning_options`), then
+  // the format default. Discovery sits above the format default because it is a
+  // real per-model answer (`qwen3.8` vs `qwen3-max` differ), while the format
+  // table only describes the wire shape — but below the hand-authored
+  // overrides, which exist precisely to correct a provider's quirks.
+  let levels = modelLevels || hit?.levels || caps.reasoningLevels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
   if (caps.thinkingCanDisable === false) levels = levels.filter((l) => l !== "none");
   return levels;
 }

@@ -16,7 +16,9 @@ export const CATALOG_RAW_FILE = path.join(DATA_DIR, "model-catalog-raw.json");
 // Schema of the file this module reads. The writer stamps it; a file carrying an
 // older value predates provider-scoped modality keys, and its flat keys are not
 // looked up here, so the sync rebuilds it instead of asking upstream for a 304.
-export const CATALOG_VERSION = 2;
+// v3 adds the per-model `providers[model].reasoning` level set discovered from
+// models.dev `reasoning_options`; an older file lacks it, so the sync rebuilds.
+export const CATALOG_VERSION = 3;
 
 const EMPTY = { models: {}, providers: {} };
 let cache = EMPTY;
@@ -69,6 +71,16 @@ export function getCatalogLimits(provider, model) {
   return byProvider[model] || byProvider[baseId(model)] || null;
 }
 
+// Per-model reasoning level set discovered from models.dev (`reasoning_options`),
+// written by the sync under the model's `reasoning` key. `null` when the catalog
+// has no effort ladder for this model, so the hand-authored tables stay in
+// charge. Not part of `getLimits` because it is a capability, not a limit.
+export function getCatalogReasoning(provider, model) {
+  const byProvider = provider && load().providers[provider];
+  if (!byProvider) return null;
+  return byProvider[model]?.reasoning || byProvider[baseId(model)]?.reasoning || null;
+}
+
 // Force a re-read on the next lookup (called right after a sync writes the file).
 export function invalidateCatalog() {
   cachedMtime = -1;
@@ -78,5 +90,9 @@ export function invalidateCatalog() {
 // too, so it cannot import this file directly — the server pushes it in.
 export async function installCatalogSource() {
   const { setCatalogSource } = await import("./capabilities.js");
-  setCatalogSource({ getModalities: getCatalogModalities, getLimits: getCatalogLimits });
+  setCatalogSource({
+    getModalities: getCatalogModalities,
+    getLimits: getCatalogLimits,
+    getReasoning: getCatalogReasoning,
+  });
 }

@@ -46,6 +46,12 @@ export const CAPACITY_META = {
   reasoning: { icon: "neurology", label: "Reasoning", desc: "Supports reasoning / thinking", color: "text-amber-500" },
 };
 
+// Canonical reasoning-effort ladder accepted on custom models — the terminal
+// `none` plus the ordered efforts from open-sse/translator/concerns/thinking.js,
+// and the Codex-only `ultra` alias. Single source of truth for the API validator
+// (models/custom route) and any dashboard picker, so they cannot drift.
+export const REASONING_EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
 // Realtime STT transport markers accepted on custom models — single source of
 // truth across layers: the API whitelist (src/app/api/models/custom/route.js
 // sanitizeTransport) and the dashboard transport select

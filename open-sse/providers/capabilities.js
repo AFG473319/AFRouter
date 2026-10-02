@@ -460,6 +460,18 @@ export function aggregateComboCapabilities(comboModels, comboLookup = null, reso
     search:      allCaps.some((c) => c.search),
     tools:       allCaps.every((c) => c.tools),
     reasoning:          first.reasoning,
+    // Union of every member's selectable efforts: a combo can express any level
+    // any member supports, and the per-candidate reconciler maps the chosen
+    // level onto whichever member ultimately serves the request. Absent (not
+    // `[]`) when no member declares levels, so the picker can tell "no effort
+    // control" from "control with an empty set".
+    reasoningLevels:    (() => {
+      const union = new Set();
+      for (const c of allCaps) {
+        for (const l of (c.reasoningLevels || c.reasoningEfforts || [])) union.add(l);
+      }
+      return union.size ? [...union] : undefined;
+    })(),
     thinkingFormat:     first.thinkingFormat,
     thinkingCanDisable: first.thinkingCanDisable,
     thinkingRange:      first.thinkingRange,
@@ -568,6 +580,20 @@ function isCommandCodeTextOnly(model) {
   return false;
 }
 export function getCapabilitiesForModel(provider, model) {
+  const result = resolveCapabilities(provider, model);
+  // Discovered per-model reasoning levels (models.dev) apply uniformly, including
+  // to exact-table hits — those tables carry reasoning booleans but not a level
+  // vocabulary, and the catalog is the only machine-readable source for it.
+  const source = getCatalogSource();
+  const discovered = source?.getReasoning?.(provider, model);
+  if (discovered?.levels?.length) {
+    result.reasoning = true;
+    result.reasoningLevels = discovered.levels;
+  }
+  return result;
+}
+
+function resolveCapabilities(provider, model) {
   if (!model) return { ...DEFAULT_CAPABILITIES };
 
   // Canonical exact lookup strips vendor prefix: "anthropic/claude-opus-4.7" -> "claude-opus-4.7".
