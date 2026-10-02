@@ -1,3 +1,18 @@
+# v0.5.91 (2026-10-02)
+
+## Fixes
+- **Reasoning discovery reached almost no model, so every picker showed the same fallback ladder** (`off/low/medium/high/max`) and models that do reason were labelled "does not support reasoning". Three independent causes, all fixed:
+  - **The catalog was keyed by registry id but read by dashboard alias.** `/api/models`, the no-connections `/v1/models` path and every CLI-tool route hand the reader `oc`, `cl`, `kc`… while the file is written under `opencode`, `cline`, `kilocode`. The lookup missed silently and the caller fell back to its hardcoded defaults — discovery "worked" and nobody could see it. `open-sse/providers/catalogOverride.js` now resolves alias → registry id once, for all three getters, which also repairs modality and window discovery on those paths.
+  - **Only models a registry seeds were indexed.** `build()` walked each provider's static `models` array, but a `passthroughModels` gateway serves its real list through a `modelsFetcher` — so `space-bunny-free`, `big-pickle`, `longcat-2.5-preview-free`, `cline-free/*`, `stealth/*`, `stepfun/*`… were never in it and could never resolve. The sync now records a model's effort ladder for **every** model the upstream catalogs, filed under each local id, and registry providers with an empty seed list claim their upstream name too.
+  - **models.dev files some gateways under another id.** `PROVIDER_ALIASES` gains `cline → cline-pass` and `kilocode`/`kilo-gateway` → `kilo` (both Kilo providers fetch `api.kilo.ai/api/gateway/models`, exactly what models.dev catalogs as `kilo`; the ids match verbatim). The rule — add an entry only when the model ids actually overlap, because a wrong mapping files another service's ladder under our id — is now written next to the table.
+- **A reasoning model with no ladder is no longer reported as not reasoning.** models.dev marks toggle/budget models `reasoning: true` without publishing `reasoning_options`; that positive evidence now sets the capability, while the level set stays the hand tables' answer and the effort wire flag stays off (a toggle is not effort control). Stored as a separate `providers[model].reasons` key so `getCatalogReasoning` still reads "no ladder" as "no ladder".
+- **A live `/v1/models` row could blank out the discovered ladder.** The DeepSeek Harness routes preferred the live row wholesale; when a gateway's own resolver built it, it carried no levels and the static resolution (which reads the synced catalog) was never consulted. Levels and the reasoning flag are now backfilled from the static side.
+- **Catalog schema v3 → v4** so a current-looking etag cannot short-circuit the rebuild that adds the new rows; a v3 file only knows the seeded ids.
+
+Every DeepSeek Harness profile patch stores specs at Apply time, so the card must be **applied again** for the corrected per-model ladders to reach `cordis.patch.yml`.
+
+Tests: `tests/unit/reasoning-discovery.test.js` (alias resolution, passthrough indexing, `reasons` without levels) and `tests/unit/model-catalog-scope.test.js` (registry-driven upstream claims, schema version read from the constant) — both in the reasoning-effort set.
+
 # v0.5.90 (2026-10-02)
 
 ## Features

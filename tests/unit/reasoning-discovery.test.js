@@ -52,6 +52,18 @@ const upstream = {
       },
     },
   },
+  // A passthrough gateway: these ids are NOT in the registry snapshot's model
+  // list (they arrive through a modelsFetcher), which is what made every one of
+  // them fall back to the fixed ladder.
+  opencode: {
+    models: {
+      "space-bunny-free": {
+        reasoning: true,
+        reasoning_options: [{ type: "effort", values: ["low", "medium", "high", "xhigh", "max"] }],
+      },
+      "big-pickle": { reasoning: true },
+    },
+  },
 };
 
 const entries = [
@@ -60,18 +72,22 @@ const entries = [
   { provider: "ladder", model: "budget-model", current: { contextWindow: 200000, maxOutput: 128000 } },
   { provider: "ladder", model: "glm-5.2", current: { contextWindow: 200000, maxOutput: 128000 } },
   { provider: "ladder", model: "glm-4.6v", current: { contextWindow: 200000, maxOutput: 128000 } },
+  // Seed view only: the registry's static list for a passthrough provider does
+  // not contain space-bunny-free / big-pickle.
+  { provider: "opencode", model: "jev-1.13-free", current: { contextWindow: 200000, maxOutput: 32000 } },
 ];
 
-let build, getCatalogReasoning, capabilities, thinkingLevels;
+let build, getCatalogReasoning, getCatalogReasons, capabilities, thinkingLevels;
 
 beforeAll(async () => {
   ({ build } = await import("../../src/lib/modelCatalog/sync.js"));
-  ({ getCatalogReasoning } = await import("../../open-sse/providers/catalogOverride.js"));
+  let CATALOG_VERSION;
+  ({ getCatalogReasoning, getCatalogReasons, CATALOG_VERSION } = await import("../../open-sse/providers/catalogOverride.js"));
   capabilities = await import("../../open-sse/providers/capabilities.js");
   thinkingLevels = await import("../../open-sse/providers/thinkingLevels.js");
 
   const { models, providers } = build(upstream, entries);
-  fs.writeFileSync(catalogFile, JSON.stringify({ v: 3, models, providers }));
+  fs.writeFileSync(catalogFile, JSON.stringify({ v: CATALOG_VERSION, models, providers }));
   // Install the reader the same way the server does at startup. Restored to null
   // in afterAll so this file cannot perturb other suites through the process-wide
   // catalog slot.
@@ -79,6 +95,7 @@ beforeAll(async () => {
     getModalities: () => null,
     getLimits: () => null,
     getReasoning: getCatalogReasoning,
+    getReasons: getCatalogReasons,
   });
 });
 
@@ -133,6 +150,40 @@ describe("discovered reasoning levels", () => {
     // skipping the field — a toggle is not effort control.
     const caps = capabilities.getCapabilitiesForModel("ladder", "glm-4.6v");
     expect(caps.thinkingFormat).toBe("zai");
+    expect(caps.thinkingEffortSupported).toBe(false);
+  });
+
+  it("indexes a passthrough model the registry never seeds", () => {
+    // space-bunny-free is not in the static `models` list of its provider — it
+    // only exists because a modelsFetcher surfaces it — and that is precisely
+    // the case that used to fall through to the fixed fallback ladder.
+    const caps = capabilities.getCapabilitiesForModel("opencode", "space-bunny-free");
+    expect(caps.reasoning).toBe(true);
+    expect(caps.reasoningLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("resolves a dashboard alias to the registry id the file is keyed by", () => {
+    // /api/models, the no-connections /v1/models path and the CLI-tool routes
+    // hand the reader `oc`, not `opencode`. Without this the lookup misses the
+    // row silently and every consumer sees "no levels".
+    expect(getCatalogReasoning("oc", "space-bunny-free")).toEqual({
+      levels: ["low", "medium", "high", "xhigh", "max"],
+      canDisable: false,
+    });
+    expect(capabilities.getCapabilitiesForModel("oc", "space-bunny-free").reasoningLevels)
+      .toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("reports a reasoning model with no ladder as reasoning, but invents no levels", () => {
+    // big-pickle reasons (models.dev says so) yet publishes no ladder: it must
+    // stop being labelled "does not support reasoning" without being handed a
+    // vocabulary only the hand tables should choose.
+    expect(getCatalogReasoning("opencode", "big-pickle")).toBeNull();
+    expect(getCatalogReasons("opencode", "big-pickle")).toBe(true);
+    const caps = capabilities.getCapabilitiesForModel("oc", "big-pickle");
+    expect(caps.reasoning).toBe(true);
+    expect(caps.reasoningLevels).toBeUndefined();
+    // ...and a toggle is still not effort control.
     expect(caps.thinkingEffortSupported).toBe(false);
   });
 });

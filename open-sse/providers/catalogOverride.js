@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR } from "@/lib/dataDir.js";
+import { resolveProviderAlias } from "../services/model.js";
 
 export const CATALOG_FILE = path.join(DATA_DIR, "model-catalog.json");
 // Trimmed upstream catalog, read by the add-models skill (not by the router).
@@ -18,7 +19,19 @@ export const CATALOG_RAW_FILE = path.join(DATA_DIR, "model-catalog-raw.json");
 // looked up here, so the sync rebuilds it instead of asking upstream for a 304.
 // v3 adds the per-model `providers[model].reasoning` level set discovered from
 // models.dev `reasoning_options`; an older file lacks it, so the sync rebuilds.
-export const CATALOG_VERSION = 3;
+// v4 also records every gateway model's ladder/flag (not just the seeded ones a
+// registry lists) plus `providers[model].reasons`, so a v3 file — which only
+// knows the seeded ids — has to be rebuilt rather than trusted.
+export const CATALOG_VERSION = 4;
+
+// The file is keyed by registry id, because that is what the sync snapshots, but
+// callers hold whichever spelling they already had: `/api/models`, `/v1/models`
+// (no-connections path) and the CLI-tool routes hand this reader a dashboard
+// alias (`oc`, `cl`, `kc`). Resolving it here — once, for every getter — is what
+// makes a discovered ladder reach those call sites at all; looking up `oc:` in a
+// file keyed `opencode:` silently misses and the consumer falls back to its
+// hardcoded defaults.
+const localProvider = (provider) => (provider ? resolveProviderAlias(provider) : provider);
 
 const EMPTY = { models: {}, providers: {} };
 let cache = EMPTY;
@@ -60,13 +73,13 @@ function load() {
 // request to the router mode inherited a stranger's vision.
 export function getCatalogModalities(provider, model) {
   if (!provider) return null;
-  return load().models[`${provider}:${baseId(model)}`] || null;
+  return load().models[`${localProvider(provider)}:${baseId(model)}`] || null;
 }
 
 // Context and output limits are a property of the gateway too: each one
 // truncates differently, so these stay keyed by provider + model.
 export function getCatalogLimits(provider, model) {
-  const byProvider = provider && load().providers[provider];
+  const byProvider = provider && load().providers[localProvider(provider)];
   if (!byProvider) return null;
   return byProvider[model] || byProvider[baseId(model)] || null;
 }
@@ -76,9 +89,20 @@ export function getCatalogLimits(provider, model) {
 // has no effort ladder for this model, so the hand-authored tables stay in
 // charge. Not part of `getLimits` because it is a capability, not a limit.
 export function getCatalogReasoning(provider, model) {
-  const byProvider = provider && load().providers[provider];
+  const byProvider = provider && load().providers[localProvider(provider)];
   if (!byProvider) return null;
   return byProvider[model]?.reasoning || byProvider[baseId(model)]?.reasoning || null;
+}
+
+// Positive "this model reasons" evidence with no level ladder behind it: a
+// `toggle`/`budget_tokens` model reasons but exposes no selectable magnitude, so
+// it carries `reasons` instead of `reasoning`. Kept separate from the getter
+// above so "no ladder" still reads as "no ladder" — the hand tables own the
+// level set — while "does it reason at all" no longer defaults to "no".
+export function getCatalogReasons(provider, model) {
+  const byProvider = provider && load().providers[localProvider(provider)];
+  if (!byProvider) return false;
+  return !!(byProvider[model]?.reasons || byProvider[baseId(model)]?.reasons);
 }
 
 // Force a re-read on the next lookup (called right after a sync writes the file).
@@ -94,5 +118,6 @@ export async function installCatalogSource() {
     getModalities: getCatalogModalities,
     getLimits: getCatalogLimits,
     getReasoning: getCatalogReasoning,
+    getReasons: getCatalogReasons,
   });
 }
