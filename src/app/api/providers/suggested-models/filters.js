@@ -1,6 +1,7 @@
+import { kiloReasoningLevels } from "@/lib/kiloReasoning.js";
+
 // Free OpenCode models that don't use the "-free" id suffix
 const KNOWN_FREE_OPENCODE_MODELS = ["big-pickle"];
-
 // Upstream returns "Model is unavailable" for this id (2026-09-02) — re-enable when fixed
 const DEAD_FREE_OPENCODE_MODELS = new Set(["deepseek-v4-flash-free"]);
 
@@ -9,6 +10,29 @@ const DEAD_FREE_OPENCODE_MODELS = new Set(["deepseek-v4-flash-free"]);
 // fields are absent from /v1/models, so the id shape is the only signal —
 // same heuristic as "opencode-free".
 const isFreeModelId = (id) => /(^|[-_/:])free$/i.test(id || "");
+
+// Shared Kilo catalog mapping (kilo-free + kilo-gateway). Kept in one place so
+// the two surfaces cannot drift on specs or reasoning levels.
+const kiloCatalog = (models, { freeOnly }) =>
+  (Array.isArray(models) ? models : [])
+    .filter((m) => m?.id)
+    .filter((m) => !freeOnly || m.isFree === true)
+    .filter((m) => (m.architecture?.output_modalities || ["text"]).includes("text"))
+    .map((m) => {
+      const reasoning = kiloReasoningLevels(m);
+      return {
+        id: m.id,
+        name: m.name || m.id,
+        ...(Number.isSafeInteger(m.context_length) && m.context_length > 0
+          ? { contextLength: m.context_length }
+          : {}),
+        // Absent (not `[]`) when the model does not reason at all, so consumers
+        // can tell "no reasoning" from "reasons, no selectable effort".
+        ...(reasoning ? { reasoningEfforts: reasoning } : {}),
+      };
+    })
+    .sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0));
+
 
 export const FILTERS = {
   // Generic OpenAI-shaped /v1/models catalog (orcarouter, tokenrouter, venice, vercel, perplexity-agent).
@@ -74,18 +98,19 @@ export const FILTERS = {
   // needs a context floor (it is what hides 65k-128k free ids and, worse,
   // suggests $0 audio-output models like google/lyria-3-pro-preview as chat
   // models). isFree is authoritative and covers both cases.
-  "kilo-free": (models) =>
-    (Array.isArray(models) ? models : [])
-      .filter((m) => m?.id && m.isFree === true)
-      .filter((m) => (m.architecture?.output_modalities || ["text"]).includes("text"))
-      .map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        ...(Number.isSafeInteger(m.context_length) && m.context_length > 0
-          ? { contextLength: m.context_length }
-          : {}),
-      }))
-      .sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0)),
+  //
+  // `reasoningEfforts` is carried through because this is the ONLY place the
+  // catalog's per-model level map is available to the dashboard: Kilo publishes
+  // it under opencode.variants (a display-name → wire-effort map), and dropping
+  // it here is why Kilo models had no selectable reasoning levels. Levels are
+  // resolved at the picker, where the label the user sees carries its own wire
+  // value, so no nearest-level coercion is involved for a single model.
+  "kilo-free": (models) => kiloCatalog(models, { freeOnly: true }),
+
+  // Kilo Gateway shares the catalog and its level map but is not free-only: it
+  // is the paid/auto-routing surface (kilo-auto/*), so filtering on isFree
+  // would suggest nothing.
+  "kilo-gateway": (models) => kiloCatalog(models, { freeOnly: false }),
 
   "opencode-free": (models) =>
     models
