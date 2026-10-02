@@ -85,6 +85,7 @@ export default function ProviderDetailPage() {
   const stopOneByOneRef = useRef(false);
   const [importingQoderModels, setImportingQoderModels] = useState(false);
   const [importingClineModels, setImportingClineModels] = useState(false);
+  const [importingClineFreeModels, setImportingClineFreeModels] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -695,6 +696,55 @@ export default function ProviderDetailPage() {
     }
   };
 
+  // Fetch Cline's public free-tier feed (recommended-models `free[]`, no auth)
+  // and add every free model not yet present. Cline-only: clinepass has no
+  // free tier (its catalog comes from /models instead).
+  const handleImportClineFreeModels = async () => {
+    if (importingClineFreeModels) return;
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection) {
+      alert(translate("Please add an active Cline connection first"));
+      return;
+    }
+    setImportingClineFreeModels(true);
+    try {
+      const res = await fetch("/api/providers/cline/free-models");
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || translate("Failed to fetch models"));
+        return;
+      }
+      const models = data.models || [];
+      if (models.length === 0) {
+        alert(translate("No models returned"));
+        return;
+      }
+      let importedCount = 0;
+      for (const model of models) {
+        const modelId = model.id || model.name;
+        if (!modelId) continue;
+        const alreadyExists = customModels.some(
+          (entry) => entry.providerAlias === providerStorageAlias && entry.id === modelId && (entry.kind || entry.type || "llm") === "llm"
+        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${modelId}`);
+        if (alreadyExists) {
+          continue;
+        }
+        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
+        importedCount += 1;
+      }
+      if (importedCount === 0) {
+        alert(translate("All models already exist, no new models added"));
+      } else {
+        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
+      }
+    } catch (error) {
+      console.log("Error importing Cline free models:", error);
+      alert(translate("Error fetching models") + ": " + error.message);
+    } finally {
+      setImportingClineFreeModels(false);
+    }
+  };
+
   const handleRunOneByOneTest = async () => {
     if (oneByOneRunning || connections.length === 0) return;
 
@@ -1280,6 +1330,20 @@ export default function ProviderDetailPage() {
               {importingClineModels ? "progress_activity" : "download"}
             </span>
             {importingClineModels ? translate("Fetching...") : translate("Import from /models")}
+          </button>
+        )}
+
+        {/* Add Cline free models button — cline provider only (clinepass has no free tier) */}
+        {providerId === "cline" && connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={handleImportClineFreeModels}
+            disabled={importingClineFreeModels}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-green-500/40 px-3 py-2 text-xs text-green-600 dark:text-green-400 transition-colors hover:border-green-500 hover:bg-green-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-sm" style={importingClineFreeModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {importingClineFreeModels ? "progress_activity" : "download"}
+            </span>
+            {importingClineFreeModels ? translate("Fetching...") : translate("Add free models")}
           </button>
         )}
 

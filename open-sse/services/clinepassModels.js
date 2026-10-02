@@ -80,12 +80,14 @@ export async function resolveClinepassModels(credentials) {
 
 /**
  * Fetch Cline's recommended-models feed and return only its `free[]` tier.
+ * The feed is public (Cline's own SDK calls it unauthenticated), so no
+ * credentials are needed — this is what the dashboard's "Add free models"
+ * button serves for the cline provider.
  * Returns null on any failure — the free tier is additive, so a dead feed must
  * never take the /api/v1/models catalog down with it.
- * @param {{accessToken?: string, apiKey?: string}} credentials
  * @returns {Promise<{id: string, name: string}[] | null>}
  */
-async function fetchClineFreeTierModels() {
+export async function fetchClineFreeTierModels() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
