@@ -5,9 +5,13 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to publish (e.g. 0.5.91). Leave empty for a latest-only build from the default branch."
+        required: false
+        type: string
 
 env:
-  GHCR_IMAGE: ghcr.io/${{ github.repository }}
   DOCKERHUB_IMAGE: afg473319/afrouter
 
 jobs:
@@ -32,11 +36,18 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Registry references must be LOWERCASE. github.repository is
+          # "AFG473319/AFRouter", and while metadata-action/build-push-action
+          # lowercase the image tags for us, cache-from/cache-to are forwarded to
+          # buildx verbatim — which failed every image build since v0.5.90 with
+          # "repository name (AFG473319/AFRouter) must be lowercase".
+          GHCR_IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "ghcr_image=$GHCR_IMAGE" >> "$GITHUB_OUTPUT"
           # `images` is a comma-separated list and `dockerhub` is a SEPARATE
           # output. Writing the marker into the same heredoc made metadata-action
           # parse "dockerhub=false" as an image attribute and fail with
           # "Unknown image attribute" before the build ever started.
-          IMAGES="${{ env.GHCR_IMAGE }}"
+          IMAGES="$GHCR_IMAGE"
           if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
             IMAGES="$IMAGES,${{ env.DOCKERHUB_IMAGE }}"
             echo "dockerhub=true" >> "$GITHUB_OUTPUT"
@@ -67,6 +78,7 @@ jobs:
           images: ${{ steps.registries.outputs.images }}
           tags: |
             type=semver,pattern={{version}}
+            type=raw,value=${{ inputs.version || 'unused' }},enable=${{ inputs.version != null && inputs.version != '' }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
@@ -76,8 +88,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ steps.registries.outputs.ghcr_image }}:buildcache
+          cache-to: type=registry,ref=${{ steps.registries.outputs.ghcr_image }}:buildcache,mode=max
           platforms: linux/amd64,linux/arm64
           provenance: false
           sbom: false
