@@ -59,7 +59,15 @@ jobs:
         working-directory: tests
 
       - name: Core tests (gate)
-        run: npx vitest run unit/standalone-assets.test.js unit/custom-server-peer-headers.test.js unit/capabilities.test.js unit/db-driver-chain.test.js
+        # unit/deepseek-harness-settings.test.js is a self-contained config-write
+        # test (temp DSH_HOME, no network) covering the per-profile dsh patch
+        # surface — promoted here so the Desktop/CLI profile targeting is gated
+        # rather than only advisory.
+        #
+        # The four reasoning-effort files pin the canonical ladder + reconciler,
+        # Kilo's variant mapper, the models.dev discovery layer, and the
+        # combo-fallback acceptance case. All offline (no network, no creds).
+        run: npx vitest run unit/standalone-assets.test.js unit/custom-server-peer-headers.test.js unit/capabilities.test.js unit/db-driver-chain.test.js unit/deepseek-harness-settings.test.js unit/thinking-levels.test.js unit/kilo-reasoning.test.js unit/reasoning-discovery.test.js translator/thinking-combo-coercion.test.js
         working-directory: tests
 
   full:

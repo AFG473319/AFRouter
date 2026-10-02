@@ -11,6 +11,8 @@ import { GET as coworkGet } from "../cowork-settings/route";
 import { GET as clineGet } from "../cline-settings/route";
 import { GET as kiloGet } from "../kilo-settings/route";
 import { GET as deepseekTuiGet } from "../deepseek-tui-settings/route";
+import { GET as deepseekHarnessGet } from "../deepseek-harness-settings/route";
+import { GET as deepseekHarnessDesktopGet } from "../deepseek-harness-desktop-settings/route";
 import { GET as jcodeGet } from "../jcode-settings/route";
 import { GET as grokBuildGet } from "../grok-build-settings/route";
 import { GET as devinGet } from "../devin-settings/route";
@@ -32,6 +34,9 @@ const STATUS_GETTERS = {
   cline: clineGet,
   kilo: kiloGet,
   "deepseek-tui": deepseekTuiGet,
+  // Two dsh entries, two profiles: `web` for the CLI, `desktop` for the app.
+  "deepseek-harness": deepseekHarnessGet,
+  "deepseek-harness-desktop": deepseekHarnessDesktopGet,
   jcode: jcodeGet,
   "grok-build": grokBuildGet,
   devin: devinGet,

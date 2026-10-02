@@ -11,7 +11,30 @@ import { buildModelEntry, FALLBACK_SPEC } from "@/lib/dshModelSpecs.js";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { stringifyYAML } from "confbox/yaml";
 
-const ENDPOINT = "/api/cli-tools/deepseek-harness-settings";
+// DeepSeek Harness (dsh) dashboard card, shared by two registry entries.
+//
+// dsh is composed per Cordis *profile*, and each profile owns its own
+// `cordis.patch.yml` — the Desktop app runs `desktop` while `dsh web` runs
+// `web`. So the profile is a property of the tool, not of the form, and the
+// only per-variant differences are the profile name, the endpoint URL and the
+// framing copy. Everything else (models, specs, compat, default-model pin) is
+// identical, which is why one component serves both.
+const VARIANTS = {
+  web: {
+    profile: "web",
+    endpoint: "/api/cli-tools/deepseek-harness-settings",
+    patchPath: "~/.dsh/profiles/web/cordis.patch.yml",
+    title: "DeepSeek Harness",
+    appliedNote: "Pick the `afrouter` route in dsh's model picker.",
+  },
+  desktop: {
+    profile: "desktop",
+    endpoint: "/api/cli-tools/deepseek-harness-desktop-settings",
+    patchPath: "~/.dsh/profiles/desktop/cordis.patch.yml",
+    title: "DeepSeek Harness Desktop",
+    appliedNote: "Pick the `afrouter` route in the Desktop app's model picker.",
+  },
+};
 
 // The card has no live catalog, so the Manual Config preview resolves specs from
 // the static capability tables and falls back exactly like the route does.
@@ -38,6 +61,9 @@ export default function DeepSeekHarnessToolCard({
   tailscaleEnabled,
   tailscaleUrl,
 }) {
+  const variant = VARIANTS[tool?.dshProfile] || VARIANTS.web;
+  const ENDPOINT = variant.endpoint;
+
   const [status, setStatus] = useState(initialStatus || null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -52,6 +78,11 @@ export default function DeepSeekHarnessToolCard({
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [unverified, setUnverified] = useState([]);
   const [thinkingCompat, setThinkingCompat] = useState(false);
+  // Opt-in, like Pi/OMP's Startup toggle: never repoint what dsh starts on
+  // without an explicit choice.
+  const [setDefault, setSetDefault] = useState(false);
+  const [defaultModel, setDefaultModel] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState("");
   const selectedModelsRef = useRef([]);
 
   useEffect(() => {
@@ -75,7 +106,9 @@ export default function DeepSeekHarnessToolCard({
     }
   }, [isExpanded]);
 
-  // Hydrate the model list from the configured route.
+  // Hydrate the model list from the configured route. The default-model pin is
+  // deliberately NOT auto-enabled: showing an existing pin is informational, and
+  // turning the toggle on is the user's decision.
   useEffect(() => {
     if (status?.harness?.models) {
       setSelectedModels(status.harness.models);
@@ -83,7 +116,21 @@ export default function DeepSeekHarnessToolCard({
     if (typeof status?.harness?.thinkingCompat === "boolean") {
       setThinkingCompat(status.harness.thinkingCompat);
     }
+    if (status?.harness?.defaultModel) {
+      setDefaultModel(status.harness.defaultModel);
+      setReasoningEffort(status.harness.defaultReasoningEffort || "");
+    }
   }, [status]);
+
+  // Keep the pinned-model field valid as the selection changes. Derived during
+  // render rather than synced in an effect: a value that is no longer in the
+  // selection falls back to the first model, so no extra render pass is needed.
+  const effectiveDefaultModel =
+    selectedModels.length === 0
+      ? ""
+      : selectedModels.includes(defaultModel)
+        ? defaultModel
+        : selectedModels[0];
 
   const fetchModelAliases = async () => {
     try {
@@ -149,6 +196,9 @@ export default function DeepSeekHarnessToolCard({
           apiKey: keyToUse(),
           models: selectedModels,
           compat: thinkingCompat ? { thinkingFormat: "deepseek" } : null,
+          setDefault,
+          defaultModel: setDefault ? effectiveDefaultModel : undefined,
+          reasoningEffort: setDefault && reasoningEffort ? reasoningEffort : undefined,
         }),
       });
       const data = await res.json();
@@ -194,6 +244,9 @@ export default function DeepSeekHarnessToolCard({
         setSelectedModels([]);
         setUnverified([]);
         setThinkingCompat(false);
+        setSetDefault(false);
+        setDefaultModel("");
+        setReasoningEffort("");
         checkStatus();
       } else {
         setMessage({ type: "error", text: data.error || "Failed to reset settings" });
@@ -206,7 +259,7 @@ export default function DeepSeekHarnessToolCard({
   };
 
   // Snippet mirrors exactly what the route writes, through the same shared
-  // builder, so a remotely-pasted config behaves identically under a later
+  // builders, so a remotely-pasted config behaves identically under a later
   // dashboard Apply/Reset. Specs resolve from the static capability tables.
   const getManualConfigs = () => {
     const key = keyToUse() || "<API_KEY_FROM_DASHBOARD>";
@@ -215,39 +268,44 @@ export default function DeepSeekHarnessToolCard({
     const modelLines = stringifyYAML({ models: modelEntries })
       .trim()
       .split("\n")
-      .map((line) => `      ${line}`)
+      .map((line) => `          ${line}`)
       .join("\n");
 
-    const settingsYaml = `# ~/.dsh/settings.yaml (or $DSH_HOME/settings.yaml)
-llm-pi-ai:
-  providers:
-    afrouter:
-      displayName: AFRouter
-      apiKeyEnv: AFROUTER_API_KEY
-      api: openai-completions
-      baseURL: ${getNormalizedBaseUrl()}
+    const patchYaml = `# ${variant.patchPath} (or $DSH_HOME/profiles/${variant.profile}/cordis.patch.yml)
+# dsh imports a legacy settings.yaml ONCE and then renames it
+# settings.yaml.imported — this profile patch is the live config surface.
+# A patch replaces the whole config of the row it targets, so this row states
+# the complete providers map.
+- id: llm-pi-ai
+  config:
+    providers:
+      afrouter:
+        displayName: AFRouter
+        apiKeyEnv: AFROUTER_API_KEY
+        api: openai-completions
+        baseURL: ${getNormalizedBaseUrl()}
 ${modelLines}
 `;
 
-    const credentialsYaml = `# ~/.dsh/.credentials.yaml (or $DSH_HOME/.credentials.yaml)
+    const credentialsYaml = `# ~/.dsh/.credentials.yaml (or $DSH_HOME/.credentials.yaml) — shared by every profile
 version: 1
 
 refs:
   AFROUTER_API_KEY: ${key}
 `;
 
-    const defaultModelSnippet = `# Optional: pin a default model via your dsh profile composition
-# (cordis.patch.yml), not settings.yaml.
-- name: '@deepseek-ai/dsh-agent-default-model'
+    const defaultModelSnippet = `# Optional: pin the model a fresh session starts on (same profile patch)
+- id: agent-default-model
   config:
     provider: afrouter
     model: ${models[0]}
+    reasoningEffort: high
 `;
 
     return [
-      { filename: "settings.yaml", content: settingsYaml },
+      { filename: `cordis.patch.yml (${variant.profile} profile)`, content: patchYaml },
       { filename: ".credentials.yaml", content: credentialsYaml },
-      { filename: "cordis.patch.yml (optional)", content: defaultModelSnippet },
+      { filename: "cordis.patch.yml — optional default model", content: defaultModelSnippet },
     ];
   };
 
@@ -276,7 +334,7 @@ refs:
           {checking && (
             <div className="flex items-center gap-2 text-text-muted">
               <span className="material-symbols-outlined animate-spin">progress_activity</span>
-              <span>Checking DeepSeek Harness...</span>
+              <span>Checking {variant.title}...</span>
             </div>
           )}
 
@@ -286,11 +344,13 @@ refs:
                 <div className="flex items-start gap-3">
                   <span className="material-symbols-outlined text-yellow-500">warning</span>
                   <div className="flex-1">
-                    <p className="font-medium text-yellow-600 dark:text-yellow-400">DeepSeek Harness not detected locally</p>
+                    <p className="font-medium text-yellow-600 dark:text-yellow-400">{variant.title} not detected locally</p>
                     <p className="text-sm text-text-muted mt-1">
-                      dsh keeps its state in <code className="px-1 bg-black/5 dark:bg-white/5 rounded">$DSH_HOME</code> (default <code className="px-1 bg-black/5 dark:bg-white/5 rounded">~/.dsh</code>). Run it once to create it:
+                      dsh keeps its state in <code className="px-1 bg-black/5 dark:bg-white/5 rounded">$DSH_HOME</code> (default <code className="px-1 bg-black/5 dark:bg-white/5 rounded">~/.dsh</code>). Launch it once to create the profile tree:
                     </p>
-                    <code className="block mt-2 p-2 bg-black/20 rounded text-xs font-mono">npx @deepseek-ai/dsh web</code>
+                    <code className="block mt-2 p-2 bg-black/20 rounded text-xs font-mono">
+                      {variant.profile === "desktop" ? "DeepSeek Harness (Desktop app)" : "npx @deepseek-ai/dsh web"}
+                    </code>
                     <p className="text-sm text-text-muted mt-2">Manual configuration is still available if AFRouter is deployed on a remote server.</p>
                   </div>
                 </div>
@@ -310,10 +370,16 @@ refs:
                   <h4 className="font-medium mb-3">Installation Guide</h4>
                   <div className="space-y-3 text-sm">
                     <div>
-                      <p className="text-text-muted mb-1">Run without installing (Node.js 22.19+):</p>
-                      <code className="block px-3 py-2 bg-black/5 dark:bg-white/5 rounded font-mono text-xs">npx @deepseek-ai/dsh web</code>
+                      <p className="text-text-muted mb-1">
+                        {variant.profile === "desktop"
+                          ? "Install the DeepSeek Harness Desktop app and launch it once, so it creates its desktop profile:"
+                          : "Run without installing (Node.js 22.19+):"}
+                      </p>
+                      <code className="block px-3 py-2 bg-black/5 dark:bg-white/5 rounded font-mono text-xs">
+                        {variant.profile === "desktop" ? "~/.dsh/profiles/desktop/ is created on first launch" : "npx @deepseek-ai/dsh web"}
+                      </code>
                     </div>
-                    <p className="text-text-muted">Config lives at <code className="px-1 bg-black/5 dark:bg-white/5 rounded">~/.dsh/settings.yaml</code>. Click &quot;Apply&quot; to auto-configure.</p>
+                    <p className="text-text-muted">Config lives at <code className="px-1 bg-black/5 dark:bg-white/5 rounded">{variant.patchPath}</code>. Click &quot;Apply&quot; to auto-configure.</p>
                   </div>
                 </div>
               )}
@@ -343,7 +409,21 @@ refs:
                 {status.corrupt && (
                   <div className="flex items-start gap-2 p-2 rounded text-xs bg-red-500/10 text-red-600 dark:text-red-400">
                     <span className="material-symbols-outlined text-[14px] mt-0.5">error</span>
-                    <span>settings.yaml could not be parsed. Fix or restore it before applying — AFRouter will not overwrite a file it cannot read.</span>
+                    <span>cordis.patch.yml could not be parsed (it must be a top-level YAML array of entries). Fix or restore it before applying — AFRouter will not overwrite a file it cannot read.</span>
+                  </div>
+                )}
+
+                {status.homePatchShadows && (
+                  <div className="flex items-start gap-2 p-2 rounded text-xs bg-red-500/10 text-red-600 dark:text-red-400">
+                    <span className="material-symbols-outlined text-[14px] mt-0.5">error</span>
+                    <span>A higher-precedence <code className="px-1 bg-black/5 dark:bg-white/5 rounded">$DSH_HOME/cordis.patch.yml</code> also declares an <code className="px-1 bg-black/5 dark:bg-white/5 rounded">llm-pi-ai</code> row, which replaces this profile&apos;s whole provider config. Remove that row (or its <code className="px-1 bg-black/5 dark:bg-white/5 rounded">afrouter</code> provider) or Apply here will have no effect.</span>
+                  </div>
+                )}
+
+                {status.legacyImported && !status.hasAFRouter && (
+                  <div className="flex items-start gap-2 p-2 rounded text-xs bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
+                    <span className="material-symbols-outlined text-[14px] mt-0.5">history</span>
+                    <span>A legacy settings.yaml was imported earlier and renamed to settings.yaml.imported. Any route in it is not live — use Apply below to write the {variant.profile} profile patch.</span>
                   </div>
                 )}
 
@@ -427,6 +507,52 @@ refs:
                     </Tooltip>
                   </label>
                 </div>
+
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-start sm:gap-2">
+                  <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm pt-1">Default model</span>
+                  <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline mt-1.5">arrow_forward</span>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input type="checkbox" checked={setDefault} onChange={(e) => setSetDefault(e.target.checked)} className="w-3.5 h-3.5 accent-primary cursor-pointer" />
+                      <span className="text-xs text-text-muted">Start fresh sessions on AFRouter</span>
+                      <Tooltip text="Sets the agent-default-model row (provider: afrouter) in this profile patch. Off by default because it changes which model dsh starts on. Reset only clears it while it still points at afrouter.">
+                        <span className="material-symbols-outlined text-text-muted text-[14px] cursor-help">info</span>
+                      </Tooltip>
+                    </label>
+                    {setDefault && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={effectiveDefaultModel}
+                          onChange={(e) => setDefaultModel(e.target.value)}
+                          className="px-2 py-1 rounded border border-border bg-surface text-xs text-text-main"
+                        >
+                          {selectedModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        <select
+                          value={reasoningEffort}
+                          onChange={(e) => setReasoningEffort(e.target.value)}
+                          className="px-2 py-1 rounded border border-border bg-surface text-xs text-text-main"
+                        >
+                          {/* pi-ai's thinking levels (THINKING_LEVELS in dsh-llm-pi-ai). */}
+                          <option value="">Default effort</option>
+                          <option value="off">off</option>
+                          <option value="minimal">minimal</option>
+                          <option value="low">low</option>
+                          <option value="medium">medium</option>
+                          <option value="high">high</option>
+                          <option value="xhigh">xhigh</option>
+                          <option value="max">max</option>
+                        </select>
+                      </div>
+                    )}
+                    {!setDefault && status?.harness?.defaultModel && (
+                      <span className="text-xs text-text-muted">
+                        Currently pinned to <code className="px-1 bg-black/5 dark:bg-white/5 rounded">{status.harness.defaultModel}</code>
+                        {status.harness.defaultReasoningEffort ? ` (${status.harness.defaultReasoningEffort})` : ""}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {message && (
@@ -469,14 +595,14 @@ refs:
           modelAliases={modelAliases}
           addedModelValues={selectedModels}
           closeOnSelect={false}
-          title="Add Model for DeepSeek Harness"
+          title={`Add Model for ${variant.title}`}
         />
       )}
 
       <ManualConfigModal
         isOpen={showManualConfigModal}
         onClose={() => setShowManualConfigModal(false)}
-        title="DeepSeek Harness - Manual Configuration"
+        title={`${variant.title} - Manual Configuration`}
         configs={getManualConfigs()}
       />
     </Card>
