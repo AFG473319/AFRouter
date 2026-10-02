@@ -19,6 +19,7 @@ import { GET as zcodeGet } from "../zcode-settings/route";
 import { GET as zedGet } from "../zed-settings/route";
 import { GET as workbuddyGet } from "../workbuddy-settings/route";
 import { GET as deepseekHarnessGet } from "../deepseek-harness-settings/route";
+import { GET as deepseekHarnessDesktopGet } from "../deepseek-harness-desktop-settings/route";
 import { GET as ompGet } from "../omp-settings/route";
 import { GET as mimocodeGet } from "../mimocode-settings/route";
 
@@ -41,6 +42,8 @@ const STATUS_GETTERS = {
   zed: zedGet,
   workbuddy: workbuddyGet,
   "deepseek-harness": deepseekHarnessGet,
+  // Two dsh entries, two profiles: `web` for the CLI, `desktop` for the app.
+  "deepseek-harness-desktop": deepseekHarnessDesktopGet,
   mimocode: mimocodeGet,
   omp: ompGet,
 };
