@@ -14,7 +14,7 @@ const CHAT_ONLY = ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vi
 const CLAUDE_CAPABLE = ["claude-fable-5", "claude-fable-5-1", "claude-opus-5",
   "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
   "claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-sonnet-4",
-  "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "union-alpha"];
+  "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus"];
 // Models that also expose the OpenAI /responses endpoint
 const RESPONSES_CAPABLE = ["gpt-6-astra",
   "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
@@ -49,7 +49,7 @@ describe("OpenCode Zen model catalog", () => {
 });
 
 describe("OpenCode Zen per-model supportedFormats", () => {
-  it("declares [claude] for Claude + Qwen + union-alpha models", () => {
+  it("declares [claude] for Claude + Qwen models", () => {
     for (const m of CLAUDE_CAPABLE) {
       expect(getModelSupportedFormats("ocz", m)).toEqual(["claude"]);
     }

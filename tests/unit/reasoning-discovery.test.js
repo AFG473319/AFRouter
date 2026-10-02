@@ -39,6 +39,17 @@ const upstream = {
         reasoning: true,
         reasoning_options: [{ type: "budget_tokens", min: 1024, max: 32768 }],
       },
+      // A real zai-format id: its exact table entry short-circuits the
+      // *glm-5.2* pattern, so without derivation the wire flag stays false.
+      "glm-5.2": {
+        reasoning: true,
+        reasoning_options: [{ type: "effort", values: ["high", "max"] }],
+      },
+      // A 4.x id: toggle-only upstream, so the wire flag must stay false.
+      "glm-4.6v": {
+        reasoning: true,
+        reasoning_options: [{ type: "toggle" }],
+      },
     },
   },
 };
@@ -47,6 +58,8 @@ const entries = [
   { provider: "ladder", model: "ladder-model", current: { contextWindow: 200000, maxOutput: 128000 } },
   { provider: "ladder", model: "toggle-model", current: { contextWindow: 200000, maxOutput: 128000 } },
   { provider: "ladder", model: "budget-model", current: { contextWindow: 200000, maxOutput: 128000 } },
+  { provider: "ladder", model: "glm-5.2", current: { contextWindow: 200000, maxOutput: 128000 } },
+  { provider: "ladder", model: "glm-4.6v", current: { contextWindow: 200000, maxOutput: 128000 } },
 ];
 
 let build, getCatalogReasoning, capabilities, thinkingLevels;
@@ -103,5 +116,23 @@ describe("discovered reasoning levels", () => {
     // rather than returning the discovery result.
     const caps = capabilities.getCapabilitiesForModel("ladder", "toggle-model");
     expect(caps.reasoningLevels).toBeUndefined();
+  });
+
+  it("auto-recognizes the wire flag for a zai model with a discovered ladder", () => {
+    // "glm-5.2" hits an exact table entry (zai format, no flag) that
+    // short-circuits the *glm-5.2* pattern — the flag must come from the
+    // discovered ladder instead of a hand edit on the entry.
+    const caps = capabilities.getCapabilitiesForModel("ladder", "glm-5.2");
+    expect(caps.thinkingFormat).toBe("zai");
+    expect(caps.reasoningLevels).toEqual(["high", "max"]);
+    expect(caps.thinkingEffortSupported).toBe(true);
+  });
+
+  it("keeps the wire flag off for a toggle-only model", () => {
+    // Upstream publishes no effort ladder for 4.x, so the zai wire keeps
+    // skipping the field — a toggle is not effort control.
+    const caps = capabilities.getCapabilitiesForModel("ladder", "glm-4.6v");
+    expect(caps.thinkingFormat).toBe("zai");
+    expect(caps.thinkingEffortSupported).toBe(false);
   });
 });

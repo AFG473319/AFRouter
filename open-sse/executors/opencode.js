@@ -39,7 +39,6 @@ const RESPONSES_MODELS = new Set([
   "muse-spark-1.2-contributor-free",
   "muse-spark-1.3-contributor-free",
 ]);
-const MESSAGES_MODELS = new Set(["union-alpha"]);
 
 let lastTimestamp = 0;
 let counter = 0;
@@ -260,7 +259,12 @@ function isResponsesModel(model) {
 }
 
 function isMessagesModel(model) {
-  return MESSAGES_MODELS.has(baseModelId(model));
+  // Registry-driven (not a hardcoded set): any model whose registry entry
+  // targets the Claude wire routes to /zen/v1/messages. Retired ids simply
+  // stop matching, and future claude-target models route with no code change.
+  const base = baseModelId(model);
+  return (getModelTargetFormat(PROVIDER_ID_TO_ALIAS.opencode, base)
+    ?? getModelTargetFormat("opencode", base)) === "claude";
 }
 
 // Decisions-only SystemOne models (Jev) route to /zen/v1/systemone and take

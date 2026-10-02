@@ -44,14 +44,25 @@ vi.mock("next/server", () => ({
 const RESOLVABLE = new Set([
   "cl/z-ai/glm-5.3-flash",
   "oc/mimo-v2.5-free",
+  "cl/z-ai/glm-5.3",
 ]);
+
+// Levels a discovered catalog would attach (models.dev effort ladder). Only
+// glm-5.3 carries them, so the suite can tell "real per-model variants" apart
+// from the hardcoded fallback every other resolvable id gets.
+const DISCOVERED_LEVELS = {
+  "cl/z-ai/glm-5.3": ["low", "medium", "high", "max"],
+};
 
 vi.mock("open-sse/providers/capabilities.js", () => ({
   getCapabilitiesForModel: (provider, model) => {
     const key = provider ? `${provider}/${model}` : model;
-    return RESOLVABLE.has(key)
-      ? { contextWindow: 1000000, maxOutput: 131072, reasoning: true, vision: false }
-      : { contextWindow: Number.NaN, maxOutput: Number.NaN };
+    if (!RESOLVABLE.has(key)) {
+      return { contextWindow: Number.NaN, maxOutput: Number.NaN };
+    }
+    const caps = { contextWindow: 1000000, maxOutput: 131072, reasoning: true, vision: false };
+    if (DISCOVERED_LEVELS[key]) caps.reasoningLevels = DISCOVERED_LEVELS[key];
+    return caps;
   },
 }));
 
@@ -233,6 +244,19 @@ describe("POST /api/cli-tools/zcode-settings", () => {
     await post({ baseUrl: "http://localhost:20128/v1", models: ["unknown/no-reasoning-model"] });
     const cfg = readConfigFile();
     expect(findEntry(cfg).models["unknown/no-reasoning-model"].reasoning).toBeUndefined();
+  });
+
+  it("writes real per-model variants from the discovered ladder, not the hardcoded set", async () => {
+    // The capabilities mock above attaches reasoningLevels to cl/z-ai/glm-5.3
+    // (standing in for a models.dev effort ladder); every other resolvable id
+    // has no levels and takes the hardcoded fallback.
+    writeFixture({ provider: {} });
+    const res = await post({ baseUrl: "http://localhost:20128/v1", models: ["cl/z-ai/glm-5.3"] });
+    expect(res.status).toBe(200);
+    const m = findEntry(readConfigFile()).models["cl/z-ai/glm-5.3"];
+    expect(m.reasoning.enabled).toBe(true);
+    expect(m.reasoning.variants).toEqual(["low", "medium", "high", "max"]);
+    expect(m.reasoning.defaultVariant).toBe("max");
   });
 
   it("refreshes limit/modalities of an existing model but preserves variants/name/priority (FR-005)", async () => {

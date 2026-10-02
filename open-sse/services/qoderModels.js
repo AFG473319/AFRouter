@@ -367,10 +367,19 @@ export function routableQoderModels(catalog) {
   if (!catalog) return [];
   const out = [];
   const seen = new Set();
+  // Live per-model signals ride along (is_reasoning/is_vl/limits): /v1/models
+  // resolves opaque gateway keys dynamically from them instead of a hand-kept
+  // table, so renames and brand-new keys keep correct specs automatically.
+  const signals = (m) => ({
+    ...(m?.isReasoning ? { isReasoning: true } : {}),
+    ...(m?.isVL ? { isVL: true } : {}),
+    ...(Number.isFinite(m?.contextLength) ? { contextLength: m.contextLength } : {}),
+    ...(Number.isFinite(m?.maxOutputTokens) ? { maxOutputTokens: m.maxOutputTokens } : {}),
+  });
   for (const m of catalog.models || []) {
     if (!m?.id || seen.has(m.id)) continue;
     seen.add(m.id);
-    out.push({ id: m.id, name: m.name || m.id, hidden: false });
+    out.push({ id: m.id, name: m.name || m.id, hidden: false, ...signals(m) });
   }
   for (const [key, cfg] of catalog.rawConfigs || []) {
     if (!key || seen.has(key)) continue;

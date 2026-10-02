@@ -1,12 +1,31 @@
 // Unit tests for unified thinking normalization (thinkingUnified.js).
 // Covers extract, suffix parse, and per-provider apply per MATRIX (.docs/thinking/plan.md).
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   parseSuffix,
   extractThinking,
   applyThinking,
 } from "../../open-sse/translator/concerns/thinkingUnified.js";
 import { extractReasoningText } from "../../open-sse/translator/concerns/reasoning.js";
+import { setCatalogSource } from "../../open-sse/providers/capabilities.js";
+
+// The zai wire gate (thinkingEffortSupported) is auto-recognized from the
+// synced catalog in production: an upstream effort ladder is positive evidence
+// the model takes effort control. This stub stands in for that catalog source
+// so the GLM tests below exercise the production path, not the sourceless
+// fallback. Restored afterwards so no other file in the suite observes it.
+const GLM_LADDER = { levels: ["low", "high", "max"], canDisable: false };
+beforeEach(() => {
+  setCatalogSource({
+    getModalities: () => null,
+    getLimits: () => null,
+    getReasoning: (provider, model) =>
+      String(model || "").toLowerCase().startsWith("glm-5") ? GLM_LADDER : null,
+  });
+});
+afterEach(() => {
+  setCatalogSource(null);
+});
 
 const apply = (targetFormat, model, body, provider) => {
   const b = JSON.parse(JSON.stringify(body));

@@ -173,7 +173,7 @@ describe("applyQoderContextTier", () => {
 describe("routableQoderModels", () => {
   it("lists visible models first, then hidden (enable:false) catalog keys", () => {
     const catalog = {
-      models: [{ id: "qmodel_38max", name: "Qwen3.8-Max" }],
+      models: [{ id: "qmodel_38max", name: "Qwen3.8-Max", isReasoning: true, contextLength: 262144 }],
       rawConfigs: new Map([
         ["qmodel_38max", { key: "qmodel_38max", enable: true }],
         ["qfmodel", { key: "qfmodel", enable: false, display_name: "Qwen Fast" }],
@@ -181,7 +181,7 @@ describe("routableQoderModels", () => {
       ]),
     };
     expect(routableQoderModels(catalog)).toEqual([
-      { id: "qmodel_38max", name: "Qwen3.8-Max", hidden: false },
+      { id: "qmodel_38max", name: "Qwen3.8-Max", hidden: false, isReasoning: true, contextLength: 262144 },
       { id: "qfmodel", name: "Qwen Fast", hidden: true },
       { id: "dmodel", name: "dmodel", hidden: true },
     ]);

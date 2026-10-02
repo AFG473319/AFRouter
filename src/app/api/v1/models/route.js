@@ -17,7 +17,8 @@ import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
-import { capabilitiesFromServiceKind, getCapabilitiesForModel, aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
+import { capabilitiesFromServiceKind, getCapabilitiesForModel, getCapabilitiesForLiveModel, aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 
 // Qoder shares one live resolver across intl (qoder) and CN (qoder-cn); the
 // credentials carry the provider id so qoderModels picks the right region's
@@ -35,9 +36,21 @@ async function resolveQoderLiveModels(conn, provider) {
     providerSpecificData: conn.providerSpecificData || {}
   });
   // Visible + hidden (enable:false) catalog keys — chat routes all of them.
+  // Live per-model signals (isReasoning/isVL/limits) ride along so
+  // buildModelsList can resolve capabilities dynamically instead of
+  // pattern-matching opaque gateway keys.
   const models = routableQoderModels(result);
   if (!models.length) return null;
-  return { models: models.map((m) => ({ id: m.id, name: m.name })) };
+  return {
+    models: models.map((m) => ({
+      id: m.id,
+      name: m.name,
+      ...(m.isReasoning ? { isReasoning: true } : {}),
+      ...(m.isVL ? { isVL: true } : {}),
+      ...(Number.isFinite(m.contextLength) ? { contextLength: m.contextLength } : {}),
+      ...(Number.isFinite(m.maxOutputTokens) ? { maxOutputTokens: m.maxOutputTokens } : {}),
+    })),
+  };
 }
 
 // Per-provider live model resolvers. Each receives a connection record and
@@ -50,7 +63,18 @@ const LIVE_MODEL_RESOLVERS = {
       refreshToken: conn.refreshToken,
       providerSpecificData: conn.providerSpecificData || {}
     }, { log: console });
-    return result?.models?.length ? { models: result.models } : null;
+    if (!result?.models?.length) return null;
+    // Kiro items carry { thinking, agentic } variant flags as `capabilities` —
+    // the wrong shape for model.capabilities (reasoning/vision/...) and wrong
+    // for every consumer, so strip them here. Variant ids resolve through the
+    // shared kiro tables; anything new self-resolves by display name below.
+    return {
+      models: result.models.map((m) => ({
+        id: m.id,
+        ...(m?.name ? { name: m.name } : {}),
+        ...(Number.isFinite(m?.contextLength) ? { contextLength: m.contextLength } : {}),
+      })),
+    };
   },
   qoder: async (conn) => resolveQoderLiveModels(conn, "qoder"),
   "qoder-cn": async (conn) => resolveQoderLiveModels(conn, "qoder-cn"),
@@ -388,6 +412,9 @@ export async function buildModelsList(kindFilter, options = {}) {
       );
       let liveModelKindById = new Map();
       let liveCapabilitiesById = new Map();
+      // Full live items by id (display names + gateway signals). Capabilities
+      // for opaque/new ids resolve dynamically from these in the loop below.
+      let liveById = new Map();
 
       let rawModelIds = hasExplicitEnabledModels
         ? Array.from(
@@ -412,6 +439,11 @@ export async function buildModelsList(kindFilter, options = {}) {
           const live = await liveResolver(conn);
           if (live?.models?.length) {
             rawModelIds = live.models.map((m) => m.id);
+            liveById = new Map(
+              live.models
+                .filter((m) => m?.id)
+                .map((m) => [m.id, m])
+            );
             liveModelKindById = new Map(
               live.models
                 .filter((m) => m?.id)
@@ -501,13 +533,26 @@ export async function buildModelsList(kindFilter, options = {}) {
           object: "model",
           owned_by: outputAlias,
         };
-        // Live-catalog resolvers (kiro/qoder/github/clinepass) mostly only return
-        // { id, name } — no per-model capability data. Fall back to the same
-        // pattern-matched capabilities the dashboard uses (useModelCaps.js) so
-        // dynamically-discovered LLM models still surface vision/reasoning/search/tools.
+        // Live-catalog resolvers vary: kimchi returns real per-model
+        // capabilities, most others only { id, name } (+ gateway signals like
+        // Qoder's is_reasoning/is_vl). Opaque or brand-new ids resolve
+        // dynamically from the live display name + signals — no per-model
+        // table needed, so renames and new models self-resolve.
         const liveCaps = liveCapabilitiesById.get(modelId);
         const serviceCaps = capabilitiesFromServiceKind(customKind || liveKind);
-        const caps = liveCaps || serviceCaps || (kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null);
+        const live = liveById.get(modelId);
+        let caps = liveCaps || serviceCaps || (kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null);
+        if (live && (kind === LLM_KIND || allowAsLlm)) {
+          caps = getCapabilitiesForLiveModel(providerId, modelId, { ...live, capabilities: caps });
+          // Selectable efforts for the picker + CLI-tool consumers (dashboard,
+          // Codex, DSH, ZCode). The live display name resolves through the
+          // shared tables (family patterns, then format defaults); unknown
+          // names honestly omit the key instead of inventing levels.
+          if (caps?.reasoning && !caps.reasoningLevels && live.name && live.name !== modelId) {
+            const levels = getThinkingLevels(providerId, live.name);
+            if (levels?.length) caps = { ...caps, reasoningLevels: levels };
+          }
+        }
         if (caps) model.capabilities = caps;
         // Token limits under the snake_case names the OpenAI/OpenRouter
         // convention uses. `capabilities.contextWindow` is camelCase and nested,

@@ -63,37 +63,14 @@ describe("OpenCode Free Muse Spark thinking", () => {
     expect(out.max_tokens).toBeUndefined();
   });
 
-  it("routes Union Alpha through Anthropic Messages", () => {
-    const caps = getCapabilitiesForModel(PROVIDER, "union-alpha");
-    expect(caps.vision).toBe(true);
-    expect(caps.contextWindow).toBe(262144);
-    expect(caps.maxOutput).toBe(131072);
-
+  it("retired Union Alpha no longer routes anywhere special", () => {
+    // union-alpha is gone upstream: no registry entry, no claude target, no
+    // Messages routing. The executor's Messages branch is registry-driven, so
+    // retirement needed zero code changes beyond dropping the entries.
+    expect(PROVIDER_MODELS.oc?.some((model) => model.id === "union-alpha")).toBe(false);
+    expect(getModelTargetFormat("oc", "union-alpha")).toBeNull();
     const executor = new OpenCodeExecutor();
-
-    expect(getModelTargetFormat("oc", "union-alpha")).toBe(FORMATS.CLAUDE);
-    const url = executor.buildUrl("union-alpha");
-    expect(url).toBe("https://opencode.ai/zen/v1/messages");
-    expect(executor.buildHeaders({}, true, url)).toMatchObject({
-      "anthropic-version": "2023-06-01",
-    });
-    expect(executor.buildHeaders({}, true, executor.buildUrl("big-pickle")))
-      .not.toHaveProperty("anthropic-version");
-
-    const translated = translateRequest(
-      FORMATS.OPENAI,
-      FORMATS.CLAUDE,
-      "union-alpha",
-      { messages: [{ role: "user", content: "ping" }], max_tokens: 1 },
-      false,
-      {},
-      PROVIDER,
-    );
-    expect(translated).toMatchObject({
-      model: "union-alpha",
-      messages: [{ role: "user", content: [{ type: "text", text: "ping" }] }],
-      max_tokens: 1,
-    });
+    expect(executor.buildUrl("union-alpha")).toBe("https://opencode.ai/zen/v1/chat/completions");
   });
 
   it("leaves the other free models on Chat Completions", () => {

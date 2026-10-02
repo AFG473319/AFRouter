@@ -57,7 +57,7 @@ export const DEFAULT_CAPABILITIES = {
   thinkingFormat: null,
   thinkingCanDisable: true,  // false → model cannot turn thinking off (clamp to min instead of disable)
   thinkingRange: null,       // { min, max } for budget formats; null = no clamp
-  thinkingEffortSupported: false, // zai format only: model accepts a reasoning_effort level (GLM-5.2+; older GLM ignores it)
+  thinkingEffortSupported: false, // model accepts effort control in its native wire format (reasoning_effort / effort / thinkingLevel). Derived automatically - see EFFORT_WIRE_FORMATS + catalog discovery in getCapabilitiesForModel; the tables below only carry offline fallbacks.
   // limits (tokens)
   contextWindow: 200000,
   maxOutput: 64000,
@@ -143,8 +143,6 @@ export const MODEL_CAPABILITIES = {
   // via OpenAI Responses input_image; reasoning supports up to xhigh.
   "muse-spark-1.2-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
   "muse-spark-1.3-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
-  // OpenCode Free Union Alpha — multimodal (text+vision), 262K context, 131K max output
-  "union-alpha": { vision: true, contextWindow: 262144, maxOutput: 131072 },
 };
 
 const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
@@ -173,6 +171,11 @@ export const PROVIDER_CAPABILITIES = {
   "opencode-go": {
     "glm-5.3-flash": { vision: true, videoInput: true, pdf: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 131072 },
   },
+  // NOTE: no "qoder" table on purpose. Qoder's ids are opaque gateway keys
+  // (ultimate, qmodel, kmodel, ...) that the gateway renames at will; a
+  // hand-kept table would rot. Opaque ids resolve dynamically instead via
+  // getCapabilitiesForLiveModel (live display name -> family patterns, plus
+  // the gateway's own per-model is_reasoning/is_vl signals).
   "codex": {
     "gpt-6-astra":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
     "gpt-5.6-sol":               CODEX_GPT_56_SOL_CAPS,
@@ -474,6 +477,7 @@ export function aggregateComboCapabilities(comboModels, comboLookup = null, reso
     })(),
     thinkingFormat:     first.thinkingFormat,
     thinkingCanDisable: first.thinkingCanDisable,
+    thinkingEffortSupported: allCaps.some((c) => c.thinkingEffortSupported),
     thinkingRange:      first.thinkingRange,
     contextWindow: Math.min(...allCaps.map((c) => c.contextWindow)),
     maxOutput:     Math.max(...allCaps.map((c) => c.maxOutput)),
@@ -579,18 +583,98 @@ function isCommandCodeTextOnly(model) {
   }
   return false;
 }
+// Formats whose applyFormat encoder in thinkingUnified.js sends an effort level
+// (reasoning_effort / output_config.effort / thinkingLevel). Budget-only formats
+// (claude-budget, gemini-budget, qwen, hunyuan) and toggle-only ones (minimax,
+// kiro) map levels to budgets/switches instead, so the flag stays false there.
+// zai is deliberately absent: z.ai only reads reasoning_effort from GLM-5.2
+// onward, so zai models need positive per-model evidence (a discovered effort
+// ladder or a table fallback) rather than a format default.
+const EFFORT_WIRE_FORMATS = new Set([
+  "openai",
+  "claude-adaptive",
+  "gemini-level",
+  "deepseek",
+  "kimi",
+  "step",
+  "tokenrouter",
+  "commandcode",
+]);
+
 export function getCapabilitiesForModel(provider, model) {
   const result = resolveCapabilities(provider, model);
-  // Discovered per-model reasoning levels (models.dev) apply uniformly, including
-  // to exact-table hits — those tables carry reasoning booleans but not a level
-  // vocabulary, and the catalog is the only machine-readable source for it.
+  // Auto-recognized effort support, two layers:
+  // 1. Discovered effort ladder (models.dev reasoning_options): positive
+  //    per-model evidence this model takes effort control, for ANY provider
+  //    including OAuth and OpenCode Free ids. Applies to every effort-wire
+  //    format plus zai.
+  // 2. Format default: a reasoning model on an effort-wire format supports
+  //    effort even with no catalog file (fresh install, offline, browser
+  //    bundle) - no per-model table edit needed, for any provider.
+  // Toggle/budget-only models keep the tables answer (no field).
   const source = getCatalogSource();
   const discovered = source?.getReasoning?.(provider, model);
   if (discovered?.levels?.length) {
     result.reasoning = true;
     result.reasoningLevels = discovered.levels;
+    if (result.thinkingFormat === "zai" || EFFORT_WIRE_FORMATS.has(result.thinkingFormat)) {
+      result.thinkingEffortSupported = true;
+    }
+  } else if (result.reasoning && EFFORT_WIRE_FORMATS.has(result.thinkingFormat)) {
+    result.thinkingEffortSupported = true;
   }
   return result;
+}
+
+// Resolve capabilities for a model id the static tables do not know (opaque
+// gateway keys, brand-new upstream ids). No per-model hardcoding: every answer
+// below is derived at call time from live data the gateway itself publishes.
+//
+// Precedence:
+//  1. An explicitly passed capabilities object (a resolver that already knows).
+//  2. The live display name through the shared tables: gateways name models
+//     after their family ("GLM-5.3", "DeepSeek-V4-Pro", "Kimi-K3"), so the
+//     normal id-based lookup resolves them with zero new entries. A gateway
+//     rename or a brand-new family id self-resolves the same way.
+//  3. The gateway's own per-model signals (Qoder publishes is_reasoning/is_vl
+//     plus token limits per key): positive live evidence beats the floor.
+//  4. Otherwise the static result untouched (never invent values).
+export function getCapabilitiesForLiveModel(provider, modelId, live = {}) {
+  if (live?.capabilities) return live.capabilities;
+  const base = getCapabilitiesForModel(provider, modelId);
+  if (base.reasoning) return base;
+  const name = typeof live?.name === "string" && live.name.trim() ? live.name.trim() : null;
+  if (name && name !== modelId) {
+    const byName = getCapabilitiesForModel(provider, name);
+    if (byName.reasoning) {
+      return {
+        ...byName,
+        contextWindow: Number.isFinite(live?.contextLength) && live.contextLength > 0
+          ? live.contextLength
+          : byName.contextWindow,
+        maxOutput: Number.isFinite(live?.maxOutputTokens) && live.maxOutputTokens > 0
+          ? live.maxOutputTokens
+          : byName.maxOutput,
+      };
+    }
+  }
+  if (live?.isReasoning) {
+    return {
+      ...base,
+      reasoning: true,
+      vision: base.vision || live.isVL === true,
+      contextWindow: Number.isFinite(live?.contextLength) && live.contextLength > 0
+        ? live.contextLength
+        : base.contextWindow,
+      maxOutput: Number.isFinite(live?.maxOutputTokens) && live.maxOutputTokens > 0
+        ? live.maxOutputTokens
+        : base.maxOutput,
+    };
+  }
+  if (live?.isVL) {
+    return { ...base, vision: true };
+  }
+  return base;
 }
 
 function resolveCapabilities(provider, model) {
