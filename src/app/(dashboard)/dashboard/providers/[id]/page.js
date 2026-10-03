@@ -7,13 +7,13 @@ import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
 import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
-import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
+import { getModelsByProviderId } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
-import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
-import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import { fetchSuggestedModels, isFreeOnlySuggestions } from "@/shared/utils/providerModelsFetcher";
+import { assembleProviderModelRows, isFreeRow } from "@/shared/utils/providerModelRows";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -73,7 +73,6 @@ export default function ProviderDetailPage() {
   const [liveModels, setLiveModels] = useState([]);
   // Live-catalog fetch warning/error (surfaced for zed only; cursor behavior unchanged).
   const [liveModelsError, setLiveModelsError] = useState(null);
-  const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
@@ -201,7 +200,7 @@ export default function ProviderDetailPage() {
       if (lv) lv.forEach((l) => { if (l !== "none") set.add(l); });
     };
     for (const m of models) addLevels(m.id);
-    for (const m of kiloFreeModels) addLevels(m.id);
+    for (const m of suggestedModels) addLevels(m.id);
     for (const entry of customModels) {
       if (entry.providerAlias !== providerStorageAlias) continue;
       if ((entry.kind || entry.type || "llm") !== "llm") continue;
@@ -212,6 +211,37 @@ export default function ProviderDetailPage() {
   const providerDisplayAlias = isCompatible
     ? (providerNode?.prefix || providerId)
     : providerAlias;
+
+  // Every chip list this page renders, derived ONCE from the page's inputs.
+  //
+  // This is the whole point of the helper: the registry seed, the live catalog,
+  // the user's custom models and the legacy aliases all compete for the same ids,
+  // and every one of them is keyed by id alone in the shared disabled-models
+  // store. Re-deriving "what is available" in each section is how one model ended
+  // up as two chips that disagreed about whether it was disabled — and how
+  // Disable-All silently skipped everything the user had added by hand.
+  const modelRows = assembleProviderModelRows({
+    builtInModels: models,
+    customModels,
+    modelAliases,
+    disabledIds: disabledModelIds,
+    providerStorageAlias,
+    suggestedModels,
+  });
+  // Free flag per id, from the catalog when the provider publishes one. Custom and
+  // legacy-alias rows carry no flag of their own, so the catalog row (Kilo's own
+  // `isFree`) is the only way to label e.g. kilo-auto/free, which has no `:free`
+  // suffix; isFreeRow falls back to the id shape for catalogs that publish none.
+  const freeIdsByCatalog = new Map(
+    suggestedModels.filter((m) => m?.id && isFreeRow(m)).map((m) => [m.id, true]),
+  );
+  const rowIsFree = (model) => freeIdsByCatalog.has(model?.id) || isFreeRow(model);
+  // "Suggested free models" is only true for the free-only filters. Kilo Gateway's
+  // view is the full catalog (kilo-auto/* plus paid ids), so calling those free is
+  // how a 400-model list ended up announced as free models.
+  const suggestionsAreFreeOnly = isFreeOnlySuggestions(
+    (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId])?.modelsFetcher?.type,
+  );
 
   const fetchDisabledModels = useCallback(async () => {
     try {
@@ -299,15 +329,6 @@ export default function ProviderDetailPage() {
       console.log("Error fetching custom models:", error);
     }
   }, []);
-
-  // Fetch free models from Kilo API for kilocode provider
-  useEffect(() => {
-    if (providerId !== "kilocode") return;
-    fetch("/api/providers/kilo/free-models")
-      .then((res) => res.json())
-      .then((data) => { if (data.models?.length) setKiloFreeModels(data.models); })
-      .catch(() => {});
-  }, [providerId]);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -1223,27 +1244,12 @@ export default function ProviderDetailPage() {
         />
       );
     }
-    // Combine hardcoded models with Kilo free models (deduplicated)
-    // Exclude non-llm models (embedding, tts, etc.) — they have dedicated pages under media-providers
-    const allModels = [
-      ...models,
-      ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
-    ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; });
-    const disabledSet = new Set(disabledModelIds);
-    const displayModels = allModels.filter((m) => !disabledSet.has(m.id));
-    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
-    const customModelRows = getProviderCustomModelRows({
-      customModels,
-      modelAliases,
-      providerAlias: providerStorageAlias,
-      builtInModels: models,
-      type: "llm",
-    });
-
+    // Active custom models first. Disabled ones are NOT rendered here — they go to
+    // the restorable Disabled list below, because the store keys them by id alone
+    // and a chip with no restore path is a model the user cannot get back.
     return (
       <div className="flex flex-wrap gap-3">
-        {/* Custom models first */}
-        {customModelRows.map((model) => (
+        {modelRows.activeCustomRows.map((model) => (
           <ModelRow
             key={`${model.source}-${model.fullModel}`}
             model={{ id: model.id, name: model.name }}
@@ -1269,7 +1275,7 @@ export default function ProviderDetailPage() {
           />
         ))}
 
-        {displayModels.map((model) => {
+        {modelRows.displayModels.map((model) => {
           const fullModel = `${providerStorageAlias}/${model.id}`;
           const oldFormatModel = `${providerId}/${model.id}`;
           const existingAlias = Object.entries(modelAliases).find(
@@ -1288,7 +1294,7 @@ export default function ProviderDetailPage() {
               testStatus={modelTestResults[model.id]}
               onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
               isTesting={testingModelIds.has(model.id)}
-              isFree={model.isFree}
+              isFree={rowIsFree(model)}
               onDisable={() => handleDisableModel(model.id)}
               caps={getCaps(`${providerId}/${model.id}`)}
               thinkingSuffix={resolveThinkingSuffix(model.id)}
@@ -1347,45 +1353,79 @@ export default function ProviderDetailPage() {
           </button>
         )}
 
-        {/* Suggested models from provider API — show only models not yet added */}
-        {suggestedModels.length > 0 && (() => {
-          const addedFullModels = new Set([
-            ...Object.values(modelAliases),
-            ...customModelRows.map((model) => model.fullModel),
-          ]);
-          const hardcodedIds = new Set(models.map((m) => m.id));
-          const notAdded = suggestedModels.filter(
-            (m) => !addedFullModels.has(`${providerStorageAlias}/${m.id}`) && !hardcodedIds.has(m.id)
-          );
-          if (notAdded.length === 0) return null;
-          return (
-            <div className="w-full mt-2">
-              <p className="text-xs text-text-muted mb-2">Suggested free models (≥200k context):</p>
-              <div className="flex flex-wrap gap-2">
-                {notAdded.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={async () => {
-                      await handleAddCustomModel(m.id, "llm", providerStorageAlias);
-                    }}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
-                    title={`${m.name} · ${(m.contextLength / 1000).toFixed(0)}k ctx`}
-                  >
-                    <span className="material-symbols-outlined text-[13px]">add</span>
-                    {m.id.split("/").pop()}
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Disabled models — restorable */}
-        {disabledDisplayModels.length > 0 && (
+        {/* Suggested models from the provider's public catalog. `suggestedNotAdded`
+            already excludes seeded ids, user-added models and legacy aliases, so
+            every id here is genuinely new — no second "is it already added?"
+            computation that could disagree with the rendered chip lists. */}
+        {(modelRows.suggestedNotAdded.length > 0 || modelRows.suggestedFreeDisabled.length > 0) && (
           <div className="w-full mt-2">
-            <p className="text-xs text-text-muted mb-2">Disabled models ({disabledDisplayModels.length}):</p>
+            {modelRows.suggestedNotAdded.length > 0 && (
+              <>
+                <p className="text-xs text-text-muted mb-2">
+                  {suggestionsAreFreeOnly ? "Suggested free models:" : "Suggested models:"}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {modelRows.suggestedNotAdded.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={async () => {
+                        // No caps here on purpose: POST /api/models/custom resolves the
+                        // provider's own catalog for this id, so the saved model keeps
+                        // its real context window, output cap, modalities and reasoning
+                        // levels instead of the 200K/64K floor.
+                        await handleAddCustomModel(m.id, "llm", providerStorageAlias);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                      title={`${m.name}${m.contextLength ? ` · ${(m.contextLength / 1000).toFixed(0)}k ctx` : ""}`}
+                    >
+                      <span className="material-symbols-outlined text-[13px]">add</span>
+                      {m.id.split("/").pop()}
+                      {rowIsFree(m) && (
+                        <span className="rounded bg-green-500/10 px-1 py-0.5 text-[9px] font-bold text-green-500">
+                          FREE
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {/* A seeded free model the user disabled belongs HERE, next to the rest
+                of its pool, not buried under Disabled models — that is the whole
+                reason it is claimed out of the Disabled list above. */}
+            {modelRows.suggestedFreeDisabled.length > 0 && (
+              <>
+                <p className="text-xs text-text-muted mt-3 mb-2">
+                  {`Suggested free models — disabled (${modelRows.suggestedFreeDisabled.length}):`}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {modelRows.suggestedFreeDisabled.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => handleEnableModel(m.id)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dashed border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                      title="Restore model"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">add</span>
+                      {m.id}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Disabled models — restorable, seeded and user-added alike. Both lists
+            come from the assembled rows, so an id can never appear here twice or
+            be missing from here while still rendered as available above. */}
+        {(modelRows.disabledDisplayModels.length > 0 || modelRows.disabledCustomRows.length > 0) && (
+          <div className="w-full mt-2">
+            <p className="text-xs text-text-muted mb-2">
+              {`Disabled models (${modelRows.disabledDisplayModels.length + modelRows.disabledCustomRows.length}):`}
+            </p>
             <div className="flex flex-wrap gap-2">
-              {disabledDisplayModels.map((m) => (
+              {[...modelRows.disabledDisplayModels, ...modelRows.disabledCustomRows].map((m) => (
                 <button
                   key={m.id}
                   onClick={() => handleEnableModel(m.id)}
@@ -1835,11 +1875,13 @@ export default function ProviderDetailPage() {
             )}
           </div>
           {!isCompatible && (() => {
-            const allIds = [
-              ...models,
-              ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
-            ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; }).map((m) => m.id);
-            const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
+            // Exactly the ids rendered as available above, once each — built-ins
+            // AND custom models together. This used to be rebuilt from the
+            // registry seed alone, which is why Disable All silently left every
+            // model added by hand (the "Import from /models" button, the Suggested
+            // chips, Add Model) enabled: they live in the custom-models store, not
+            // in the seed, and nothing else here ever reconciled the two lists.
+            const activeIds = modelRows.disableAllIds;
             return (
               <div className="flex gap-2">
                 {disabledModelIds.length > 0 && (

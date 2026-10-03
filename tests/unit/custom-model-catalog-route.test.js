@@ -67,7 +67,10 @@ describe("custom model catalog enrichment", () => {
   });
   it("fills in Kilo Code specs from its public catalog instead of the 200K floor", async () => {
     await save("kilocode");
-    expect(fetch).toHaveBeenCalledWith("https://api.kilo.ai/api/gateway/models", expect.objectContaining({
+    // The documented, versioned catalog path — the same URL the suggestion list
+    // reads, so a saved model's specs and the row that offered it cannot describe
+    // different models.
+    expect(fetch).toHaveBeenCalledWith("https://api.kilo.ai/api/gateway/v1/models", expect.objectContaining({
       headers: { Accept: "application/json" },
     }));
     expect(db.getProviderConnections).not.toHaveBeenCalled();
@@ -75,6 +78,28 @@ describe("custom model catalog enrichment", () => {
       providerAlias: "kilocode", id: entry.id, name: "Union Alpha",
       caps: expect.objectContaining({ contextWindow: 262144, maxOutput: 131072, vision: true }),
     }));
+  });
+  it("resolves the same Kilo catalog for the API-key Gateway surface", async () => {
+    await save("kilo-gateway");
+    expect(fetch).toHaveBeenCalledWith("https://api.kilo.ai/api/gateway/v1/models", expect.objectContaining({
+      headers: { Accept: "application/json" },
+    }));
+    expect(db.addCustomModel).toHaveBeenCalledWith(expect.objectContaining({
+      providerAlias: "kilo-gateway", id: entry.id,
+      caps: expect.objectContaining({ contextWindow: 262144, maxOutput: 131072, vision: true }),
+    }));
+  });
+  it("persists the reasoning vocabulary Kilo publishes for a model", async () => {
+    // Kilo's opencode.variants is a display-label → wire-effort map and the ONLY
+    // reason a Kilo model has selectable levels. Without it the saved model had a
+    // reasoning boolean with no levels, so the picker offered nothing.
+    fetch.mockResolvedValue(Response.json({ data: [{ ...entry, opencode: { variants: {
+      instant: { reasoning: { enabled: true, effort: "none" } },
+      thinking: { reasoning: { enabled: true, effort: "high" } },
+      max: { reasoning: { enabled: true, effort: "max" } },
+    } } }] }));
+    await save("kilo-gateway");
+    expect(db.addCustomModel.mock.calls[0][0].caps.reasoningEfforts).toEqual(["none", "high", "max"]);
   });
   it("does not let the modal's unchecked defaults mask catalog capabilities", async () => {
     await save("nous", { caps: { vision: false, reasoning: false } });

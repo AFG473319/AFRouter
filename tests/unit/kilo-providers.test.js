@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest";
 import kilocode from "../../open-sse/providers/registry/kilocode.js";
 import kiloGateway from "../../open-sse/providers/registry/kilo-gateway.js";
+import { KILO_CATALOG_URL } from "../../open-sse/config/kiloCatalog.js";
 import { FILTERS } from "../../src/app/api/providers/suggested-models/filters.js";
 import { PROVIDER_MODELS } from "../../open-sse/providers/index.js";
 
 // Kilo Code and Kilo Gateway are the same upstream (api.kilo.ai): one
-// OpenRouter-shaped catalog of ~394 ids behind two surfaces — the OAuth
+// OpenRouter-shaped catalog behind two surfaces — the OAuth
 // /api/openrouter/chat/completions proxy and the API-key /api/gateway
 // /chat/completions. The gateway 400s any id the catalog does not list, so a
 // stale seed entry is a chip that can only ever fail. These ids were checked
-// against GET https://api.kilo.ai/api/gateway/models; keep them in sync when the
-// catalog is refreshed (the same endpoint the modelsFetcher reads).
+// against GET /api/gateway/v1/models; keep them in sync when the catalog is
+// refreshed (the same endpoint the modelsFetcher reads).
 const CATALOG_IDS = [
   "kilo-auto/free",
   "kilo-auto/frontier",
@@ -52,18 +53,52 @@ describe("kilo provider registries", () => {
     expect(PROVIDER_MODELS.kgw.map((m) => m.id)).toEqual(kiloGateway.models.map((m) => m.id));
   });
 
-  it("reads the catalog through exactly one fetcher per provider", () => {
+  it("reads the official catalog through one URL, for specs and for suggestions", () => {
     // The duplicate was a kilocode-only /api/providers/kilo/free-models route
     // hitting the same URL with a different filter — that is what rendered every
     // free model twice.
-    expect(kilocode.modelsFetcher.url).toBe("https://api.kilo.ai/api/gateway/models");
+    //
+    // KILO_CATALOG_URL is the documented, versioned path
+    // (https://api.kilo.ai/api/gateway/v1/models) and it is what both surfaces
+    // must read: the modelsFetcher (the dashboard's suggestion list), the
+    // modelSpecs source (the specs persisted when a model is saved), and
+    // kilo-gateway's credential validation. Kilo also answers the unversioned
+    // /api/gateway/models and /api/openrouter/models aliases with identical
+    // bytes, so pointing at those is not "wrong" today — but the whole point of
+    // one constant is that the three call sites cannot drift onto different
+    // catalogs later.
+    expect(KILO_CATALOG_URL).toBe("https://api.kilo.ai/api/gateway/v1/models");
+    for (const entry of [kilocode, kiloGateway]) {
+      expect(entry.modelsFetcher.url).toBe(KILO_CATALOG_URL);
+      // Stated explicitly rather than left to customSpecs.js falling back to
+      // modelsFetcher.url, so a future fetcher change cannot silently repoint
+      // the spec lookup somewhere else.
+      expect(entry.modelSpecs.url).toBe(KILO_CATALOG_URL);
+      expect(entry.modelSpecs).toMatchObject({ format: "openrouter", auth: "none" });
+    }
+    expect(kiloGateway.transport.validateUrl).toBe(KILO_CATALOG_URL);
     expect(kilocode.modelsFetcher.type).toBe("kilo-free");
+    // The two surfaces read ONE catalog through two different views; they are not
+    // the same filter, so the client cache must key on (url, type).
+    expect(kiloGateway.modelsFetcher.type).toBe("kilo-gateway");
+    expect(kilocode.modelsFetcher.type).not.toBe(kiloGateway.modelsFetcher.type);
     expect(kilocode.passthroughModels).toBe(true);
-    // modelSpecs is what gives a saved model its real context window; without it
-    // every Kilo model falls back to the 200K default.
-    expect(kilocode.modelSpecs).toEqual({ format: "openrouter", auth: "none" });
-    expect(kilocode.modelSpecs.url ?? kilocode.modelsFetcher.url)
-      .toBe("https://api.kilo.ai/api/gateway/models");
+    expect(kiloGateway.passthroughModels).toBe(true);
+  });
+
+  it("carries the catalog's own free flag on the seeded rows", () => {
+    // kilo-auto/free costs nothing and has no `:free` suffix on its id, so an
+    // id-shape heuristic cannot see it. The seed must state the flag the catalog
+    // publishes, or the dashboard shows no FREE badge for the one model the
+    // provider is named after.
+    const freeSeeds = [...kilocode.models, ...kiloGateway.models]
+      .filter((m) => m.isFree === true)
+      .map((m) => m.id);
+    expect(freeSeeds).toContain("kilo-auto/free");
+    expect(freeSeeds).toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
+    // A paid seed must not claim to be free.
+    expect(kiloGateway.models.find((m) => m.id === "kwaipilot/kat-coder-pro-v2.5")?.isFree)
+      .toBeUndefined();
   });
 
   it("routes the OAuth surface and the API-key surface to their own base URLs", () => {
@@ -111,7 +146,42 @@ describe("kilo-free suggested filter", () => {
   it("sorts by context and omits a missing context instead of rendering NaN", () => {
     expect(ids[0]).toBe("poolside/laguna-s-2.1:free");
     const noCtx = FILTERS["kilo-free"]([{ id: "a:free", isFree: true }]);
-    expect(noCtx[0]).toEqual({ id: "a:free", name: "a:free" });
+    expect(noCtx[0]).toEqual({ id: "a:free", name: "a:free", isFree: true });
+  });
+
+  it("carries the catalog's free flag, which no id shape could recover", () => {
+    // Neither of these is free by its id: `kilo-auto/free` only matches by
+    // accident (the tier is literally named free) and space-bunny-alpha has no
+    // suffix at all. The flag is Kilo's own and must survive the mapping.
+    expect(FILTERS["kilo-free"]([{ id: "kilo-auto/free", name: "Auto Free", isFree: true }])[0].isFree)
+      .toBe(true);
+    expect(FILTERS["kilo-gateway"]([
+      { id: "stealth/space-bunny-alpha", name: "Space Bunny Alpha", isFree: true },
+      { id: "anthropic/claude-sonnet-4.6", name: "Claude Sonnet 4.6", isFree: false },
+    ]).map((m) => [m.id, m.isFree])).toEqual([
+      ["stealth/space-bunny-alpha", true],
+      ["anthropic/claude-sonnet-4.6", undefined],
+    ]);
+  });
+
+  it("carries the per-model reasoning vocabulary as wire values", () => {
+    // Kilo publishes a display-label → wire-effort map under opencode.variants.
+    // Only the wire values can be sent, so `instant`/`thinking` must not leak into
+    // the level list; and a model with no map carries no field at all, so the
+    // consumer can still tell "does not reason" from "no selectable effort".
+    const variants = {
+      instant: { reasoning: { enabled: true, effort: "none" } },
+      thinking: { reasoning: { enabled: true, effort: "high" } },
+      max: { reasoning: { enabled: true, effort: "max" } },
+    };
+    const [aliased, plain, none] = FILTERS["kilo-gateway"]([
+      { id: "alias/model", name: "Alias", opencode: { variants } },
+      { id: "plain/model", name: "Plain", opencode: { variants: {} }, supported_parameters: ["tools"] },
+      { id: "none/model", name: "None", opencode: {} },
+    ]);
+    expect(aliased.reasoningEfforts).toEqual(["none", "high", "max"]);
+    expect(plain.reasoningEfforts).toBeUndefined();
+    expect(none.reasoningEfforts).toBeUndefined();
   });
 
   it("carries the curated name and tolerates a malformed payload", () => {
