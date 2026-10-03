@@ -1,4 +1,7 @@
-import { kiloReasoningLevels } from "@/lib/kiloReasoning.js";
+// Pure — imports only the reasoning mapper, never node builtins — because the
+// "which filters are free-only" table in providerModelsFetcher.js mirrors this
+// one and the two must be checked together.
+import { kiloEffortValues } from "@/lib/kiloReasoning.js";
 
 // Free OpenCode models that don't use the "-free" id suffix
 const KNOWN_FREE_OPENCODE_MODELS = ["big-pickle"];
@@ -12,23 +15,34 @@ const DEAD_FREE_OPENCODE_MODELS = new Set(["deepseek-v4-flash-free"]);
 const isFreeModelId = (id) => /(^|[-_/:])free$/i.test(id || "");
 
 // Shared Kilo catalog mapping (kilo-free + kilo-gateway). Kept in one place so
-// the two surfaces cannot drift on specs or reasoning levels.
+// the two surfaces cannot drift on specs, free flags or reasoning levels, and so
+// both read KILO_CATALOG_URL — one published catalog, two views of it.
 const kiloCatalog = (models, { freeOnly }) =>
   (Array.isArray(models) ? models : [])
     .filter((m) => m?.id)
     .filter((m) => !freeOnly || m.isFree === true)
     .filter((m) => (m.architecture?.output_modalities || ["text"]).includes("text"))
     .map((m) => {
-      const reasoning = kiloReasoningLevels(m);
+      // The model's own reasoning vocabulary, as wire values (kiloEffortValues).
+      // Absent when Kilo publishes no variants, so the consumer can still tell
+      // "does not reason" from "reasons, no selectable effort".
+      const efforts = kiloEffortValues(m);
       return {
         id: m.id,
         name: m.name || m.id,
+        // Kilo's own free flag, carried verbatim rather than inferred from the
+        // id. The `kilo-gateway` view is UNFILTERED — kilo-auto/* plus the paid
+        // ids are that lane's whole point — so this flag is the only thing that
+        // can tell the dashboard which of its ~400 suggestions actually cost
+        // nothing; dropping it is what made every one of them read as free.
+        // Emitted only when true, so an absent flag means "Kilo did not declare
+        // this free" instead of a defaulted false the id heuristic cannot see
+        // (kilo-auto/free has no `:free` suffix on its id).
+        ...(m.isFree === true ? { isFree: true } : {}),
         ...(Number.isSafeInteger(m.context_length) && m.context_length > 0
           ? { contextLength: m.context_length }
           : {}),
-        // Absent (not `[]`) when the model does not reason at all, so consumers
-        // can tell "no reasoning" from "reasons, no selectable effort".
-        ...(reasoning ? { reasoningEfforts: reasoning } : {}),
+        ...(efforts?.length ? { reasoningEfforts: efforts } : {}),
       };
     })
     .sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0));
@@ -99,17 +113,17 @@ export const FILTERS = {
   // suggests $0 audio-output models like google/lyria-3-pro-preview as chat
   // models). isFree is authoritative and covers both cases.
   //
-  // `reasoningEfforts` is carried through because this is the ONLY place the
-  // catalog's per-model level map is available to the dashboard: Kilo publishes
-  // it under opencode.variants (a display-name → wire-effort map), and dropping
-  // it here is why Kilo models had no selectable reasoning levels. Levels are
-  // resolved at the picker, where the label the user sees carries its own wire
-  // value, so no nearest-level coercion is involved for a single model.
+  // Both Kilo surfaces read the SAME catalog (KILO_CATALOG_URL); they differ
+  // only in the view. This one keeps the free ids, and every row carries
+  // `isFree` so the dashboard can label a row whose id carries no `:free`
+  // suffix (stealth/space-bunny-alpha, kilo-auto/free).
   "kilo-free": (models) => kiloCatalog(models, { freeOnly: true }),
 
-  // Kilo Gateway shares the catalog and its level map but is not free-only: it
-  // is the paid/auto-routing surface (kilo-auto/*), so filtering on isFree
-  // would suggest nothing.
+  // Kilo Gateway shares the catalog and its level map but is NOT free-only: it is
+  // the paid/auto-routing surface (kilo-auto/*), so filtering on isFree would
+  // suggest nothing at all. Each row still carries the catalog's own isFree flag
+  // — without it an unfiltered 400-model list has no way to say which entries are
+  // free, and the page reads every one of them as free.
   "kilo-gateway": (models) => kiloCatalog(models, { freeOnly: false }),
 
   "opencode-free": (models) =>

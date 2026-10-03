@@ -44,9 +44,17 @@ function isChatRow(model) {
   return !kind || kind === "llm";
 }
 
-// Same $0-id heuristic as suggested-models/filters.js ("x-free", ":free", "orcarouter/free").
+// $0-id heuristic, for catalogs that carry no free flag of their own.
+// Providers that publish one (Kilo's `isFree`) are trusted over this shape:
+// kilo-auto/free and stealth/space-bunny-alpha cost nothing with no `:free`
+// suffix on the id, and an id suffix is not evidence a provider actually charges
+// for the model.
 const FREE_ID_RE = /(^|[-_/:])free$/i;
 export const isFreeModelId = (id) => FREE_ID_RE.test(id || "");
+
+// A row's own free flag wins; the id shape is the fallback for catalogs that do
+// not publish one.
+export const isFreeRow = (model) => model?.isFree === true || isFreeModelId(model?.id);
 
 /**
  * Everything the provider detail page needs to render its model rows, computed
@@ -114,7 +122,7 @@ export function assembleProviderModelRows({
     (m) => m?.id
       && baseIds.has(m.id)
       && disabledSet.has(m.id)
-      && isFreeModelId(m.id)
+      && isFreeRow(m)
       && !isAdded(m),
   ));
   const freeDisabledIds = new Set(suggestedFreeDisabled.map((m) => m.id));

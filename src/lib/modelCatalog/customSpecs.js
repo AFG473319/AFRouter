@@ -1,5 +1,6 @@
 import { getProviderConnections } from "@/lib/db/index.js";
 import registry from "open-sse/providers/registry/index.js";
+import { kiloEffortValues } from "@/lib/kiloReasoning.js";
 
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -24,6 +25,16 @@ export function normalizeCatalogSpecs(model) {
   })) {
     if (Number.isSafeInteger(value) && value > 0) caps[key] = value;
   }
+  // The per-model reasoning vocabulary, when the catalog publishes one. OpenRouter
+  // and Nous publish no level map, so this stays absent there and the hand tables
+  // keep answering; Kilo publishes `opencode.variants` and it is the only reason
+  // a Kilo model has selectable levels at all. Only WIRE values are taken —
+  // Kilo's variant keys are display labels (`instant`/`thinking`) the router
+  // cannot send, so kiloEffortValues drops them. Absent when the model publishes
+  // no variants, and an empty list is dropped too, so "no reasoning" stays
+  // distinguishable from "reasons, no selectable effort".
+  const efforts = kiloEffortValues(model);
+  if (efforts?.length) caps.reasoningEfforts = efforts;
   return { ...(typeof model.name === "string" && model.name ? { name: model.name } : {}), caps };
 }
 

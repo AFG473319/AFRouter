@@ -3,6 +3,7 @@ import {
   assembleProviderModelRows,
   dedupeModelRows,
   isFreeModelId,
+  isFreeRow,
 } from "@/shared/utils/providerModelRows.js";
 
 // Shapes mirror what the provider detail page feeds in: the registry seed
@@ -140,6 +141,50 @@ describe("provider model rows", () => {
     ]);
   });
 
+  it("gives Disable-All every model the page renders as AVAILABLE, however it was added", () => {
+    // The reported bug: Disable All was recomputed from the registry seed alone,
+    // so every model the user added by hand — the "Import from /models" button
+    // (Cline/Qoder) and the Suggested chips both save as custom models — stayed
+    // enabled while the button reported having disabled everything.
+    const rows = assemble({ customModels: [CUSTOM("stealth/space-bunny-alpha"), CUSTOM("inclusionai/ling-3.1-flash")] });
+    // Only the available rows, never a suggestion chip the user has not added.
+    const available = [...rows.displayModels, ...rows.activeCustomRows].map((m) => m.id);
+    expect(rows.disableAllIds).toEqual(available);
+    expect(rows.disableAllIds).toContain("stealth/space-bunny-alpha");
+    expect(rows.disableAllIds).toContain("inclusionai/ling-3.1-flash");
+    // A suggested-but-not-added id is not available, so it must not be swept in.
+    expect(rows.disableAllIds).not.toContain("cohere/north-mini-code:free");
+  });
+
+  it("gives Disable-All a legacy-alias model too, not just the seed and custom rows", () => {
+    const rows = assemble({ modelAliases: { nmc: "kc/cohere/north-mini-code:free" } });
+    expect(rows.disableAllIds).toContain("cohere/north-mini-code:free");
+  });
+
+  it("treats a catalog's own free flag as authoritative over the id shape", () => {
+    // kilo-auto/free and stealth/space-bunny-alpha cost nothing with no `:free`
+    // suffix, so an id-shape check alone hides them — and would call a paid id
+    // free only if the provider said so. A published flag decides.
+    const rows = assemble({
+      builtInModels: [...SEED, { id: "stealth/space-bunny-alpha", name: "Space Bunny Alpha" }],
+      suggestedModels: [
+        { id: "kilo-auto/free", name: "Auto Free", isFree: true, contextLength: 256000 },
+        { id: "stealth/space-bunny-alpha", name: "Space Bunny Alpha", isFree: true, contextLength: 1000000 },
+        { id: "kwaipilot/kat-coder-pro-v2.5", name: "Kat Coder Pro" },
+      ],
+      disabledIds: ["kilo-auto/free", "stealth/space-bunny-alpha"],
+    });
+    // Both land in the restorable free group exactly once, not in Disabled and
+    // not in the suggestion chips.
+    expect(rows.suggestedFreeDisabled.map((m) => m.id).sort())
+      .toEqual(["kilo-auto/free", "stealth/space-bunny-alpha"]);
+    expect(rows.disabledDisplayModels.map((m) => m.id)).not.toContain("kilo-auto/free");
+    // The paid id is suggested (this is the unfiltered Gateway view) but never
+    // claimed as free.
+    expect(rows.suggestedNotAdded.map((m) => m.id)).toContain("kwaipilot/kat-coder-pro-v2.5");
+    assertRenderedOnce(rows);
+  });
+
   it("leaves disabled ids out of Disable-All", () => {
     expect(assemble({ disabledIds: ["kilo-auto/free"] }).disableAllIds).not.toContain("kilo-auto/free");
   });
@@ -199,4 +244,14 @@ describe("isFreeModelId", () => {
       expect(isFreeModelId(id)).toBe(false);
     },
   );
+
+  it("lets a published flag decide where the id cannot", () => {
+    // The flag is the provider's own statement of fact; the id shape is a guess.
+    expect(isFreeRow({ id: "stealth/space-bunny-alpha", isFree: true })).toBe(true);
+    expect(isFreeRow({ id: "kwaipilot/kat-coder-pro-v2.5" })).toBe(false);
+    // No flag published → fall back to the shape, so OpenRouter-style catalogs
+    // (which carry no flag) keep working.
+    expect(isFreeRow({ id: "poolside/laguna-s-2.1:free" })).toBe(true);
+    expect(isFreeRow(undefined)).toBe(false);
+  });
 });

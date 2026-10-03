@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel } from "@/models";
+import { lookupCustomModelSpecs } from "@/lib/modelCatalog/customSpecs.js";
 import { CAPACITY_META, REASONING_EFFORT_LEVELS, isSttTransport } from "@/shared/constants/models";
 
 export const dynamic = "force-dynamic";
@@ -50,9 +51,26 @@ export async function POST(request) {
     if (!providerAlias || !id) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
-    const cleanCaps = sanitizeCaps(caps);
+    // Providers that publish their own catalog own the specs for their models:
+    // Kilo Code / Kilo Gateway (api.kilo.ai/api/gateway/v1/models), OpenRouter,
+    // Nous and NVIDIA all answer with real context windows, output caps,
+    // modalities and a reasoning vocabulary. Without this a model saved from any
+    // of them keeps no caps and silently inherits the 200K/64K floor — including
+    // the 1M-window ones. Media models (stt/tts/embedding) are excluded: those
+    // catalogs are shaped for chat and would answer with nonsense.
+    const catalog = (type || "llm") === "llm" ? await lookupCustomModelSpecs(providerAlias, id) : null;
+    // Catalog specs win over the caller's flags: the Add-Model form always sends
+    // every checkbox, so an unticked "vision" is a form default, not a
+    // measurement. A field the catalog does not publish keeps what was sent.
+    const mergedCaps = { ...sanitizeCaps(caps), ...catalog?.caps };
+    const cleanCaps = Object.keys(mergedCaps).length ? mergedCaps : null;
     const cleanTransport = sanitizeTransport(transport, type || "llm");
-    const added = await addCustomModel({ providerAlias, id, type: type || "llm", name, ...(cleanCaps ? { caps: cleanCaps } : {}), ...(cleanTransport ? { transport: cleanTransport } : {}) });
+    const added = await addCustomModel({
+      providerAlias, id, type: type || "llm",
+      name: name || catalog?.name,
+      ...(cleanCaps ? { caps: cleanCaps } : {}),
+      ...(cleanTransport ? { transport: cleanTransport } : {}),
+    });
     return NextResponse.json({ success: true, added });
   } catch (error) {
     console.log("Error adding custom model:", error);
