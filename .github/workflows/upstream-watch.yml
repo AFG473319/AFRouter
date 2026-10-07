@@ -1,0 +1,396 @@
+name: Upstream watch
+
+# Weekly "did decolua/9router move without us?" check.
+#
+# This repo is a fork of decolua/9router that has diverged hard (rebrand, CI,
+# SQLite persistence, provider work), so upstream is never a clean
+# fast-forward — it gets merged in by hand, commit by commit. That only works
+# if we NOTICE upstream moved, which is exactly what nobody does when the only
+# signal is a stale `git fetch`.
+#
+# The job:
+#   1. fetches `upstream/master` (upstream's default branch is `master`, NOT
+#      `main` — do not "fix" this to `main`, the ref will not exist),
+#   2. lists `git log HEAD..upstream/master` — every upstream commit that is
+#      not reachable from our HEAD,
+#   3. files / updates ONE open issue labelled `upstream` with that list,
+#      every commit linked to its upstream URL,
+#   4. flags the commits that will actually need hand-merging (see below).
+#
+# On the conflict flag (step 4): the obvious version of this check is "flag
+# commits touching files WE changed". Measured against the current tree that
+# fires on 151 of 151 commits, because this fork has rewritten 834 files since
+# the merge-base — a flag that is always true carries no information at all.
+# So instead we run a real 3-way trial merge with `git merge-tree`, which
+# merges upstream into HEAD inside the object database (no working tree, no
+# commits, no push) and lists exactly the files that come out conflicted.
+# Commits touching *those* files are the genuine merge blockers; currently
+# 63 files / 95 of 151 commits. If `git merge-tree` is unavailable or fails
+# (git < 2.38), the job degrades to the naive file-overlap flag and says so
+# rather than reporting nothing.
+#
+# Idempotence: the body carries a digest of the commit-sha list plus the
+# conflict-file list (`<!-- upstream-watch:digest=... -->`). Unchanged since
+# the last run means no API write at all, so a quiet week costs nothing and
+# the issue does not churn. The timestamp in the body therefore only refreshes
+# when the underlying data changes — intentional, not a stale bug.
+#
+# Advisory, never a gate: it only ever writes an issue. It cannot block a PR,
+# and a failure here means "we don't know whether upstream moved", not
+# "the build is broken".
+#
+# Note: scheduled workflows stop firing after ~60 days without repo activity;
+# `workflow_dispatch` is here so the check can also be run by hand.
+
+on:
+  schedule:
+    # Weekly, Monday 06:17 UTC — deliberately off the top-of-the-hour stampede,
+    # when GitHub's scheduler is most likely to delay or drop the run.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# Never cancel an in-flight report: two overlapping runs could race on
+# create-vs-edit and file a duplicate issue.
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM_REPO: decolua/9router
+      UPSTREAM_BRANCH: master
+      ISSUE_LABEL: upstream
+      ISSUE_TITLE: '⬆️ Upstream sync: decolua/9router'
+      # Hard cap on commits written into the issue body (a body is limited to
+      # 64 KB and a 150-commit dump is unreadable anyway). Newest first, so
+      # the digest still changes whenever anything new lands.
+      MAX_COMMITS: '100'
+      # Rows in the "where it will hurt" table.
+      HOTSPOT_ROWS: '15'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history on both sides: `HEAD..upstream/master`,
+          # `git merge-base` and `git merge-tree` are all meaningless on a
+          # shallow clone.
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          # checkout only configures `origin`, so the second remote has to be
+          # created here. Deliberately NOT `git remote remove` + `add`: removing
+          # a remote also deletes its remote-tracking refs, so a flaky fetch
+          # would leave us with no upstream ref at all. set-url / add keeps
+          # whatever we already had and is idempotent either way.
+          URL="https://github.com/${UPSTREAM_REPO}.git"
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream "${URL}"
+          else
+            git remote add upstream "${URL}"
+          fi
+          # Explicit refspec so the remote-tracking ref is guaranteed to exist
+          # regardless of the remote's configured fetch refspec.
+          git fetch --no-tags upstream \
+            "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+          echo "upstream/${UPSTREAM_BRANCH} -> $(git rev-parse --short "refs/remotes/upstream/${UPSTREAM_BRANCH}")"
+
+      - name: Collect new commits and conflict risks
+        id: scan
+        run: |
+          set -euo pipefail
+
+          UPSTREAM_REF="refs/remotes/upstream/${UPSTREAM_BRANCH}"
+          RANGE="HEAD..${UPSTREAM_REF}"
+          TMP="${RUNNER_TEMP}"
+
+          LIST_FILE="${TMP}/upstream-list.md"
+          BODY_FILE="${TMP}/upstream-body.md"
+          OURS_FILE="${TMP}/ours-files.txt"
+          CONFLICT_FILE="${TMP}/conflict-files.txt"
+          HOTSPOT_FILE="${TMP}/hotspots.tsv"
+          LOG_FILE="${TMP}/upstream-log.txt"
+          MT_OUT="${TMP}/merge-tree.out"
+          MT_ERR="${TMP}/merge-tree.err"
+
+          BASE="$(git merge-base HEAD "${UPSTREAM_REF}")"
+          TOTAL="$(git rev-list --count "${RANGE}")"
+
+          # base/total first: both the reporting steps branch on total.
+          {
+            echo "base=${BASE}"
+            echo "total=${TOTAL}"
+          } >> "${GITHUB_OUTPUT}"
+
+          if [ "${TOTAL}" -eq 0 ]; then
+            : > "${BODY_FILE}"
+            echo "### Upstream watch" >> "${GITHUB_STEP_SUMMARY}"
+            echo >> "${GITHUB_STEP_SUMMARY}"
+            echo "Nothing to do — every upstream commit is already in this fork." \
+              >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          # ------------------------------------------------------------------
+          # Which files will actually conflict?
+          # ------------------------------------------------------------------
+          git diff --name-only "${BASE}" HEAD > "${OURS_FILE}"
+          OURS_COUNT="$(grep -c . "${OURS_FILE}" || true)"
+
+          : > "${CONFLICT_FILE}"
+          MODE="trial-merge"
+          mt_rc=0
+          git merge-tree --write-tree --name-only --no-messages \
+            HEAD "${UPSTREAM_REF}" > "${MT_OUT}" 2>"${MT_ERR}" || mt_rc=$?
+
+          # merge-tree exits 1 BOTH for "conflicts found" (what we want) and
+          # for "bad arguments", so the exit code alone is ambiguous. The
+          # discriminator is a tree OID on stdout: a successful merge always
+          # writes one, an error writes nothing.
+          if head -1 "${MT_OUT}" | grep -qE '^[0-9a-f]{40,64}$'; then
+            # stdout = <merged tree OID> / <conflicted paths> / blank ...
+            awk 'NR>1 && $0=="" {exit} NR>1 {print}' "${MT_OUT}" \
+              | sort -u > "${CONFLICT_FILE}"
+          else
+            # Old git (<2.38) or an unexpected failure: degrade to the naive
+            # file-overlap flag instead of silently reporting nothing.
+            MODE="file-overlap"
+            cp "${OURS_FILE}" "${CONFLICT_FILE}"
+            # First stderr line only — git's usage text is ~20 lines and a
+            # single-line annotation is all anyone reads.
+            MT_MSG="$(sed -n '1p' "${MT_ERR}" | tr -d '\r\n')"
+            echo "::warning::git merge-tree unusable (rc=${mt_rc}): ${MT_MSG:-no stderr}; falling back to file-overlap flags"
+          fi
+          CONFLICT_COUNT="$(grep -c . "${CONFLICT_FILE}" || true)"
+
+          declare -A CONFLICTING=()
+          while IFS= read -r f; do
+            [ -n "${f}" ] || continue
+            CONFLICTING["${f}"]=1
+          done < "${CONFLICT_FILE}"
+
+          # ------------------------------------------------------------------
+          # One pass over every upstream commit: `SOH<sha>TAB<subject>` header
+          # lines, then the changed paths. SOH cannot occur in a filename we
+          # would ever diff, so it is a safe record marker.
+          # ------------------------------------------------------------------
+          git log --format='%x01%H%x09%s' --name-only "${RANGE}" > "${LOG_FILE}"
+
+          : > "${LIST_FILE}"
+          : > "${HOTSPOT_FILE}"
+          declare -A HOT=()
+          shown=0
+          flagged_total=0
+          current_sha=""
+          current_subj=""
+          current_flag=0
+
+          # Counts every commit; only writes the first MAX_COMMITS.
+          emit() {
+            [ -n "${current_sha}" ] || return 0
+            local mark=""
+            if [ "${current_flag}" -eq 1 ]; then
+              flagged_total=$((flagged_total + 1))
+              mark="⚠️ **conflicts** "
+            fi
+            if [ "${shown}" -lt "${MAX_COMMITS}" ]; then
+              printf -- '- %s[`%s`](https://github.com/%s/commit/%s) %s\n' \
+                "${mark}" "${current_sha:0:8}" "${UPSTREAM_REPO}" \
+                "${current_sha}" "${current_subj}" >> "${LIST_FILE}"
+            fi
+            shown=$((shown + 1))
+          }
+
+          while IFS= read -r line || [ -n "${line}" ]; do
+            if [ "${line:0:1}" = $'\x01' ]; then
+              emit
+              rest="${line:1}"
+              current_sha="${rest%%$'\t'*}"
+              current_subj="${rest#*$'\t'}"
+              current_flag=0
+            elif [ -n "${line}" ]; then
+              if [ -n "${CONFLICTING[${line}]:-}" ]; then
+                current_flag=1
+                HOT["${line}"]=$(( ${HOT["${line}"]:-0} + 1 ))
+              fi
+            fi
+          done < "${LOG_FILE}"
+          emit
+
+          for k in "${!HOT[@]}"; do
+            printf '%s\t%s\n' "${HOT[$k]}" "${k}" >> "${HOTSPOT_FILE}"
+          done
+
+          # The conflict set is part of the identity too: our HEAD can move
+          # (changing what conflicts) without the upstream commit list moving,
+          # e.g. after cherry-picking something upstream already had.
+          DIGEST="$({ git rev-list "${RANGE}"; echo '---'; cat "${CONFLICT_FILE}"; } \
+            | sha256sum | cut -c1-16)"
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+
+          FLAG_LINE="- Upstream commits touching those files: **${flagged_total} of ${TOTAL}** (marked ⚠️ below)"
+          if [ "${MODE}" = "trial-merge" ]; then
+            FLAG_QUOTE1='> ⚠️ marks a commit touching a file that a real `git merge upstream/master` would leave conflicted.'
+            FLAG_QUOTE2='> Everything else should merge clean — read those first.'
+          else
+            FLAG_QUOTE1='> ⚠️ marks a commit touching a file this fork has already rewritten — a coarse overlap check only.'
+            FLAG_QUOTE2='> `git merge-tree` was unavailable, so this is NOT a verified conflict list.'
+          fi
+
+          {
+            echo "<!-- upstream-watch:digest=${DIGEST} -->"
+            echo
+            echo "## ${TOTAL} commit(s) in \`${UPSTREAM_REPO}\` we don't have"
+            echo
+            echo "- Compared \`upstream/${UPSTREAM_BRANCH}\` against \`HEAD\`"
+            echo "- Merge-base: \`${BASE:0:8}\`"
+            echo "- Files this fork has modified since the merge-base: **${OURS_COUNT}**"
+            if [ "${MODE}" = "trial-merge" ]; then
+              echo "- Files that actually conflict in a trial merge: **${CONFLICT_COUNT}**"
+            else
+              echo "- Coarse overlap set (trial merge unavailable): **${CONFLICT_COUNT}**"
+            fi
+            echo "${FLAG_LINE}"
+            echo "- Report generated <sub>(refreshed only when the data changes)</sub>"
+            echo
+            printf '%s\n%s\n' "${FLAG_QUOTE1}" "${FLAG_QUOTE2}"
+          } > "${BODY_FILE}"
+
+          if [ "${MODE}" = "trial-merge" ] && [ -s "${HOTSPOT_FILE}" ]; then
+            {
+              echo
+              echo "### Where it will hurt"
+              echo
+              echo "Conflicted files, by how many of the ${TOTAL} upstream commits touch them:"
+              echo
+              echo "| Upstream commits | File |"
+              echo "| ---: | --- |"
+              sort -t $'\t' -k1,1nr "${HOTSPOT_FILE}" | head -n "${HOTSPOT_ROWS}" \
+                | while IFS=$'\t' read -r cnt path; do
+                    printf '| %s | `%s` |\n' "${cnt}" "${path}"
+                  done
+              total_hotspots="$(grep -c . "${HOTSPOT_FILE}" || true)"
+              if [ "${total_hotspots}" -gt "${HOTSPOT_ROWS}" ]; then
+                echo
+                echo "<sub>…and $((total_hotspots - HOTSPOT_ROWS)) more conflicted file(s).</sub>"
+              fi
+            } >> "${BODY_FILE}"
+          fi
+
+          {
+            echo
+            echo "### Commits"
+            echo
+          } >> "${BODY_FILE}"
+          cat "${LIST_FILE}" >> "${BODY_FILE}"
+
+          if [ "${shown}" -gt "${MAX_COMMITS}" ]; then
+            {
+              echo
+              echo "<sub>…and $((shown - MAX_COMMITS)) older commit(s) not shown. Full list:</sub>"
+              echo
+              echo '```'
+              echo "git log --oneline HEAD..upstream/${UPSTREAM_BRANCH}"
+              echo '```'
+            } >> "${BODY_FILE}"
+          fi
+
+          {
+            echo "### Upstream watch"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| New upstream commits | ${TOTAL} |"
+            echo "| Files we modified since merge-base | ${OURS_COUNT} |"
+            echo "| Flag mode | ${MODE} |"
+            echo "| Conflicted files | ${CONFLICT_COUNT} |"
+            echo "| Commits flagged | ${flagged_total} / ${TOTAL} |"
+            echo "| Merge-base | \`${BASE:0:8}\` |"
+            echo "| Digest | \`${DIGEST}\` |"
+            echo "| merge-tree exit code | ${mt_rc} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: File or update the issue
+        if: steps.scan.outputs.total != '0'
+        env:
+          DIGEST: ${{ steps.scan.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          # `gh issue create --label` fails if the label never existed; --force
+          # is create-or-update, so this is safe to run every single time.
+          gh label create "${ISSUE_LABEL}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --force --color D93F0B \
+            --description "Commits from ${UPSTREAM_REPO} that this fork does not have" \
+            >/dev/null
+
+          BODY_FILE="${RUNNER_TEMP}/upstream-body.md"
+
+          # `gh` embeds its own jq behind --jq, so there is no jq binary to be
+          # missing. The title is interpolated into the program (it contains no
+          # `"`, backtick or backslash, so this is safe) and passed as one argv
+          # element via quoting.
+          #
+          # The title is stable on purpose so the same tracker survives every
+          # run; a title carrying the commit count could never be re-found.
+          MATCH=(--repo "${GITHUB_REPOSITORY}" --label "${ISSUE_LABEL}" \
+                 --state open --limit 100 --json number,title,url)
+          PICK='[.[] | select(.title | startswith("'"${ISSUE_TITLE}"'"))][0]'
+
+          NUMBER="$(gh issue list "${MATCH[@]}" --jq "${PICK}.number // empty")"
+          URL="$(gh issue list "${MATCH[@]}" --jq "${PICK}.url // empty")"
+
+          if [ -z "${NUMBER}" ]; then
+            URL="$(gh issue create \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${ISSUE_TITLE}" \
+              --label "${ISSUE_LABEL}" \
+              --body-file "${BODY_FILE}")"
+            echo "Opened a new tracker: ${URL}" >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          # Capture the body first instead of piping `gh` straight into
+          # `sed | head`: head exiting early can SIGPIPE the writer, and under
+          # `set -o pipefail` that would abort the whole step over a purely
+          # cosmetic extraction. Only one line can ever match, so no `head`.
+          ISSUE_BODY="$(gh issue view "${NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+            --json body --jq '.body')"
+          OLD_DIGEST="$(printf '%s\n' "${ISSUE_BODY}" \
+            | sed -n 's/.*upstream-watch:digest=\([0-9a-f]*\).*/\1/p')"
+
+          if [ "${OLD_DIGEST}" = "${DIGEST}" ]; then
+            echo "Commit list unchanged (digest ${DIGEST}); issue #${NUMBER} left alone." \
+              >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          gh issue edit "${NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file "${BODY_FILE}" >/dev/null
+          echo "Updated ${URL} (digest ${OLD_DIGEST:-none} → ${DIGEST})." \
+            >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Close the tracker when we are back in sync
+        if: steps.scan.outputs.total == '0'
+        run: |
+          set -euo pipefail
+          MATCH=(--repo "${GITHUB_REPOSITORY}" --label "${ISSUE_LABEL}" \
+                 --state open --limit 100 --json number,title,url)
+          PICK='[.[] | select(.title | startswith("'"${ISSUE_TITLE}"'"))][0]'
+          NUMBER="$(gh issue list "${MATCH[@]}" --jq "${PICK}.number // empty")"
+          if [ -n "${NUMBER}" ]; then
+            gh issue close "${NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --comment "Nothing left: \`git log HEAD..upstream/${UPSTREAM_BRANCH}\` is empty, so every upstream commit is already in this fork. Reopened automatically if upstream moves again." \
+              >> "${GITHUB_STEP_SUMMARY}"
+            echo "Closed #${NUMBER} — fully in sync." >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "Already in sync; no tracker open." >> "${GITHUB_STEP_SUMMARY}"
+          fi
