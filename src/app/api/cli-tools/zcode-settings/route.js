@@ -180,9 +180,11 @@ const capsToSpec = (caps) => ({
     caps.audioInput ? "audio" : null,
   ].filter(Boolean),
   reasoning: caps.reasoning === true,
-  // Per-model selectable efforts (models.dev ladder via /v1/models, else the
-  // static tables). Carried so brand-new entries get real variants instead of
-  // the hardcoded fallback in buildModelEntry.
+  // Per-model selectable efforts from the single resolver
+  // (getCapabilitiesForModel → resolveReasoningLevels, backfilled via
+  // getThinkingLevels). Carried so brand-new entries get real variants instead
+  // of the hardcoded fallback in buildModelEntry. Raw caps fields are fallback
+  // only so PATTERN_THINKING fixes are never bypassed.
   reasoningLevels: Array.isArray(caps.reasoningLevels) && caps.reasoningLevels.length
     ? caps.reasoningLevels
     : (Array.isArray(caps.reasoningEfforts) && caps.reasoningEfforts.length ? caps.reasoningEfforts : null),
@@ -211,13 +213,14 @@ const resolveModelSpecs = async (ids, catalog) => {
       }
     }
     if (caps && Number.isFinite(caps.contextWindow) && Number.isFinite(caps.maxOutput)) {
-      // Levels precedence: live/discovered ladder first, then the shared
-      // per-model levels (pattern quirks, then format defaults) — both
-      // dynamic, so new models self-resolve with zero table edits here.
+      // Levels precedence: the shared resolver first (pattern quirks, then
+      // format defaults) — dynamic, so new models self-resolve with zero table
+      // edits here — then the live/discovered ladder carried on caps.
       const spec = { ...capsToSpec(caps), verified: true };
-      if (spec.reasoning && !spec.reasoningLevels) {
-        const levels = getThinkingLevels(prefix, bare);
+      if (spec.reasoning) {
+        const levels = getThinkingLevels(prefix, bare) || spec.reasoningLevels;
         if (levels?.length) spec.reasoningLevels = levels;
+        else delete spec.reasoningLevels;
       }
       specs.set(id, spec);
     } else {

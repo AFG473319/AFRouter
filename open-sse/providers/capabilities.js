@@ -37,6 +37,8 @@
 
 import { matchPattern } from "./pricing.js";
 import { looksLikeVisionModel } from "./visionPatterns.js";
+import { getProviderModels } from "../config/providerModels.js";
+import { resolveKiroEffortPath } from "../config/kiroConstants.js";
 
 /**
  * Safe floor — every resolved result is merged over this so consumers
@@ -160,12 +162,15 @@ export const MODEL_CAPABILITIES = {
   "union-alpha": { vision: true, contextWindow: 262144, maxOutput: 131072 },
 };
 
-const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
+const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 272000, maxOutput: 128000 };
 
 // Codex OAuth (ChatGPT backend) — per-model context window reported by upstream
 // (lower than OpenAI API's 1.05M). Sol differs from Terra/Luna. #2720
-const CODEX_GPT_56_SOL_CAPS  = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 372000, maxOutput: 128000 };
-const CODEX_GPT_56_DEFAULT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
+// thinkingCanDisable:false — the backend 400s on reasoning_effort "none"
+// (Unsupported value), so the picker must not offer it and the wire clamps to
+// minimal instead. See tests/unit/thinking-openai-reasoning-cannot-disable.test.js (#4031).
+const CODEX_GPT_56_SOL_CAPS  = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 372000, maxOutput: 128000 };
+const CODEX_GPT_56_DEFAULT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 272000, maxOutput: 128000 };
 const CODEX_EXTENDED_CAPS = { ...CODEX_GPT_56_DEFAULT_CAPS, contextWindow: 872000 };
 
 // Devin CLI's registry declares a 200k context window for these GPT variants.
@@ -198,10 +203,10 @@ export const PROVIDER_CAPABILITIES = {
   // getCapabilitiesForLiveModel (live display name -> family patterns, plus
   // the gateway's own per-model is_reasoning/is_vl signals).
   "codex": {
-    "gpt-6.1-sol":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
-    "gpt-6-astra":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
-    "gpt-6-sol":                 { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
-    "gpt-6-luna":                { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-6.1-sol":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 272000, maxOutput: 128000 },
+    "gpt-6-astra":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 272000, maxOutput: 128000 },
+    "gpt-6-sol":                 { vision: true, reasoning: true, search: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 272000, maxOutput: 128000 },
+    "gpt-6-luna":                { vision: true, reasoning: true, search: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 272000, maxOutput: 128000 },
     "gpt-6-astra[1m]":           CODEX_EXTENDED_CAPS,
     "gpt-6-sol[1m]":             CODEX_EXTENDED_CAPS,
     "gpt-6-luna[1m]":            CODEX_EXTENDED_CAPS,
@@ -521,9 +526,13 @@ export function aggregateComboCapabilities(comboModels, comboLookup = null, reso
     reasoning:          first.reasoning,
     // Union of every member's selectable efforts: a combo can express any level
     // any member supports, and the per-candidate reconciler maps the chosen
-    // level onto whichever member ultimately serves the request. Absent (not
-    // `[]`) when no member declares levels, so the picker can tell "no effort
-    // control" from "control with an empty set".
+    // level onto whichever member ultimately serves the request
+    // (translateRequest coerceLevels=true → resolveLevelFor nearest-supported,
+    // thinking.js). Intersection would hide levels that ARE available whenever
+    // their owning seat serves; the wire never sends a member a level it
+    // rejects — it is re-encoded onto that member's nearest level instead.
+    // Absent (not `[]`) when no member declares levels, so the picker can tell
+    // "no effort control" from "control with an empty set".
     reasoningLevels:    (() => {
       const union = new Set();
       for (const c of allCaps) {
@@ -639,6 +648,119 @@ function isCommandCodeTextOnly(model) {
   }
   return false;
 }
+// ── Single source of truth for selectable reasoning levels ─────────────
+// Canonical ladder order (low → high). `none` is FIRST and terminal ("thinking
+// disabled", not minimal effort). `ultra` is real on two Codex models (one step
+// above max). Off-ladder aliases (e.g. zai `thinking`) sort after the canonical
+// set, preserving first-seen order.
+const LEVEL_RANK = new Map(
+  ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"].map((l, i) => [l, i])
+);
+
+export function orderReasoningLevels(levels) {
+  const seen = new Set();
+  const ranked = [];
+  const unranked = [];
+  for (const l of levels || []) {
+    if (typeof l !== "string" || seen.has(l)) continue;
+    seen.add(l);
+    if (LEVEL_RANK.has(l)) ranked.push(l);
+    else unranked.push(l);
+  }
+  ranked.sort((a, b) => LEVEL_RANK.get(a) - LEVEL_RANK.get(b));
+  return [...ranked, ...unranked];
+}
+
+// Shared level sets (deduped) — verified against provider docs + wire in thinkingUnified.applyFormat.
+const L = {
+  base: ["none", "low", "medium", "high"],                          // qwen, step, hunyuan, gemini-budget
+  onOff: ["none", "thinking"],                                      // zai (binary), minimax (adaptive)
+  openai: ["none", "minimal", "low", "medium", "high", "xhigh"],    // GPT-5.x / o-series (no "max")
+  levelMax: ["none", "low", "medium", "high", "max"],               // kimi
+  budgetX: ["none", "low", "medium", "high", "xhigh", "max"],       // claude-budget, claude-adaptive
+  gemini: ["minimal", "low", "medium", "high"],                     // gemini-3 thinkingLevel (no disable)
+  hiMax: ["none", "high", "max"],                                   // deepseek (low/med→high, xhigh→max)
+};
+
+// thinkingFormat → valid selectable levels (source of truth for UI options).
+export const FORMAT_LEVELS = {
+  openai: L.openai,
+  "claude-adaptive": L.budgetX,
+  "claude-budget": L.budgetX,
+  "gemini-level": L.gemini,
+  "gemini-budget": L.base,
+  zai: L.onOff,
+  qwen: L.base,
+  kimi: L.levelMax,
+  deepseek: L.hiMax,
+  commandcode: ["none", "low", "medium", "high", "xhigh", "max"],
+  minimax: L.onOff,
+  hunyuan: L.base,
+  step: L.base,
+};
+
+const CODEX_GPT_5_6_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+// Opus/Sonnet 4.6 lack xhigh (Anthropic + Kiro docs) — keep the 4-level+max set.
+const CLAUDE_NO_XHIGH = ["none", "low", "medium", "high", "max"];
+
+// Model-name pattern overrides (glob, first match wins) — more precise than format default.
+export const PATTERN_THINKING = [
+  { pattern: "*claude*4.6*", levels: CLAUDE_NO_XHIGH },
+  { pattern: "*claude*4-6*", levels: CLAUDE_NO_XHIGH },
+  { provider: "codex", pattern: "*gpt-6*", levels: CODEX_GPT_5_6_LEVELS },
+  { provider: "codex", pattern: "*gpt-5.6-sol*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
+  { provider: "codex", pattern: "*gpt-5.6-terra*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
+  { provider: "codex", pattern: "*gpt-5.6-luna*", levels: CODEX_GPT_5_6_LEVELS },
+  { pattern: "*codex*", levels: ["low", "medium", "high", "xhigh"] }, // codex cannot disable thinking
+  { pattern: "*mimo*v2.6*", levels: ["none", "low", "medium", "high", "xhigh"] },
+  // mimo-v2.5-pro on opencode-go rejects reasoning_effort "max" (probed live); v2.5 accepts it.
+  { pattern: "*mimo*v2.5-pro*", levels: ["none", "low", "medium", "high", "xhigh"] },
+  // DeepSeek v4.* (Alibaba MaaS, probed live): effort low|medium|high|xhigh|max
+  // all 200 via output_config.effort; "none" is a 400 on the anthropic route
+  // (disable thinking instead). none kept for the picker = disable.
+  { pattern: "*deepseek-v4.*", levels: ["none", "low", "medium", "high", "xhigh", "max"] },
+  // codebuddy-cn per-model effort sets — the server's product-config payload
+  // publishes `reasoning.supportedEfforts` per model. NOTE: the chat endpoint
+  // accepts any level you send (probed none/minimal/low/medium/high/xhigh/max
+  // → all 200), but values outside a model's supportedEfforts are silently
+  // clamped, so the declared set stays authoritative for the picker. Models
+  // that publish no supportedEfforts (glm-5.1 / glm-5v-turbo / kimi-k2.x /
+  // kimi-k3-1 / minimax-m3) fall through to the openai format default.
+  { provider: "codebuddy-cn", pattern: "glm-5.3*",     levels: ["low", "high", "max"] },
+  { provider: "codebuddy-cn", pattern: "glm-5.2",      levels: ["high", "xhigh"] },
+  { provider: "codebuddy-cn", pattern: "deepseek-v4*", levels: ["low", "high", "xhigh"] },
+  { provider: "codebuddy-cn", pattern: "hy3*",         levels: ["low", "high"] },
+  { provider: "codebuddy-cn", pattern: "hy4*",         levels: ["high"] },
+  // codebuddy-intl rides the same gateway catalog, so its deepseek levels match.
+  { provider: "codebuddy-intl", pattern: "deepseek-v4*", levels: ["low", "high", "xhigh"] },
+];
+
+// Resolve the selectable reasoning ladder for one model — the ONLY place the
+// precedence lives. Order: exact Codex registry entry → PATTERN_THINKING
+// override → discovered ladder (models.dev reasoning_options via the synced
+// catalog) → thinkingFormat default. Returns `undefined` (not `[]`) when the
+// model reasons but exposes no known effort control — callers must offer a
+// toggle only and must NOT invent levels. `none` is kept only when the model
+// can disable thinking (thinkingCanDisable !== false). Kiro models with no
+// effort path resolve to `undefined` (Kiro null case).
+export function resolveReasoningLevels(provider, model, caps, discoveredLevels = null, codexLevels = null) {
+  if (provider === "kiro") {
+    try {
+      if (resolveKiroEffortPath(model) === null) return undefined;
+    } catch { /* kiro helper unavailable (browser bundle) — fall through */ }
+  }
+  if (!caps?.reasoning) return undefined;
+  const hit = PATTERN_THINKING.find((entry) =>
+    (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
+  );
+  let levels = codexLevels || hit?.levels || discoveredLevels || FORMAT_LEVELS[caps.thinkingFormat];
+  if (!levels) return undefined;
+  let ordered = orderReasoningLevels(levels);
+  if (caps.thinkingCanDisable === false) ordered = ordered.filter((l) => l !== "none");
+  return ordered.length ? ordered : undefined;
+}
+
 // Formats whose applyFormat encoder in thinkingUnified.js sends an effort level
 // (reasoning_effort / output_config.effort / thinkingLevel). Budget-only formats
 // (claude-budget, gemini-budget, qwen, hunyuan) and toggle-only ones (minimax,
@@ -687,6 +809,28 @@ export function getCapabilitiesForModel(provider, model) {
     if (reasoned && EFFORT_WIRE_FORMATS.has(result.thinkingFormat)) {
       result.thinkingEffortSupported = true;
     }
+  }
+  // Single source of truth for the picker ladder: exact Codex entry, then
+  // PATTERN_THINKING override, then the discovered ladder above, then the
+  // format default — with the canDisable filter and Kiro null case. Every
+  // reasoning model with known effort control leaves here with an ordered,
+  // deduplicated ladder; toggle-only / unknown-effort models leave with NO
+  // reasoningLevels key so consumers offer a toggle instead of inventing
+  // levels. Codex exact entries come from the co-located registry (transport +
+  // models); the suffix "(level)" picker form is stripped before lookup.
+  if (result.reasoning) {
+    let codexLevels = null;
+    if (provider === "codex" || provider === "cx") {
+      try {
+        const baseId = String(model || "").replace(/\([^()]+\)\s*$/, "");
+        codexLevels = getProviderModels("cx").find((entry) => entry.id === baseId)?.thinkingLevels || null;
+      } catch { codexLevels = null; }
+    }
+    const resolved = resolveReasoningLevels(provider, model, result, result.reasoningLevels || null, codexLevels);
+    if (resolved?.length) result.reasoningLevels = resolved;
+    else delete result.reasoningLevels;
+  } else {
+    delete result.reasoningLevels;
   }
   return result;
 }
