@@ -7,8 +7,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CATALOG_FILE, CATALOG_RAW_FILE, CATALOG_VERSION, invalidateCatalog, installCatalogSource } from "open-sse/providers/catalogOverride.js";
-import { KILO_CATALOG_URL } from "open-sse/config/kiloCatalog.js";
-import { kiloReasoningLevels } from "@/lib/kiloReasoning.js";
 
 const CATALOG_URL = "https://models.dev/api.json";
 const FETCH_TIMEOUT_MS = 60000;
@@ -49,9 +47,8 @@ export const PROVIDER_ALIASES = {
   // the same base ids it publishes.
   "cline": "cline-pass",
   // Both Kilo providers (`kilocode` the free view, `kilo-gateway` the paid one)
-  // are filed under the same catalog key `kilo` — but that entry is built from
-  // Kilo's own API (KILO_CATALOG_URL), not models.dev's copy of it; see
-  // kiloCatalogFromKiloApi below. The ids match verbatim:
+  // fetch the very endpoint models.dev catalogs as `kilo`
+  // (https://api.kilo.ai/api/gateway/models), and the ids match verbatim:
   // kilo-auto/free, stealth/space-bunny-alpha, stepfun/step-3.7-flash:free.
   "kilocode": "kilo",
   "kilo-gateway": "kilo",
@@ -96,42 +93,6 @@ function slim(catalog) {
     out[providerId] = models;
   }
   return out;
-}
-
-// Kilo's own catalog is the authority for its two providers. models.dev's
-// `kilo` entry is a secondhand copy of the same gateway and can lag it (or
-// describe it with models.dev's field names, not Kilo's). Kilo publishes
-// OpenRouter-shaped models; convert one entry into the models.dev shape the
-// rest of this pipeline already understands, so build() can consume it
-// unchanged and PROVIDER_ALIASES keeps working.
-//
-// Field map (Kilo -> models.dev):
-//   architecture.input_modalities  -> modalities.input ("file" normalized to "pdf")
-//   architecture.output_modalities -> modalities.output
-//   context_length                 -> limit.context
-//   top_provider.max_completion_tokens -> limit.output
-//   supported_parameters           -> reasoning / tool_call
-//   opencode.variants              -> reasoning_options ([{type:"effort",values}])
-export function kiloCatalogFromKiloApi(payload) {
-  const models = {};
-  for (const entry of Array.isArray(payload?.data) ? payload.data : []) {
-    if (!entry?.id) continue;
-    const input = (entry.architecture?.input_modalities || []).map((m) => (m === "file" ? "pdf" : m));
-    const parameters = Array.isArray(entry.supported_parameters) ? entry.supported_parameters : [];
-    const levels = kiloReasoningLevels(entry);
-    const efforts = levels?.levels?.map((l) => l.effort).filter((v, i, a) => a.indexOf(v) === i);
-    models[entry.id] = {
-      id: entry.id,
-      name: entry.name,
-      description: entry.description,
-      reasoning: parameters.includes("reasoning") || parameters.includes("reasoning_effort"),
-      tool_call: parameters.includes("tools"),
-      modalities: { input: [...new Set(input)], output: entry.architecture?.output_modalities || [] },
-      limit: { context: entry.context_length, output: entry.top_provider?.max_completion_tokens },
-      ...(efforts?.length ? { reasoning_options: [{ type: "effort", values: efforts }] } : {}),
-    };
-  }
-  return { models };
 }
 
 // models.dev publishes a model's reasoning controls as `reasoning_options`:
@@ -344,21 +305,6 @@ export async function syncModelCatalog() {
       // point — not worth a worker thread.
       const catalog = await response.json();
       const etag = response.headers.get("etag") || null;
-
-      // Replace models.dev's secondhand `kilo` entry with Kilo's own catalog.
-      // Fail closed: a Kilo outage drops the override (hand tables decide)
-      // rather than falling back to a mirror we no longer trust.
-      try {
-        const kiloResponse = await fetch(KILO_CATALOG_URL, {
-          headers: { accept: "application/json" },
-          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        });
-        if (kiloResponse.ok) catalog.kilo = kiloCatalogFromKiloApi(await kiloResponse.json());
-        else delete catalog.kilo;
-      } catch {
-        delete catalog.kilo;
-      }
-
       const { entries, registry } = await collectEntries();
       const { models, providers } = build(catalog, entries, registry);
       const serialized = JSON.stringify({ v: CATALOG_VERSION, etag, syncedAt: Date.now(), models, providers });
