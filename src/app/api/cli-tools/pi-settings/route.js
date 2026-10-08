@@ -7,6 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 import { readOwnership, writeOwnership } from "@/lib/piModelOwnership.js";
 import {
@@ -160,13 +161,28 @@ const resolveLiveCatalog = async (origin) => {
   }
 };
 
-const capsToSpec = (caps) => ({
-  name: caps.name || undefined,
-  contextWindow: Math.floor(Number(caps.contextWindow)),
-  maxTokens: Math.floor(Number(caps.maxOutput)),
-  vision: caps.vision === true,
-  reasoning: caps.reasoning === true,
-});
+const capsToSpec = (caps, prefix, bare) => {
+  // The shared ladder (Part 1 resolver) drives thinkingLevelMap; when the
+  // caps row carries no ladder, resolve it directly so pattern overrides and
+  // the canDisable filter are never bypassed.
+  let reasoningLevels = Array.isArray(caps.reasoningLevels) && caps.reasoningLevels.length
+    ? caps.reasoningLevels
+    : null;
+  if (!reasoningLevels && caps.reasoning === true && prefix) {
+    reasoningLevels = getThinkingLevels(prefix, bare) || null;
+  }
+  return {
+    name: caps.name || undefined,
+    contextWindow: Math.floor(Number(caps.contextWindow)),
+    maxTokens: Math.floor(Number(caps.maxOutput)),
+    vision: caps.vision === true,
+    reasoning: caps.reasoning === true,
+    // The shared ladder (Part 1 resolver) + disable capability, threaded so
+    // buildModelEntry can write thinkingLevelMap. Absent for toggle-only models.
+    reasoningLevels: reasoningLevels || undefined,
+    canDisable: caps.thinkingCanDisable === false ? false : undefined,
+  };
+};
 
 // Catalog (exact, then alias-translated) -> static registry -> conservative
 // fallback. Never invent values: an unresolved id is reported `unverified` and
@@ -192,7 +208,7 @@ const resolveModelSpecs = async (ids, catalog) => {
       if (staticCaps && Number.isFinite(staticCaps.contextWindow)) caps = staticCaps;
     }
     if (caps && Number.isFinite(caps.contextWindow) && Number.isFinite(caps.maxOutput)) {
-      specs[id] = capsToSpec(caps);
+      specs[id] = capsToSpec(caps, prefix, bare);
     } else {
       specs[id] = { ...FALLBACK_SPEC };
       unverified.push(id);

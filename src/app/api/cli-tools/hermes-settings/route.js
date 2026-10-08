@@ -18,19 +18,32 @@ const getHermesEnvPath = () => path.join(getHermesDir(), ".env");
 
 // Match top-level "model:" block (until next non-indented, non-empty line)
 const MODEL_BLOCK_RE = /^model:[ \t]*\r?\n((?:[ \t]+.*\r?\n?|[ \t]*\r?\n)*)/m;
+// Fresh installs ship the single-line empty-string sentinel (`model: ""` —
+// Nous docs "configuring-models", schema "empty string vs. mapping"). It has
+// no mapping body for MODEL_BLOCK_RE to match, so rewrite it into block form
+// first; otherwise upsert would prepend a second `model:` key and Hermes would
+// read the stale sentinel. Quotes required: a bare `model:` line starts a
+// real mapping and must keep going through MODEL_BLOCK_RE.
+const MODEL_SENTINEL_RE = /^model:[ \t]*(""|'')[ \t]*\r?$/m;
 const DELEGATION_BLOCK_RE = /^delegation:[ \t]*\r?\n((?:[ \t]+.*\r?\n?|[ \t]*\r?\n)*)/m;
 // "auxiliary:" block; children are 2-space-indented role keys with 4+-space fields
 const AUX_BLOCK_RE = /^auxiliary:[ \t]*\r?\n((?:(?:[ \t]+.*\r?\n?)|(?:[ \t]*\r?\n))*)/m;
 const auxRoleRe = (role) => new RegExp(`^  ${role}:[ \\t]*\\r?\\n(?:(?:[ \\t]{4,}.*\\r?\\n?)|(?:[ \\t]*\\r?\\n))*`, "m");
 
+// AFRouter serves OpenAI chat completions, so declare it explicitly: api_mode
+// "" means auto-detect, and a wrong guess would mistranslate every request.
+// (Nous docs: integrations/providers "Custom Endpoint", configuration
+// "providers:" + api_mode chat_completions/codex_responses/anthropic_messages.)
+const HERMES_API_MODE = "chat_completions";
+
 const buildModelBlock = (model, baseUrl) =>
-  `model:\n  default: "${model}"\n  provider: "custom"\n  base_url: "${baseUrl}"\n  api_key: \${OPENAI_API_KEY}\n`;
+  `model:\n  default: "${model}"\n  provider: "custom"\n  base_url: "${baseUrl}"\n  api_mode: "${HERMES_API_MODE}"\n  api_key: \${OPENAI_API_KEY}\n`;
 
 const buildDelegationBlock = (model, baseUrl) =>
-  `delegation:\n  model: "${model}"\n  provider: "custom"\n  base_url: "${baseUrl}"\n  api_key: \${OPENAI_API_KEY}\n`;
+  `delegation:\n  model: "${model}"\n  provider: "custom"\n  base_url: "${baseUrl}"\n  api_mode: "${HERMES_API_MODE}"\n  api_key: \${OPENAI_API_KEY}\n`;
 
 const buildAuxRoleBlock = (role, model, baseUrl) =>
-  `  ${role}:\n    provider: "custom"\n    model: "${model}"\n    base_url: "${baseUrl}"\n    api_key: \${OPENAI_API_KEY}\n`;
+  `  ${role}:\n    provider: "custom"\n    model: "${model}"\n    base_url: "${baseUrl}"\n    api_mode: "${HERMES_API_MODE}"\n    api_key: \${OPENAI_API_KEY}\n`;
 
 // Parse current model block back to fields (best-effort, simple key:value)
 const parseModelBlock = (yaml) => {
@@ -50,6 +63,7 @@ const parseModelBlock = (yaml) => {
 };
 
 const upsertModelBlock = (yaml, newBlock) => {
+  if (MODEL_SENTINEL_RE.test(yaml)) return yaml.replace(MODEL_SENTINEL_RE, newBlock.trimEnd());
   if (MODEL_BLOCK_RE.test(yaml)) return yaml.replace(MODEL_BLOCK_RE, newBlock);
   return yaml.length > 0 ? `${newBlock}\n${yaml}` : newBlock;
 };
@@ -214,7 +228,19 @@ export async function POST(request) {
         newYaml = upsertAuxRole(newYaml, role, buildAuxRoleBlock(role, roleModel, normalizedBaseUrl));
       }
     }
-    await fs.writeFile(getHermesConfigPath(), newYaml);
+    const configPath = getHermesConfigPath();
+    // Backup + atomic write: never leave a half-written config.yaml behind.
+    let backupPath = null;
+    try {
+      await fs.access(configPath);
+      backupPath = `${configPath}.bak-${Date.now()}`;
+      await fs.copyFile(configPath, backupPath);
+    } catch {
+      /* No existing config — nothing to back up */
+    }
+    const tmpPath = `${configPath}.tmp-${process.pid}-${Date.now()}`;
+    await fs.writeFile(tmpPath, newYaml, "utf-8");
+    await fs.rename(tmpPath, configPath);
 
     // Update .env — upsert OPENAI_API_KEY only when caller provides one
     if (apiKey) {
@@ -227,6 +253,7 @@ export async function POST(request) {
       success: true,
       message: "Hermes settings applied successfully!",
       configPath: getHermesConfigPath(),
+      backupPath,
     });
   } catch (error) {
     console.log("Error updating hermes settings:", error);

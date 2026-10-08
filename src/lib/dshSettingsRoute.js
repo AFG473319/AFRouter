@@ -95,8 +95,11 @@ const capsToSpec = (caps, id) => ({
   maxTokens: Math.floor(Number(caps.maxOutput)) || FALLBACK_SPEC.maxTokens,
   vision: caps.vision === true,
   reasoning: caps.reasoning === true,
-  // Real per-model level set (models.dev discovery / hand tables). Carried so the
-  // builder writes the model's actual vocabulary, not a fixed low..max ladder.
+  // Real per-model level set from the single Part 1 resolver
+  // (getCapabilitiesForModel → resolveReasoningLevels: exact Codex entry,
+  // PATTERN_THINKING override, discovered ladder, format default, canDisable
+  // filter). Carried so the builder writes the model's actual vocabulary, not
+  // a fixed low..max ladder. Absent for toggle-only models.
   ...(Array.isArray(caps.reasoningLevels) ? { reasoningLevels: caps.reasoningLevels } : {}),
 });
 

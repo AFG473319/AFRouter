@@ -50,9 +50,15 @@
  *   - `samplingParams` / `compat`: merged verbatim into every request body and
  *     used for verified endpoint quirks. AFRouter is a faithful OpenAI surface,
  *     so the defaults are correct and the user keeps control of temperature.
- *   - `thinkingLevelMap`: omitted = Pi's default map (off..high), the widest
- *     set every routed provider understands. Declaring it would only *narrow*
- *     the /thinking picker.
+ *   - `thinkingLevelMap`: WRITTEN per reasoning model from the shared resolver
+ *     (see piThinkingLevelMap). Pi limits /thinking choices to levels the model
+ *     supports; the map's keys are Pi levels (off/minimal/low/medium/high/
+ *     xhigh/max), string values are the provider wire values, null hides the
+ *     level. Omitting the map leaves Pi's default set, which hides xhigh/max
+ *     on models that support them and offers "off" on models that cannot
+ *     disable thinking. Refs: https://pi.dev/docs/latest/models,
+ *     earendil-works/pi v0.72.0 (thinkingLevelMap replaces reasoningEffortMap,
+ *     #3208).
  *   - `modelOverrides`: only meaningful against a provider's built-in catalog.
  *     The `afrouter` provider is entirely ours, so `models` is the whole story.
  *
@@ -121,8 +127,55 @@ export const buildModelEntry = (id, caps = {}) => {
   }
   if (caps.vision) entry.input.push("image");
   if (caps.reasoning === true) entry.reasoning = true;
+  const thinkingLevelMap = piThinkingLevelMap(caps);
+  if (thinkingLevelMap) entry.thinkingLevelMap = thinkingLevelMap;
   return entry;
 };
+
+/**
+ * Pi thinking levels, weakest-first. `off` is the disable switch, not an
+ * effort — Pi omits the effort param for it.
+ */
+export const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+const PI_EFFORT_KEYS = PI_THINKING_LEVELS.slice(1);
+
+/**
+ * Map a resolved AFRouter spec to Pi's per-model `thinkingLevelMap`.
+ *
+ * Keys are Pi levels; string values are the wire values Pi sends as
+ * `reasoning_effort` on openai-completions (AFRouter speaks that vocabulary
+ * natively, so the map is the identity — wire-neutral, picker-accurate);
+ * null hides the level from /thinking and from cycling. Refs:
+ * https://pi.dev/docs/latest/models (level keys, clamping),
+ * earendil-works/pi v0.72.0 release (map replaces reasoningEffortMap, #3208).
+ *
+ *  - Non-reasoning models, and reasoning models with no mappable effort
+ *    (toggle-only / binary ladders such as zai's [none, thinking]): undefined,
+ *    so the field stays out and Pi keeps its default behavior.
+ *  - `off` maps to "none" (AFRouter's explicit disable) when the model can
+ *    disable thinking, and to null (hidden) when it cannot — offering "off"
+ *    there would display "thinking off" while the backend keeps thinking on.
+ *  - Effort keys missing from the ladder map to null (hidden) so a level the
+ *    model rejects is never offered; keys outside Pi's vocabulary (e.g. Codex
+ *    `ultra`) are left absent for Pi's default pass-through, which AFRouter
+ *    projects onto the model's ceiling.
+ *
+ * @param {{ reasoning?: boolean, reasoningLevels?: string[], canDisable?: boolean, thinkingCanDisable?: boolean } | null} spec
+ * @returns {Record<string, string|null> | undefined}
+ */
+export function piThinkingLevelMap(spec) {
+  if (!spec || spec.reasoning !== true) return undefined;
+  const levels = Array.isArray(spec.reasoningLevels) ? spec.reasoningLevels : [];
+  if (!levels.some((l) => PI_EFFORT_KEYS.includes(l))) return undefined;
+  const canDisable = (spec.canDisable ?? spec.thinkingCanDisable) !== false;
+  const map = { off: canDisable ? "none" : null };
+  for (const key of PI_EFFORT_KEYS) {
+    if (key in map) continue;
+    map[key] = levels.includes(key) ? key : null;
+  }
+  return map;
+}
 
 /** The AFRouter provider entry Pi loads as one OpenAI-compatible provider. */
 export const buildProviderEntry = ({ baseUrl, apiKey, models = [], specs = {} } = {}) => ({

@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { resolveCliApiKey } from "../resolveApiKey.js";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -9,6 +10,8 @@ import { exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+
+const CRUSH_PROVIDER_ID = "9router";
 
 const getCrushConfigPath = () => {
   const configDir = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
@@ -52,6 +55,36 @@ const readConfig = async () => {
   }
 };
 
+// Backup + atomic write: never leave a half-written crush.json behind.
+const writeConfigAtomic = async (config) => {
+  const configPath = getCrushConfigPath();
+  const text = JSON.stringify(config, null, 2);
+  let backupPath = null;
+  try {
+    await fs.access(configPath);
+    backupPath = `${configPath}.bak-${Date.now()}`;
+    await fs.copyFile(configPath, backupPath);
+  } catch {
+    /* No existing config — nothing to back up */
+  }
+  const tmpPath = `${configPath}.tmp-${process.pid}-${Date.now()}`;
+  await fs.writeFile(tmpPath, text, "utf-8");
+  await fs.rename(tmpPath, configPath);
+  return backupPath;
+};
+
+// Resolved context window for one "provider/model" id, via the shared Part 1
+// resolver (finite safe floor when the registry does not know the id — the
+// same convention every other tool route uses).
+const resolveContextWindow = (id) => {
+  const slash = id.indexOf("/");
+  const caps = getCapabilitiesForModel(
+    slash > 0 ? id.slice(0, slash) : null,
+    slash > 0 ? id.slice(slash + 1) : id,
+  );
+  return Math.floor(caps.contextWindow);
+};
+
 export async function GET() {
   try {
     const installed = await checkCrushInstalled();
@@ -85,10 +118,18 @@ export async function POST(request) {
   }
 
   try {
-    const { baseUrl, apiKey, model } = rawBody || {};
+    const { baseUrl, apiKey, model, models } = rawBody || {};
     if (!baseUrl) {
       return NextResponse.json({ error: { message: "baseUrl is required" } }, { status: 400 });
     }
+
+    // Accept a models list (multi-model native: Crush switches between
+    // entries without touching AFRouter); `model` stays as legacy fallback.
+    const ids = (Array.isArray(models) ? models : [])
+      .map((m) => (typeof m === "string" ? m.trim() : m?.id?.trim?.()))
+      .filter(Boolean);
+    if (model && typeof model === "string" && model.trim()) ids.unshift(model.trim());
+    const uniqueIds = [...new Set(ids.length ? ids : ["provider/model-id"])];
 
     const configPath = getCrushConfigPath();
     await fs.mkdir(getCrushDir(), { recursive: true });
@@ -101,30 +142,38 @@ export async function POST(request) {
       /* No existing config */
     }
 
-    if (!existing.providers) existing.providers = {};
+    if (!existing.providers || typeof existing.providers !== "object") existing.providers = {};
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    const modelId = model || "provider/model-id";
+    const resolved = uniqueIds.map((id) => ({ id, name: id, context_window: resolveContextWindow(id) }));
 
-    existing.providers["9router"] = {
+    // Additive merge by model id: re-Apply refreshes specs for models already
+    // written (matters after a catalog refresh) and is idempotent; entries
+    // the user added by hand under our provider are preserved.
+    const previous = Array.isArray(existing.providers[CRUSH_PROVIDER_ID]?.models)
+      ? existing.providers[CRUSH_PROVIDER_ID].models
+      : [];
+    const byId = new Map();
+    for (const m of previous) {
+      if (m && typeof m.id === "string") byId.set(m.id, m);
+    }
+    for (const m of resolved) byId.set(m.id, m);
+
+    existing.providers[CRUSH_PROVIDER_ID] = {
       type: "openai-compat",
       base_url: normalizedBaseUrl,
       api_key: await resolveCliApiKey(apiKey),
-      models: [
-        {
-          id: modelId,
-          name: modelId,
-          context_window: 128000,
-        },
-      ],
+      models: [...byId.values()],
     };
 
-    await fs.writeFile(configPath, JSON.stringify(existing, null, 2), "utf-8");
+    const backupPath = await writeConfigAtomic(existing);
 
     return NextResponse.json({
       success: true,
       message: "Crush settings applied successfully!",
       configPath,
+      backupPath,
+      written: resolved.map((m) => m.id),
     });
   } catch (err) {
     return NextResponse.json({ error: { message: err.message } }, { status: 500 });
@@ -142,10 +191,10 @@ export async function DELETE() {
       return NextResponse.json({ success: true, message: "No config file to reset" });
     }
 
-    if (existing.providers && existing.providers["9router"]) {
-      delete existing.providers["9router"];
+    if (existing.providers && existing.providers[CRUSH_PROVIDER_ID]) {
+      delete existing.providers[CRUSH_PROVIDER_ID];
       if (Object.keys(existing.providers).length === 0) delete existing.providers;
-      await fs.writeFile(configPath, JSON.stringify(existing, null, 2), "utf-8");
+      await writeConfigAtomic(existing);
     }
 
     return NextResponse.json({ success: true, message: "9Router removed from Crush" });

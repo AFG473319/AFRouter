@@ -68,7 +68,8 @@ export const buildModelEntry = (id, caps, format = DEFAULT_FORMAT) => {
     output: Math.floor(caps.maxOutput),
   };
   const capabilities = buildModelCapabilities(caps);
-  if (format === "v2") return { name: id, limit, capabilities };
+  const variants = opencodeReasoningVariants(caps);
+  if (format === "v2") return { name: id, limit, capabilities, ...(variants ? { variants } : null) };
   return {
     name: id,
     limit,
@@ -76,8 +77,39 @@ export const buildModelEntry = (id, caps, format = DEFAULT_FORMAT) => {
     tool_call: capabilities.tools,
     attachment: capabilities.input.some((modality) => modality !== "text"),
     modalities: { input: capabilities.input, output: capabilities.output },
+    ...(variants ? { variants } : null),
   };
 };
+
+/**
+ * Effort vocabulary OpenCode understands as variant `reasoningEffort` values
+ * (opencode.ai/docs/models: OpenAI built-ins none/minimal/low/medium/high/
+ * xhigh; custom variant names allowed, so ladders carrying `max` keep it —
+ * AFRouter projects it onto the model's ceiling).
+ */
+export const OPENCODE_EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * Map a resolved AFRouter spec to OpenCode per-model `variants`: one named
+ * variant per ladder level, each setting that level's `reasoningEffort`
+ * (identity — AFRouter speaks OpenCode's vocabulary natively). `none` is
+ * included only when the model can disable thinking. Returns undefined for
+ * non-reasoning models and toggle-only ladders. Refs:
+ * https://opencode.ai/docs/models/ (variants), https://opencode.ai/v2/docs/models/.
+ *
+ * @param {{ reasoning?: boolean, reasoningLevels?: string[], thinkingCanDisable?: boolean } | null} spec
+ * @returns {Record<string, { reasoningEffort: string }> | undefined}
+ */
+export function opencodeReasoningVariants(spec) {
+  if (!spec || spec.reasoning !== true) return undefined;
+  const levels = Array.isArray(spec.reasoningLevels) ? spec.reasoningLevels : [];
+  const canDisable = spec.thinkingCanDisable !== false && spec.canDisable !== false;
+  const names = OPENCODE_EFFORT_LEVELS.filter((l) => levels.includes(l) && (l !== "none" || canDisable));
+  if (!names.length) return undefined;
+  const variants = {};
+  for (const name of names) variants[name] = { reasoningEffort: name };
+  return variants;
+}
 
 /**
  * Rewrite a model entry into `format` without touching its values, so switching
