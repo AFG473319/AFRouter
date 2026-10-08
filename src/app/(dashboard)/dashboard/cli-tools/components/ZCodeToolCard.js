@@ -126,7 +126,10 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
         const candidateNote = Array.isArray(data.skippedCandidates) && data.skippedCandidates.length > 0
           ? ` Left untouched (looks AFRouter-added but not recorded — adopt inside ZCode or re-add): ${data.skippedCandidates.join(", ")}.`
           : "";
-        setMessage({ type: "success", text: "ZCode settings applied! Restart ZCode if it is running — it loads config at session start." + unverifiedNote });
+        const overrideNote = Array.isArray(data.personalConfig?.manualOverrides) && data.personalConfig.manualOverrides.length > 0
+          ? ` Skipped (you configured these by hand inside ZCode — your settings win): ${data.personalConfig.manualOverrides.join(", ")}.`
+          : "";
+        setMessage({ type: "success", text: "ZCode settings applied! Restart ZCode if it is running — it loads config at session start." + unverifiedNote + overrideNote });
         checkStatus();
       } else {
         setMessage({ type: "error", text: data.error || "Failed to apply settings" });
@@ -182,6 +185,12 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
   // of letting Apply claim them silently.
   const managedModels = status?.zcode?.afrouterModels || [];
   const candidateModels = status?.zcode?.bootstrapCandidates || [];
+  // ZCode 3.14+ reads the Personal layer (provider_config.json):
+  // the thinking levels it will offer per applied model, and the
+  // models configured by hand inside ZCode (manual rules win and
+  // are never rewritten by Apply).
+  const levelsByModel = status?.personalConfig?.levelsByModel || {};
+  const manualModels = status?.personalConfig?.manualModels || [];
 
   // Snippet mirrors the exact entry shape the route writes (data-model.md),
   // including the zcode.afrouter ownership marker, so remotely-pasted configs
@@ -326,13 +335,26 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
                       ) : (
                         selectedModels.map((model) => {
                           const managed = managedModels.includes(model);
+                          const levels = levelsByModel[model];
                           return (
                             <span
                               key={model}
                               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs border ${managed ? "bg-primary/10 text-primary border-primary/40" : "bg-black/5 dark:bg-white/5 text-text-muted border-transparent"}`}
-                              title={managed ? "AFRouter-managed model" : "Added outside AFRouter — remove it inside ZCode"}
+                              title={
+                                managed
+                                  ? `AFRouter-managed model${levels ? ` — ZCode thinking levels (lowest → highest): ${levels.join(" → ")}` : ""}`
+                                  : "Added outside AFRouter — remove it inside ZCode"
+                              }
                             >
                               {model}
+                              {levels && (
+                                <span
+                                  className="ml-0.5 opacity-60 text-[10px]"
+                                  title={`ZCode thinking levels (lowest → highest): ${levels.join(" → ")}`}
+                                >
+                                  {levels.length > 1 ? `${levels[0]}→${levels[levels.length - 1]}` : levels[0]}
+                                </span>
+                              )}
                               {managed && (
                                 <button
                                   onClick={() => removeModel(model)}
@@ -347,7 +369,16 @@ export default function ZCodeToolCard({ tool, isExpanded, onToggle, baseUrl, api
                       )}
                     </div>
                     <button onClick={() => setModalOpen(true)} disabled={!activeProviders?.length} className={`self-start px-2 py-1 rounded border text-xs transition-colors ${activeProviders?.length ? "bg-surface border-border text-text-main hover:border-primary cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}>Add Model</button>
-                    <span className="text-xs text-text-muted">Highlighted models are AFRouter-managed (× to remove); dimmed ones were added outside AFRouter and are left untouched. Pick the active model inside ZCode — AFRouter does not set it.</span>
+                    <span className="text-xs text-text-muted">Highlighted models are AFRouter-managed (× to remove); dimmed ones were added outside AFRouter and are left untouched. Pick the active model inside ZCode — AFRouter does not set it. The small level range on each chip is the thinking-effort ladder ZCode will offer.</span>
+                    {manualModels.length > 0 && (
+                      <div className="flex items-start gap-2 px-2 py-1.5 rounded text-xs bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                        <span className="material-symbols-outlined text-[14px]">info</span>
+                        <span>Configured by hand inside ZCode — Apply keeps your settings: {manualModels.join(", ")}</span>
+                      </div>
+                    )}
+                    {status?.personalConfig?.present && (
+                      <span className="text-xs text-text-muted break-all">ZCode Personal layer: {status.personalConfig.path}{status.personalConfig.corrupt ? " (unreadable — ZCode runs an empty provider layer until it is fixed)" : ` (${status.personalConfig.modelIds?.length ?? 0} AFRouter model${(status.personalConfig.modelIds?.length ?? 0) === 1 ? "" : "s"})`}</span>
+                    )}
                     {candidateModels.length > 0 && (
                       <div className="flex flex-wrap items-center gap-2 rounded border border-yellow-500/40 bg-yellow-500/10 px-2 py-1.5 text-xs text-yellow-700 dark:text-yellow-300">
                         <span>Possible AFRouter models from before tracking ({candidateModels.join(", ")}) — Reset will not touch them.</span>
