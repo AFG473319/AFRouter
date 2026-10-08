@@ -1,4 +1,4 @@
-# Unreleased
+# v0.5.92 (2026-10-08)
 
 ## Features
 - **ZCode now receives per-model reasoning levels.** Applying models from Dashboard → CLI Tools → ZCode updated `~/.zcode/v2/config.json` only, and ZCode 3.14+'s one-time legacy import of that file copies just name/apiKey/baseURL/kind/model ids/contextWindow — it **drops `variants`** — so every applied model showed up in ZCode with no per-model thinking-effort levels (the picker fell back to ZCode's built-in ladder, and toggle models lost their on/off switch). Apply now follows the config.json write with an upsert into ZCode's **Personal layer** `~/.zcode/v2/provider_config.json` (ZCode 3.14+; `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` / `ZCODE_DATA_BASE_DIR` override the location), mirroring ZCode's own import shape: the same UUID `providerId` as the config.json entry, `providerName` "AFRouter", group `standard-personal`, refreshed `baseUrl`/`apiKey`, new ids appended to `personalModelIds`/`modelOrder`/`providerOrder`, and a `providerModelRules` entry per model carrying `contextWindow`, `inputFormat`, `maxOutputTokens.max` and `reasoningLevel.values`.
