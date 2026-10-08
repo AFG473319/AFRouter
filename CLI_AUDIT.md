@@ -42,7 +42,11 @@ These are not fixed by the initial repair batch; API existence alone is not CLI 
   and console inspection have no corresponding domain/menu.
 - Tool configuration still uses a generic multi-model fallback. Tool-specific
   settings, individual model removal, and explicit ZCode ownership adoption are
-  not comprehensively exposed. Guide-only tools must not be sent to nonexistent
+  not comprehensively exposed. The ZCode dashboard route now also writes
+  per-model reasoning levels to ZCode 3.14+'s Personal layer
+  (`~/.zcode/v2/provider_config.json`, with manual-override skip, corrupt-file
+  refusal and ZCode-style locking); headless exposes none of that either.
+  Guide-only tools must not be sent to nonexistent
   settings routes. Validate each tool against its own route rather than promise
   universal setup support.
 - Headless MITM alias writes send `{alias, model}` but the route requires
