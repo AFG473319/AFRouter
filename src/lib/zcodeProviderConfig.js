@@ -118,7 +118,12 @@ const timestamp = () => {
 // ---------------------------------------------------------------------------
 // Shape validation — mirrors ZCode's strict zod schemas so a document we
 // write always decodes. Unknown keys, wrong types and cross-list
-// duplicates are all rejected (ZCode would run an empty layer otherwise).
+// duplicates are all rejected (ZCode would run an empty layer
+// otherwise). The check is deliberately no stricter than ZCode's
+// own schemas: sparse fields accept null, optional leaves may be
+// absent, and a personal provider's baseUrl accepts any string
+// (ZCode stages in-progress endpoint edits there) — only the
+// endpoint AFRouter itself writes is required to be a valid URL.
 // ---------------------------------------------------------------------------
 
 const PROVIDER_API_TYPES = new Set([
@@ -131,7 +136,19 @@ const PROVIDER_GROUPS = new Set([
   "zai-family",
   "bigmodel-family",
 ]);
-const ACCESS_TYPES = new Set(["api-key", "zhipu-coding-plan-api-key"]);
+const ACCESS_TYPES = new Set(["api-key", "zhipu-coding-plan-api-key", "zhipu-account"]);
+// providerAccessDataSchema is a discriminated union on `type`:
+// api-key/zhipu-coding-plan-api-key carry apiKey (+ an optional
+// management URL), zhipu-account carries accountType/mode/entitled.
+const API_KEY_ACCESS_KEYS = new Set(["type", "apiKey", "apiKeyManagementUrl"]);
+const ZHIPU_ACCOUNT_ACCESS_KEYS = new Set(["type", "accountType", "mode", "entitled"]);
+const ZHIPU_ACCOUNT_TYPES = new Set(["zai", "bigmodel"]);
+const ZHIPU_ACCOUNT_MODES = new Set([
+  "start-plan",
+  "individual-coding-plan",
+  "team-coding-plan",
+  "off-peak",
+]);
 const PROVIDER_CONFIG_KEYS = new Set([
   "group",
   "logo",
@@ -179,7 +196,7 @@ function checkIdList(value, where, issues) {
   }
 }
 
-function validateProviderRule(rule, where, issues) {
+function validateProviderRule(rule, where, issues, ownProviderId) {
   if (!isRecord(rule)) {
     issues.push(`${where}: rule must be an object`);
     return;
@@ -211,11 +228,43 @@ function validateProviderRule(rule, where, issues) {
     if (!isRecord(access)) {
       issues.push(`${where}.config.access: must be an object`);
     } else {
-      checkKeys(access, new Set(["type", "apiKey", "apiKeyManagementUrl"]), `${where}.config.access`, issues);
+      const isZhipuAccount = access.type === "zhipu-account";
+      checkKeys(
+        access,
+        isZhipuAccount ? ZHIPU_ACCOUNT_ACCESS_KEYS : API_KEY_ACCESS_KEYS,
+        `${where}.config.access`,
+        issues
+      );
       if (!ACCESS_TYPES.has(access.type)) {
         issues.push(`${where}.config.access.type: unknown access type`);
       }
-      if (access.apiKey !== undefined && access.apiKey !== null && typeof access.apiKey !== "string") {
+      if (isZhipuAccount) {
+        if (
+          access.accountType !== undefined &&
+          access.accountType !== null &&
+          !ZHIPU_ACCOUNT_TYPES.has(access.accountType)
+        ) {
+          issues.push(`${where}.config.access.accountType: unknown account type`);
+        }
+        if (
+          access.mode !== undefined &&
+          access.mode !== null &&
+          !ZHIPU_ACCOUNT_MODES.has(access.mode)
+        ) {
+          issues.push(`${where}.config.access.mode: unknown account mode`);
+        }
+        if (
+          access.entitled !== undefined &&
+          access.entitled !== null &&
+          typeof access.entitled !== "boolean"
+        ) {
+          issues.push(`${where}.config.access.entitled: must be a boolean`);
+        }
+      } else if (
+        access.apiKey !== undefined &&
+        access.apiKey !== null &&
+        typeof access.apiKey !== "string"
+      ) {
         issues.push(`${where}.config.access.apiKey: must be a string`);
       }
     }
@@ -226,14 +275,24 @@ function validateProviderRule(rule, where, issues) {
       issues.push(`${where}.config.api: must be an object`);
     } else {
       checkKeys(api, new Set(["type", "baseUrl", "headers"]), `${where}.config.api`, issues);
-      if (!PROVIDER_API_TYPES.has(api.type)) {
+      // ZCode's sparse schema makes api.type optional.
+      if (api.type !== undefined && api.type !== null && !PROVIDER_API_TYPES.has(api.type)) {
         issues.push(`${where}.config.api.type: unknown api type`);
       }
       if (api.baseUrl !== undefined && api.baseUrl !== null) {
-        try {
-          new URL(api.baseUrl);
-        } catch {
-          issues.push(`${where}.config.api.baseUrl: not a valid URL`);
+        if (typeof api.baseUrl !== "string") {
+          issues.push(`${where}.config.api.baseUrl: must be a string`);
+        } else if (rule.providerId === ownProviderId) {
+          // ZCode's personal schema accepts ANY string here —
+          // it stages in-progress endpoint edits — so a
+          // half-typed endpoint on someone else's provider
+          // must not block us. Only the endpoint AFRouter
+          // itself writes is required to be a valid URL.
+          try {
+            new URL(api.baseUrl);
+          } catch {
+            issues.push(`${where}.config.api.baseUrl: not a valid URL`);
+          }
         }
       }
     }
@@ -261,7 +320,7 @@ function validateModelRule(rule, where, issues) {
     return;
   }
   checkKeys(config, new Set(["enabled", "properties", "optionSpecs"]), `${where}.config`, issues);
-  if (config.enabled !== undefined && typeof config.enabled !== "boolean") {
+  if (config.enabled !== undefined && config.enabled !== null && typeof config.enabled !== "boolean") {
     issues.push(`${where}.config.enabled: must be a boolean`);
   }
   const properties = config.properties;
@@ -270,7 +329,7 @@ function validateModelRule(rule, where, issues) {
       issues.push(`${where}.config.properties: must be an object`);
     } else {
       checkKeys(properties, MODEL_PROPERTY_KEYS, `${where}.config.properties`, issues);
-      if (properties.contextWindow !== undefined) {
+      if (properties.contextWindow !== undefined && properties.contextWindow !== null) {
         if (!Number.isInteger(properties.contextWindow) || properties.contextWindow <= 0) {
           issues.push(`${where}.config.properties.contextWindow: must be a positive integer`);
         }
@@ -282,7 +341,7 @@ function validateModelRule(rule, where, issues) {
         } else {
           checkKeys(inputFormat, INPUT_FORMAT_KEYS, `${where}.config.properties.inputFormat`, issues);
           for (const key of Object.keys(inputFormat)) {
-            if (typeof inputFormat[key] !== "boolean") {
+            if (inputFormat[key] !== null && typeof inputFormat[key] !== "boolean") {
               issues.push(`${where}.config.properties.inputFormat.${key}: must be a boolean`);
             }
           }
@@ -303,7 +362,7 @@ function validateModelRule(rule, where, issues) {
         } else {
           checkKeys(reasoningLevel, ENUM_SPEC_KEYS, `${where}.config.optionSpecs.reasoningLevel`, issues);
           const values = reasoningLevel.values;
-          if (values !== undefined) {
+          if (values !== undefined && values !== null) {
             if (
               !Array.isArray(values) ||
               values.length === 0 ||
@@ -323,7 +382,7 @@ function validateModelRule(rule, where, issues) {
           issues.push(`${where}.config.optionSpecs.maxOutputTokens: must be an object`);
         } else {
           checkKeys(maxOutputTokens, LIMIT_SPEC_KEYS, `${where}.config.optionSpecs.maxOutputTokens`, issues);
-          if (maxOutputTokens.max !== undefined) {
+          if (maxOutputTokens.max !== undefined && maxOutputTokens.max !== null) {
             if (!Number.isInteger(maxOutputTokens.max) || maxOutputTokens.max <= 0) {
               issues.push(`${where}.config.optionSpecs.maxOutputTokens.max: must be a positive integer`);
             }
@@ -335,10 +394,17 @@ function validateModelRule(rule, where, issues) {
 }
 
 /**
- * Validate a provider_config.json document against ZCode's strict schemas.
- * Returns a list of human-readable issues (empty when valid).
+ * Validate a provider_config.json document against ZCode's strict
+ * schemas. Returns a list of human-readable issues (empty when
+ * valid).
+ *
+ * `ownProviderId` is the provider AFRouter is about to write:
+ * its api.baseUrl must be a valid URL (we write it), while every
+ * other provider's baseUrl only needs to be a string — ZCode's
+ * personal schema deliberately accepts in-progress endpoint
+ * edits and we must not 409 on them.
  */
-export function validatePersonalConfigShape(doc) {
+export function validatePersonalConfigShape(doc, ownProviderId) {
   const issues = [];
   if (!isRecord(doc)) {
     return ["document must be an object"];
@@ -367,7 +433,7 @@ export function validatePersonalConfigShape(doc) {
         } else {
           const seen = new Set();
           rules.forEach((rule, index) => {
-            validateProviderRule(rule, `config.providerConfigRules.providerRules[${index}]`, issues);
+            validateProviderRule(rule, `config.providerConfigRules.providerRules[${index}]`, issues, ownProviderId);
             if (isNonEmptyString(rule?.providerId)) {
               if (seen.has(rule.providerId)) {
                 issues.push(`config.providerConfigRules.providerRules: duplicate providerId "${rule.providerId}"`);
@@ -426,12 +492,27 @@ export function validatePersonalConfigShape(doc) {
     if (!isRecord(selection)) {
       issues.push("config.defaultModelSelection: must be an object");
     } else {
-      checkKeys(selection, new Set(["providerId", "modelId"]), "config.defaultModelSelection", issues);
+      checkKeys(selection, new Set(["providerId", "modelId", "options"]), "config.defaultModelSelection", issues);
       if (!isNonEmptyString(selection.providerId)) {
         issues.push("config.defaultModelSelection.providerId: must be a non-empty string");
       }
       if (!isNonEmptyString(selection.modelId)) {
         issues.push("config.defaultModelSelection.modelId: must be a non-empty string");
+      }
+      const options = selection.options;
+      if (options !== undefined && options !== null) {
+        if (!isRecord(options)) {
+          issues.push("config.defaultModelSelection.options: must be an object");
+        } else {
+          checkKeys(options, new Set(["reasoningLevel"]), "config.defaultModelSelection.options", issues);
+          if (
+            options.reasoningLevel !== undefined &&
+            options.reasoningLevel !== null &&
+            !isNonEmptyString(options.reasoningLevel)
+          ) {
+            issues.push("config.defaultModelSelection.options.reasoningLevel: must be a non-empty string");
+          }
+        }
       }
     }
   }
@@ -911,7 +992,10 @@ export async function upsertPersonalProviderConfig({
     rule.config.personalModelIds = personalModelIds;
     rule.config.modelOrder = modelOrder;
 
-    const issues = validatePersonalConfigShape(doc);
+    // We write this document, so the AFRouter rule's own
+    // endpoint must be a valid URL; other providers keep
+    // ZCode's any-string semantics (see validator docs).
+    const issues = validatePersonalConfigShape(doc, providerId);
     if (issues.length > 0) {
       throw new PersonalConfigInvalidError(issues.join("; "), filePath);
     }
@@ -995,6 +1079,10 @@ export async function removePersonalProviderModels({
       providerRemoved = true;
     }
 
+    // Pure ZCode semantics: removal never writes an
+    // api.baseUrl, so even a half-typed endpoint on the
+    // AFRouter rule (which ZCode itself accepts) must
+    // not block the cleanup.
     const issues = validatePersonalConfigShape(doc);
     if (issues.length > 0) {
       throw new PersonalConfigInvalidError(issues.join("; "), filePath);

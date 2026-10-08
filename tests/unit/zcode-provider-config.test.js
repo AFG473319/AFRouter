@@ -382,6 +382,123 @@ describe("upsertPersonalProviderConfig", () => {
     expect(after.config.modelConfigRules.providerModelRules).toHaveLength(3);
   });
 
+  it("applies cleanly when another provider has a half-typed baseUrl and a zhipu-account access entry", async () => {
+    // ZCode's personal schema accepts ANY string (or null) as a
+    // personal provider's baseUrl — it stages in-progress endpoint
+    // edits — and zhipu-account is a first-class access type with
+    // its own keys. Neither may block AFRouter's Apply.
+    const zhipuProvider = {
+      providerId: "22222222-3333-4444-5555-666666666666",
+      providerName: "Zhipu Account Provider",
+      config: {
+        group: "standard-personal",
+        access: {
+          type: "zhipu-account",
+          accountType: "zai",
+          mode: "individual-coding-plan",
+          entitled: true,
+        },
+        // No scheme: a half-typed endpoint ZCode itself accepts.
+        api: { type: "openai-chat-completions", baseUrl: "api.z.ai/v1" },
+        personalModelIds: ["glm-4.6"],
+        modelOrder: ["glm-4.6"],
+      },
+    };
+    const doc = {
+      schemaVersion: 1,
+      config: {
+        providerOrder: ["22222222-3333-4444-5555-666666666666"],
+        providerConfigRules: { providerRules: [zhipuProvider] },
+        modelConfigRules: { providerModelRules: [], manualProviderModelRules: [] },
+        defaultModelSelection: {
+          providerId: "22222222-3333-4444-5555-666666666666",
+          modelId: "glm-4.6",
+          options: { reasoningLevel: "thinking" },
+        },
+      },
+    };
+    writePersonalFixture(doc);
+
+    const result = await upsertPersonalProviderConfig({
+      filePath: personalPath(),
+      providerId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      baseUrl: "http://127.0.0.1:20128/v1",
+      apiKey: "sk_afrouter",
+      models: [{ id: "cx/gpt-5.6", spec: SPECS["cx/gpt-5.6"] }],
+    });
+    expect(result.created).toBe(false);
+    expect(result.providerCreated).toBe(true);
+    expect(result.applied).toEqual(["cx/gpt-5.6"]);
+
+    const after = readPersonalFile();
+    // The Zhipu provider's rule and the default selection
+    // (with its reasoning option) survive untouched.
+    expect(after.config.providerConfigRules.providerRules[0]).toEqual(zhipuProvider);
+    expect(after.config.providerOrder).toEqual([
+      "22222222-3333-4444-5555-666666666666",
+      "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    ]);
+    expect(after.config.defaultModelSelection).toEqual(doc.config.defaultModelSelection);
+    // The file still reads as a valid layer with our levels.
+    const status = await readPersonalProviderStatus({
+      filePath: personalPath(),
+      providerId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    });
+    expect(status.corrupt).toBe(false);
+    expect(status.levelsByModel).toEqual({
+      "cx/gpt-5.6": ["disabled", "minimal", "low", "medium", "high", "xhigh", "max"],
+    });
+  });
+
+  it("repairs a half-typed baseUrl on the AFRouter rule on apply", async () => {
+    const doc = {
+      schemaVersion: 1,
+      config: {
+        providerOrder: [],
+        providerConfigRules: {
+          providerRules: [
+            {
+              providerId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+              providerName: "AFRouter",
+              config: {
+                group: "standard-personal",
+                access: { type: "api-key", apiKey: "old" },
+                api: { type: "openai-chat-completions", baseUrl: "api.z.ai/v1" },
+                personalModelIds: [],
+                modelOrder: [],
+              },
+            },
+          ],
+        },
+        modelConfigRules: { providerModelRules: [], manualProviderModelRules: [] },
+      },
+    };
+    writePersonalFixture(doc);
+
+    const result = await upsertPersonalProviderConfig({
+      filePath: personalPath(),
+      providerId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      baseUrl: "http://127.0.0.1:20128/v1",
+      models: [{ id: "zai/glm-5.3", spec: SPECS["zai/glm-5.3"] }],
+    });
+    expect(result.applied).toEqual(["zai/glm-5.3"]);
+    const rule = readPersonalFile().config.providerConfigRules.providerRules[0];
+    expect(rule.config.api.baseUrl).toBe("http://127.0.0.1:20128/v1");
+  });
+
+  it("refuses to write when the AFRouter endpoint itself is not a valid URL", async () => {
+    await expect(
+      upsertPersonalProviderConfig({
+        filePath: personalPath(),
+        providerId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        baseUrl: "not-a-url",
+        models: [{ id: "zai/glm-5.3", spec: SPECS["zai/glm-5.3"] }],
+      })
+    ).rejects.toThrow(PersonalConfigInvalidError);
+    // Nothing was written.
+    expect(() => readPersonalFile()).toThrow();
+  });
+
   it("matches the existing AFRouter rule by providerId and refreshes endpoint + key", async () => {
     const doc = {
       schemaVersion: 1,
@@ -942,6 +1059,103 @@ describe("validatePersonalConfigShape", () => {
     expect(validatePersonalConfigShape(valid())).toEqual([]);
   });
 
+  it("accepts any-string baseUrl on other providers (ZCode stages in-progress edits)", () => {
+    const doc = valid();
+    doc.config.providerConfigRules.providerRules.push({
+      providerId: "other",
+      config: {
+        group: "standard-personal",
+        access: { type: "api-key" },
+        // No scheme: a half-typed endpoint ZCode itself accepts.
+        api: { baseUrl: "api.example.com/v1" },
+        personalModelIds: [],
+        modelOrder: [],
+      },
+    });
+    // Pure ZCode semantics: nothing to reject.
+    expect(validatePersonalConfigShape(doc)).toEqual([]);
+    // With our own id declared, only THAT endpoint is checked.
+    expect(validatePersonalConfigShape(doc, "p1")).toEqual([]);
+  });
+
+  it("requires a valid URL only for the provider being written", () => {
+    const doc = valid();
+    doc.config.providerConfigRules.providerRules[0].config.api.baseUrl = "half-typed/v1";
+    // Someone else's id: the endpoint is not ours to judge.
+    expect(validatePersonalConfigShape(doc, "someone-else")).toEqual([]);
+    // Our own id: we are about to write it, so it must be valid.
+    expect(validatePersonalConfigShape(doc, "p1").length).toBeGreaterThan(0);
+  });
+
+  it("accepts a zhipu-account access entry with its own keys", () => {
+    const doc = valid();
+    doc.config.providerConfigRules.providerRules.push({
+      providerId: "zhipu",
+      config: {
+        group: "standard-personal",
+        access: {
+          type: "zhipu-account",
+          accountType: "bigmodel",
+          mode: "team-coding-plan",
+          entitled: false,
+        },
+        personalModelIds: [],
+        modelOrder: [],
+      },
+    });
+    expect(validatePersonalConfigShape(doc)).toEqual([]);
+  });
+
+  it("rejects unknown zhipu-account field values", () => {
+    const doc = valid();
+    doc.config.providerConfigRules.providerRules.push({
+      providerId: "zhipu",
+      config: {
+        access: { type: "zhipu-account", accountType: "nope" },
+      },
+    });
+    expect(validatePersonalConfigShape(doc).length).toBeGreaterThan(0);
+
+    const doc2 = valid();
+    doc2.config.providerConfigRules.providerRules.push({
+      providerId: "zhipu",
+      config: {
+        access: { type: "zhipu-account", mode: "no-such-plan", entitled: "yes" },
+      },
+    });
+    expect(validatePersonalConfigShape(doc2).length).toBeGreaterThan(0);
+  });
+
+  it("accepts an absent api.type and null on sparse fields", () => {
+    const doc = valid();
+    delete doc.config.providerConfigRules.providerRules[0].config.api.type;
+    const modelRule = doc.config.modelConfigRules.providerModelRules[0];
+    modelRule.config.enabled = null;
+    modelRule.config.properties.contextWindow = null;
+    modelRule.config.properties.inputFormat.supportsText = null;
+    modelRule.config.optionSpecs.reasoningLevel.values = null;
+    modelRule.config.optionSpecs.maxOutputTokens.max = null;
+    expect(validatePersonalConfigShape(doc)).toEqual([]);
+  });
+
+  it("accepts a defaultModelSelection with reasoning options", () => {
+    const doc = valid();
+    doc.config.defaultModelSelection = {
+      providerId: "p1",
+      modelId: "m",
+      options: { reasoningLevel: "high" },
+    };
+    expect(validatePersonalConfigShape(doc)).toEqual([]);
+
+    const doc2 = valid();
+    doc2.config.defaultModelSelection = {
+      providerId: "p1",
+      modelId: "m",
+      options: { reasoningLevel: "" },
+    };
+    expect(validatePersonalConfigShape(doc2).length).toBeGreaterThan(0);
+  });
+
   it("rejects unknown top-level keys", () => {
     const doc = valid();
     doc.afrouter = true;
@@ -1109,6 +1323,54 @@ describe("route: Personal layer wiring", () => {
     expect(doc.config.modelConfigRules.providerModelRules[0].modelId).toBe("hand/model");
     expect(doc.config.providerOrder).toEqual([
       "99999999-aaaa-bbbb-cccc-dddddddddd",
+      entryKeyOf(readConfigFile()),
+    ]);
+  });
+
+  it("POST applies cleanly when another provider has a non-URL baseUrl and a zhipu-account entry", async () => {
+    // A file ZCode itself accepts: the other provider stages a
+    // half-typed endpoint (any string is valid there) and logs
+    // in with a zhipu-account access entry. Apply must not 409.
+    const zhipuRule = {
+      providerId: "22222222-3333-4444-5555-666666666666",
+      providerName: "Zhipu Account Provider",
+      config: {
+        group: "standard-personal",
+        access: {
+          type: "zhipu-account",
+          accountType: "zai",
+          mode: "individual-coding-plan",
+          entitled: true,
+        },
+        api: { type: "openai-chat-completions", baseUrl: "api.z.ai/v1" },
+        personalModelIds: ["glm-4.6"],
+        modelOrder: ["glm-4.6"],
+      },
+    };
+    writePersonalFixture({
+      schemaVersion: 1,
+      config: {
+        providerOrder: ["22222222-3333-4444-5555-666666666666"],
+        providerConfigRules: { providerRules: [zhipuRule] },
+        modelConfigRules: { providerModelRules: [], manualProviderModelRules: [] },
+        defaultModelSelection: {
+          providerId: "22222222-3333-4444-5555-666666666666",
+          modelId: "glm-4.6",
+          options: { reasoningLevel: "thinking" },
+        },
+      },
+    });
+    writeConfigFixture({ provider: {} });
+
+    const res = await post({ baseUrl: "http://127.0.0.1:20128/v1", models: ["cx/gpt-5.6"] });
+    expect(res.status).toBe(200);
+    expect(res.body.personalConfig.applied).toEqual(["cx/gpt-5.6"]);
+
+    const doc = readPersonalFile();
+    expect(doc.config.providerConfigRules.providerRules[0]).toEqual(zhipuRule);
+    expect(doc.config.defaultModelSelection.options).toEqual({ reasoningLevel: "thinking" });
+    expect(doc.config.providerOrder).toEqual([
+      "22222222-3333-4444-5555-666666666666",
       entryKeyOf(readConfigFile()),
     ]);
   });
