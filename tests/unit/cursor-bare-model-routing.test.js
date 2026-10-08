@@ -92,15 +92,19 @@ describe("bare Cursor model routing", () => {
     });
   });
 
-  it("still infers openai for bare gpt-* when no Cursor connection exists", async () => {
+  // Bare Codex-only slugs (gpt-5.x/6.x, gpt-daybreak-*, gpt-reserve*) infer the
+  // codex provider since v0.5.95 (upstream #4405: they 404 on the OpenAI API
+  // for Codex-OAuth-only users), so the openai-fallback case uses gpt-4o,
+  // which still falls through to the generic gpt-* rule.
+  it("still infers openai for bare gpt-4* when no Cursor connection exists", async () => {
     const ctx = await setupDb({
-      mockCursorLive: [{ id: "gpt-5.6-sol", name: "GPT 5.6 Sol" }],
+      mockCursorLive: [{ id: "gpt-4o", name: "GPT 4o" }],
     });
     cleanup = ctx.cleanup;
 
-    await expect(ctx.getModelInfo("gpt-5.6-sol")).resolves.toEqual({
+    await expect(ctx.getModelInfo("gpt-4o")).resolves.toEqual({
       provider: "openai",
-      model: "gpt-5.6-sol",
+      model: "gpt-4o",
     });
   });
 
