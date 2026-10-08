@@ -343,7 +343,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > claude → headers (
     "Anthropic-Dangerous-Direct-Browser-Access": "true",
     "Anthropic-Version": "2023-06-01",
     "Content-Type": "application/json",
-    "User-Agent": "claude-cli/2.1.258 (external, sdk-cli)",
+    "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
     "X-App": "cli",
     "X-Stainless-Arch": "arm64",
     "X-Stainless-Helper-Method": "stream",
@@ -361,7 +361,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > claude → headers (
     "Anthropic-Dangerous-Direct-Browser-Access": "true",
     "Anthropic-Version": "2023-06-01",
     "Content-Type": "application/json",
-    "User-Agent": "claude-cli/2.1.258 (external, sdk-cli)",
+    "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
     "X-App": "cli",
     "X-Stainless-Arch": "arm64",
     "X-Stainless-Helper-Method": "stream",
@@ -381,7 +381,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > claude → headers (
     "Anthropic-Version": "2023-06-01",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "claude-cli/2.1.258 (external, sdk-cli)",
+    "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
     "X-App": "cli",
     "X-Stainless-Arch": "arm64",
     "X-Stainless-Helper-Method": "stream",
@@ -403,10 +403,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > cline → headers (a
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "AFRouter/0.5.75",
+    "User-Agent": "AFRouter/0.5.95",
     "X-CLIENT-TYPE": "afrouter",
-    "X-CLIENT-VERSION": "0.5.75",
-    "X-CORE-VERSION": "0.5.75",
+    "X-CLIENT-VERSION": "0.5.95",
+    "X-CORE-VERSION": "0.5.95",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "win32",
     "X-PLATFORM-VERSION": "v24.18.0",
@@ -416,10 +416,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > cline → headers (a
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "AFRouter/0.5.75",
+    "User-Agent": "AFRouter/0.5.95",
     "X-CLIENT-TYPE": "afrouter",
-    "X-CLIENT-VERSION": "0.5.75",
-    "X-CORE-VERSION": "0.5.75",
+    "X-CLIENT-VERSION": "0.5.95",
+    "X-CORE-VERSION": "0.5.95",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "win32",
     "X-PLATFORM-VERSION": "v24.18.0",
@@ -430,10 +430,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > cline → headers (a
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "AFRouter/0.5.75",
+    "User-Agent": "AFRouter/0.5.95",
     "X-CLIENT-TYPE": "afrouter",
-    "X-CLIENT-VERSION": "0.5.75",
-    "X-CORE-VERSION": "0.5.75",
+    "X-CLIENT-VERSION": "0.5.95",
+    "X-CORE-VERSION": "0.5.95",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "win32",
     "X-PLATFORM-VERSION": "v24.18.0",
@@ -449,10 +449,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > clinepass → header
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "AFRouter/0.5.75",
+    "User-Agent": "AFRouter/0.5.95",
     "X-CLIENT-TYPE": "afrouter",
-    "X-CLIENT-VERSION": "0.5.75",
-    "X-CORE-VERSION": "0.5.75",
+    "X-CLIENT-VERSION": "0.5.95",
+    "X-CORE-VERSION": "0.5.95",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "win32",
     "X-PLATFORM-VERSION": "v24.18.0",
@@ -462,10 +462,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > clinepass → header
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "AFRouter/0.5.75",
+    "User-Agent": "AFRouter/0.5.95",
     "X-CLIENT-TYPE": "afrouter",
-    "X-CLIENT-VERSION": "0.5.75",
-    "X-CORE-VERSION": "0.5.75",
+    "X-CLIENT-VERSION": "0.5.95",
+    "X-CORE-VERSION": "0.5.95",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "win32",
     "X-PLATFORM-VERSION": "v24.18.0",
@@ -476,10 +476,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > clinepass → header
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "AFRouter/0.5.75",
+    "User-Agent": "AFRouter/0.5.95",
     "X-CLIENT-TYPE": "afrouter",
-    "X-CLIENT-VERSION": "0.5.75",
-    "X-CORE-VERSION": "0.5.75",
+    "X-CLIENT-VERSION": "0.5.95",
+    "X-CORE-VERSION": "0.5.95",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "win32",
     "X-PLATFORM-VERSION": "v24.18.0",
@@ -783,24 +783,24 @@ exports[`GOLDEN buildHeaders (default executor providers) > grok-cli → headers
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "grok-shell/0.2.99 (linux; x86_64)",
+    "User-Agent": "grok-shell/1.0.44 (linux; x86_64)",
     "x-grok-client-identifier": "grok-shell",
-    "x-grok-client-version": "0.2.99",
+    "x-grok-client-version": "1.0.44",
   },
   "nonStream": {
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "grok-shell/0.2.99 (linux; x86_64)",
+    "User-Agent": "grok-shell/1.0.44 (linux; x86_64)",
     "x-grok-client-identifier": "grok-shell",
-    "x-grok-client-version": "0.2.99",
+    "x-grok-client-version": "1.0.44",
   },
   "oauth": {
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "grok-shell/0.2.99 (linux; x86_64)",
+    "User-Agent": "grok-shell/1.0.44 (linux; x86_64)",
     "x-grok-client-identifier": "grok-shell",
-    "x-grok-client-version": "0.2.99",
+    "x-grok-client-version": "1.0.44",
   },
 }
 `;
@@ -914,7 +914,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Windows x64",
     "X-Msh-Device-Name": "DESKTOP-53VVGIU",
     "X-Msh-Platform": "afrouter",
-    "X-Msh-Version": "0.5.75",
+    "X-Msh-Version": "0.5.95",
     "x-api-key": "<CRED>",
   },
   "nonStream": {
@@ -925,7 +925,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Windows x64",
     "X-Msh-Device-Name": "DESKTOP-53VVGIU",
     "X-Msh-Platform": "afrouter",
-    "X-Msh-Version": "0.5.75",
+    "X-Msh-Version": "0.5.95",
     "x-api-key": "<CRED>",
   },
   "oauth": {
@@ -937,7 +937,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Windows x64",
     "X-Msh-Device-Name": "DESKTOP-53VVGIU",
     "X-Msh-Platform": "afrouter",
-    "X-Msh-Version": "0.5.75",
+    "X-Msh-Version": "0.5.95",
     "x-api-key": "<CRED>",
   },
 }
@@ -1065,6 +1065,26 @@ exports[`GOLDEN buildHeaders (default executor providers) > morph → headers (a
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > muse → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+    "x-api-version": "1.0.0",
   },
 }
 `;
@@ -1204,25 +1224,6 @@ exports[`GOLDEN buildHeaders (default executor providers) > openrouter → heade
     "Content-Type": "application/json",
     "HTTP-Referer": "https://endpoint-proxy.local",
     "X-Title": "Endpoint Proxy",
-  },
-}
-`;
-
-exports[`GOLDEN buildHeaders (default executor providers) > orcarouter → headers (apiKey / oauth) 1`] = `
-{
-  "apiKey": {
-    "Accept": "text/event-stream",
-    "Authorization": "Bearer <TOK>",
-    "Content-Type": "application/json",
-  },
-  "nonStream": {
-    "Authorization": "Bearer <TOK>",
-    "Content-Type": "application/json",
-  },
-  "oauth": {
-    "Accept": "text/event-stream",
-    "Authorization": "Bearer <TOK>",
-    "Content-Type": "application/json",
   },
 }
 `;
@@ -1875,6 +1876,13 @@ exports[`GOLDEN buildUrl (default executor providers) > morph → url (stream + 
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > muse → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://api.meta.ai/v1/chat/completions",
+  "stream": "https://api.meta.ai/v1/chat/completions",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > nanobanana → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://api.nanobananaapi.ai/v1/chat/completions",
@@ -1921,13 +1929,6 @@ exports[`GOLDEN buildUrl (default executor providers) > openrouter → url (stre
 {
   "nonStream": "https://openrouter.ai/api/v1/chat/completions",
   "stream": "https://openrouter.ai/api/v1/chat/completions",
-}
-`;
-
-exports[`GOLDEN buildUrl (default executor providers) > orcarouter → url (stream + non-stream) 1`] = `
-{
-  "nonStream": "https://api.orcarouter.ai/v1/chat/completions",
-  "stream": "https://api.orcarouter.ai/v1/chat/completions",
 }
 `;
 

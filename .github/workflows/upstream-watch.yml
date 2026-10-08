@@ -350,6 +350,20 @@ jobs:
           URL="$(gh issue list "${MATCH[@]}" --jq "${PICK}.url // empty")"
 
           if [ -z "${NUMBER}" ]; then
+            # No open tracker — reopen the most recent closed one so the
+            # "Reopened automatically if upstream moves again" close comment
+            # stays true, instead of opening a duplicate tracker every sync.
+            # The fresh body carries the new digest marker, so the digest
+            # comparison above keeps working on the next run.
+            CLOSED_PICK='[.[] | select(.title | startswith("'"${ISSUE_TITLE}"'"))][0]'
+            CLOSED_NUMBER="$(gh issue list --repo "${GITHUB_REPOSITORY}" --label "${ISSUE_LABEL}" \
+              --state closed --limit 100 --json number,title,url --jq "${CLOSED_PICK}.number // empty")"
+            if [ -n "${CLOSED_NUMBER}" ]; then
+              gh issue reopen "${CLOSED_NUMBER}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+              gh issue edit "${CLOSED_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file "${BODY_FILE}" >/dev/null
+              echo "Reopened #${CLOSED_NUMBER} with the new commit list (digest ${DIGEST})." >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
             URL="$(gh issue create \
               --repo "${GITHUB_REPOSITORY}" \
               --title "${ISSUE_TITLE}" \

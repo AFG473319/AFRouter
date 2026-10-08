@@ -1,6 +1,7 @@
 "use server";
 
 import { NextResponse } from "next/server";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
@@ -303,7 +304,8 @@ export async function POST(request) {
     const { format, source: formatSource } = resolveFormat({ requested: requestedFormat, config, version });
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    const keyToUse = apiKey || "sk_afrouter";
+    const keyToUse = await resolveCliApiKey(apiKey);
+    const effectiveSubagentModel = subagentModel || modelsArray[0];
 
     const mapKey = providerMapKey(format);
     const staleMapKey = providerMapKey(otherFormat(format));

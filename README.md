@@ -266,6 +266,13 @@ Available domains: `providers`, `nodes`, `keys`, `combos`, `models`, `usage`, `s
       <b>🇮🇩 Indonesia</b><br/>
       <sub>Bye Limit! Cara Bikin Sistem "AI Unlimited" 100% Gratis Dengan 9Router!<br/>by <a href="https://www.youtube.com/@neptiver">neptiver</a></sub>
     </td>
+    <td align="center" width="320">
+      <a href="https://www.youtube.com/watch?v=hgnE7MKi3Y4">
+        <img src="https://img.youtube.com/vi/hgnE7MKi3Y4/maxresdefault.jpg" alt="Bye Limit! Cara Bikin Sistem 'AI Unlimited' 100% Gratis Dengan 9Router!" width="300"/>
+      </a><br/>
+      <b>🇮🇩 Indonesia</b><br/>
+      <sub>Bye Limit! Cara Bikin Sistem "AI Unlimited" 100% Gratis Dengan 9Router!<br/>by <a href="https://www.youtube.com/@neptiver">neptiver</a></sub>
+    </td>
     <td align="center" width="320"></td>
     <td align="center" width="320"></td>
   </tr>

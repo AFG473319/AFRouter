@@ -119,7 +119,21 @@ Conventions:
 | `tools` | `statuses`, `setup --tool kilo --model cc/claude-sonnet-5`, `reset --tool cline` |
 | `media` | `voices --provider edge-tts --lang en` |
 | `chat` | `chat --model <m> --prompt <text>` (or piped stdin; `--system`, `--max-tokens`, `--temperature`) |
+## 🔌 Connect to a Remote AFRouter
 
+Already running 9Router on another machine (e.g. a team server on your LAN)? Point this machine's CLI tools at it — no local server is started:
+
+```bash
+npx @afg473319/afrouter connect http://<server-host>:20128                       # pick tools interactively
+npx @afg473319/afrouter connect http://<server-host>:20128 --tools claude,codex  # or choose up front
+npx @afg473319/afrouter connect --reset --tools claude,codex                     # undo
+```
+
+It logs in with the dashboard password (hidden prompt), reuses or creates an API key named `cli-<hostname>`, and writes each tool's config (backing up the original once as `*.bak-afrouter`).
+
+Supported: `claude`, `codex`, `opencode`, `droid`, `crush`, `kilo`, `cline`, or `all`. Other options: `--model`, `--opus/--sonnet/--haiku/--fable`, `--api-key`, `--key-name`, `--print-env`. See `afrouter connect --help`.
+
+> ⚠️ Over plain `http://` the password and API key are sent unencrypted — use a trusted LAN/VPN or put HTTPS in front. The API key is stored in each tool's config file.
 ---
 
 ## 🛠️ Supported CLI Tools
