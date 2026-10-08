@@ -52,6 +52,7 @@ export const CAPACITY_META = {
 // (models/custom route) and any dashboard picker, so they cannot drift.
 export const REASONING_EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 
+
 // Realtime STT transport markers accepted on custom models — single source of
 // truth across layers: the API whitelist (src/app/api/models/custom/route.js
 // sanitizeTransport) and the dashboard transport select

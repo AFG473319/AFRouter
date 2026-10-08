@@ -9,6 +9,8 @@ import { resolveProviderAlias } from "open-sse/services/model.js";
 
 export const dynamic = "force-dynamic";
 
+export const dynamic = "force-dynamic";
+
 const execAsync = promisify(exec);
 const validModel = (value) => typeof value === "string" && value.length > 0 && value.length <= 300 && !/[\s\x00-\x1f]/.test(value);
 
