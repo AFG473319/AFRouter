@@ -1252,7 +1252,9 @@ Dashboard → CLI Tools → OpenClaw → Select Model → Apply
 
 Dashboard → CLI Tools → ZCode → select models → Apply. AFRouter updates the custom **AFRouter** provider entry in `~/.zcode/v2/config.json`, preserving unrelated configuration and backing up the file before replacement.
 
-The card shows both managed and hand-added models. Reset removes only models AFRouter owns; use **Adopt as mine** explicitly to take ownership of eligible existing models. Ownership survives ZCode restarts in `<DATA_DIR>/zcode-model-ownership.json`; retain that ledger with your AFRouter data.
+**Per-model reasoning levels (ZCode 3.14+):** Apply also upserts a Personal-layer entry in `~/.zcode/v2/provider_config.json` with each model's context window, output limit and thinking-effort ladder (mapped into ZCode's vocabulary — `disabled`…`enabled` for toggle models, the discovered ladder otherwise), so ZCode's thinking picker shows the real per-model levels. Restart ZCode after Apply to load the new layer. Models you configured by hand in ZCode (`manualProviderModelRules`) are left untouched and reported as manual overrides on the card; the file is validated before writing, locked while ZCode's own save lock is held, and other providers are preserved byte-for-byte. Override the location with `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` / `ZCODE_DATA_BASE_DIR`.
+
+The card shows both managed and hand-added models, per-model level chips and the manual-override status. Reset removes only models AFRouter owns; use **Adopt as mine** explicitly to take ownership of eligible existing models. Ownership survives ZCode restarts in `<DATA_DIR>/zcode-model-ownership.json`; retain that ledger with your AFRouter data.
 
 ### DeepSeek Harness (`dsh`)
 

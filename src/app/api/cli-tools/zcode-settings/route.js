@@ -9,6 +9,16 @@ import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 import { readOwnership, writeOwnership } from "@/lib/zcodeModelOwnership.js";
+import {
+  getPersonalConfigPath,
+  readPersonalConfig,
+  readPersonalProviderStatus,
+  upsertPersonalProviderConfig,
+  removePersonalProviderModels,
+  PersonalConfigCorruptError,
+  PersonalConfigInvalidError,
+  ZCODE_FILE_LOCK_TIMEOUT_ERROR_CODE,
+} from "@/lib/zcodeProviderConfig.js";
 
 const PROVIDER_NAME = "AFRouter";
 
@@ -298,6 +308,13 @@ export async function POST(request) {
     if (result.corrupt || result.notInstalled) {
       return NextResponse.json({ success: false, error: "ZCode config is missing or unreadable — fix or restore it before applying" }, { status: 409 });
     }
+    // The Personal layer file is what ZCode 3.14+ actually reads. A
+    // corrupt one makes ZCode run an empty layer, so refuse before
+    // touching either file (mirrors the config.json 409 above).
+    const personalResult = await readPersonalConfig();
+    if (personalResult.corrupt) {
+      return NextResponse.json({ success: false, error: "ZCode personal provider config (provider_config.json) is missing or unreadable — fix or restore it before applying" }, { status: 409 });
+    }
 
     const config = result.data;
     if (!config || typeof config !== "object" || !config.provider || typeof config.provider !== "object") {
@@ -369,6 +386,43 @@ export async function POST(request) {
     const { backupPath } = await writeConfigAtomic(config);
     await writeOwnership(getConfigPath(), [...new Set(adopted)]);
 
+    // ZCode 3.14+: the legacy config.json is imported into the
+    // Personal layer (provider_config.json) only once — and the
+    // importer drops reasoning variants. Upsert the same adopted
+    // ids into the Personal layer so the per-model thinking
+    // efforts actually land (and land on the first run, because
+    // we create the file ourselves when ZCode has not yet).
+    let personalConfig = null;
+    try {
+      personalConfig = await upsertPersonalProviderConfig({
+        providerId: entryKey,
+        baseUrl: normalizedBaseUrl,
+        apiKey,
+        models: [...new Set(adopted)].map((id) => ({ id, spec: specs.get(id) })),
+      });
+    } catch (error) {
+      // The up-front check already refused a corrupt file; these
+      // only fire on a concurrent write between the check and the
+      // lock, or on a document we cannot safely extend. config.json
+      // is already applied at this point — report it, never 500.
+      if (
+        error instanceof PersonalConfigCorruptError ||
+        error instanceof PersonalConfigInvalidError ||
+        error?.code === ZCODE_FILE_LOCK_TIMEOUT_ERROR_CODE
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Legacy ZCode config applied, but the Personal layer (provider_config.json) was not updated: ${error.message}`,
+            configPath: getConfigPath(),
+            backupPath,
+          },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
+
     return NextResponse.json({
       success: true,
       message: "ZCode settings applied successfully!",
@@ -377,6 +431,14 @@ export async function POST(request) {
       written: modelsArray,
       unverified,
       restartAdvice: true,
+      personalConfig: personalConfig && {
+        path: personalConfig.path,
+        present: true,
+        providerCreated: personalConfig.providerCreated,
+        applied: personalConfig.applied,
+        manualOverrides: personalConfig.manualOverrides,
+        ambiguous: personalConfig.ambiguous,
+      },
     });
   } catch (error) {
     console.log("Error applying zcode settings:", error);
@@ -412,11 +474,13 @@ export async function DELETE(request) {
     const { owned, candidates } = await classifyOwnership(entry, catalog);
     const ownedSet = new Set(owned);
     let removed = 0;
+    const removedIds = [];
     for (const key of Object.keys(models)) {
       const matches = modelToRemove ? key === modelToRemove : true;
       if (matches && ownedSet.has(key)) {
         delete models[key];
         removed++;
+        removedIds.push(key);
       }
     }
 
@@ -430,6 +494,32 @@ export async function DELETE(request) {
     if (Object.keys(models).length === 0) {
       delete config.provider[entryKey];
       entryRemoved = true;
+    }
+
+    // Personal layer (ZCode 3.14+): remove the same owned ids from
+    // personalModelIds/modelOrder/providerModelRules. Manual rules
+    // and other providers are never touched; the provider rule and
+    // its providerOrder entry go only when no models are left.
+    let personalConfig = null;
+    if (removed > 0 || entryRemoved) {
+      try {
+        personalConfig = await removePersonalProviderModels({
+          providerId: entryKey,
+          modelIds: removedIds,
+        });
+      } catch (error) {
+        if (
+          error instanceof PersonalConfigCorruptError ||
+          error instanceof PersonalConfigInvalidError ||
+          error?.code === ZCODE_FILE_LOCK_TIMEOUT_ERROR_CODE
+        ) {
+          // Legacy config was already reset — report the Personal
+          // layer failure instead of failing the whole call.
+          personalConfig = { path: getPersonalConfigPath(), error: error.message };
+        } else {
+          throw error;
+        }
+      }
     }
 
     if (removed > 0 || entryRemoved) {
@@ -449,6 +539,13 @@ export async function DELETE(request) {
       removed,
       entryRemoved,
       skippedCandidates: remainingCandidates,
+      personalConfig: personalConfig && {
+        path: personalConfig.path,
+        present: personalConfig.present,
+        removed: personalConfig.removed || [],
+        providerRemoved: personalConfig.providerRemoved || false,
+        error: personalConfig.error,
+      },
     });
   } catch (error) {
     console.log("Error resetting zcode settings:", error);
@@ -465,6 +562,7 @@ export async function GET(request) {
         hasAFRouter: false,
         configPath: getConfigPath(),
         zcode: null,
+        personalConfig: { present: false, path: getPersonalConfigPath() },
         message: "ZCode is not installed",
       });
     }
@@ -475,9 +573,11 @@ export async function GET(request) {
         hasAFRouter: false,
         configPath: getConfigPath(),
         zcode: null,
+        personalConfig: await readPersonalProviderStatus(),
       });
     }
     const { entry, ambiguous } = findAFRouterEntry(result.data);
+    const entryKey = findEntryKey(result.data);
     const models = entry ? listModelKeys(entry) : [];
     // T013: flag entry models whose specs are not resolvable from the live
     // catalog or static registry so the card can badge them (FR-006).
@@ -509,6 +609,10 @@ export async function GET(request) {
         baseURL: entry?.options?.baseURL || null,
         bootstrapCandidates: candidates,
       },
+      // ZCode 3.14+ reads the Personal layer
+      // (provider_config.json): which file is in use and the
+      // reasoning levels ZCode will offer per applied model.
+      personalConfig: await readPersonalProviderStatus({ providerId: entryKey }),
     });
   } catch (error) {
     console.log("Error checking zcode settings:", error);
