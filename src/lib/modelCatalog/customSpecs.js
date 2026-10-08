@@ -10,9 +10,13 @@ export function normalizeCatalogSpecs(model) {
   const caps = {};
   const input = model.architecture?.input_modalities;
   if (Array.isArray(input)) {
-    for (const [modality, key] of Object.entries({ image: "vision", audio: "audioInput", video: "videoInput", file: "pdf" })) {
+    for (const [modality, key] of Object.entries({ image: "vision", audio: "audioInput", video: "videoInput" })) {
       caps[key] = input.includes(modality);
     }
+    // Kilo spells document input "pdf" on some models and "file" on others —
+    // 25 of 401 live models use only "pdf", so mapping just one silently
+    // strips the pdf flag from a large slice of the catalog.
+    caps.pdf = input.includes("pdf") || input.includes("file");
   }
   const parameters = model.supported_parameters;
   if (Array.isArray(parameters)) {
