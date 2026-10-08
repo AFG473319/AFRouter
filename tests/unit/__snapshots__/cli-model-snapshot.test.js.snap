@@ -1,0 +1,1076 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`cli model snapshot: fixed model set > dsh entries map none to off and keep the real vocabulary 1`] = `
+{
+  "claude/claude-opus-4.7": {
+    "contextWindow": 1000000,
+    "id": "claude/claude-opus-4.7",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "name": "claude/claude-opus-4.7",
+    "reasoningEfforts": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": "medium",
+      "off": null,
+      "xhigh": "xhigh",
+    },
+  },
+  "claude/claude-sonnet-4.6": {
+    "contextWindow": 1000000,
+    "id": "claude/claude-sonnet-4.6",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "name": "claude/claude-sonnet-4.6",
+    "reasoningEfforts": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": "medium",
+      "off": null,
+    },
+  },
+  "codebuddy-cn/glm-5.3": {
+    "contextWindow": 1000000,
+    "id": "codebuddy-cn/glm-5.3",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 48000,
+    "name": "codebuddy-cn/glm-5.3",
+    "reasoningEfforts": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+    },
+  },
+  "codex/gpt-5.6-sol": {
+    "contextWindow": 372000,
+    "id": "codex/gpt-5.6-sol",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "name": "codex/gpt-5.6-sol",
+    "reasoningEfforts": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": "medium",
+      "minimal": "minimal",
+      "ultra": "ultra",
+      "xhigh": "xhigh",
+    },
+  },
+  "deepseek/deepseek-v4-pro": {
+    "contextWindow": 1000000,
+    "id": "deepseek/deepseek-v4-pro",
+    "maxTokens": 384000,
+    "name": "deepseek/deepseek-v4-pro",
+    "reasoningEfforts": {
+      "high": "high",
+      "max": "max",
+      "off": null,
+    },
+  },
+  "glm/glm-5.3": {
+    "contextWindow": 200000,
+    "id": "glm/glm-5.3",
+    "maxTokens": 128000,
+    "name": "glm/glm-5.3",
+    "reasoningEfforts": {
+      "off": null,
+      "thinking": "thinking",
+    },
+  },
+  "openai/gpt-4o": {
+    "contextWindow": 128000,
+    "id": "openai/gpt-4o",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 16384,
+    "name": "openai/gpt-4o",
+  },
+  "openai/gpt-5": {
+    "contextWindow": 400000,
+    "id": "openai/gpt-5",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "name": "openai/gpt-5",
+    "reasoningEfforts": {
+      "high": "high",
+      "low": "low",
+      "medium": "medium",
+      "minimal": "minimal",
+      "off": null,
+      "xhigh": "xhigh",
+    },
+  },
+}
+`;
+
+exports[`cli model snapshot: fixed model set > grok sections write resolved limits, reasoning in description 1`] = `
+"
+[model.openai-gpt-5]
+model = "openai/gpt-5"
+base_url = "http://127.0.0.1:20128/v1"
+name = "openai/gpt-5"
+description = "Routed via AFRouter gateway · vision · reasoning · 400K context · 128K max output"
+api_backend = "chat_completions"
+context_window = 400000
+max_completion_tokens = 128000
+
+[model.openai-gpt-4o]
+model = "openai/gpt-4o"
+base_url = "http://127.0.0.1:20128/v1"
+name = "openai/gpt-4o"
+description = "Routed via AFRouter gateway · vision · 128K context · 16,384 max output"
+api_backend = "chat_completions"
+context_window = 128000
+max_completion_tokens = 16384
+
+[models]
+default = "openai-gpt-5"
+"
+`;
+
+exports[`cli model snapshot: fixed model set > mimocode entries keep limit/modalities/reasoning shape 1`] = `
+{
+  "claude/claude-opus-4.7": {
+    "limit": {
+      "context": 1000000,
+      "output": 128000,
+    },
+    "modalities": {
+      "input": [
+        "text",
+        "image",
+      ],
+      "output": [
+        "text",
+      ],
+    },
+    "name": "claude/claude-opus-4.7",
+    "reasoning": true,
+    "tool_call": true,
+  },
+  "claude/claude-sonnet-4.6": {
+    "limit": {
+      "context": 1000000,
+      "output": 128000,
+    },
+    "modalities": {
+      "input": [
+        "text",
+        "image",
+      ],
+      "output": [
+        "text",
+      ],
+    },
+    "name": "claude/claude-sonnet-4.6",
+    "reasoning": true,
+    "tool_call": true,
+  },
+  "codebuddy-cn/glm-5.3": {
+    "limit": {
+      "context": 1000000,
+      "output": 48000,
+    },
+    "modalities": {
+      "input": [
+        "text",
+        "image",
+      ],
+      "output": [
+        "text",
+      ],
+    },
+    "name": "codebuddy-cn/glm-5.3",
+    "reasoning": true,
+    "tool_call": true,
+  },
+  "codex/gpt-5.6-sol": {
+    "limit": {
+      "context": 372000,
+      "output": 128000,
+    },
+    "modalities": {
+      "input": [
+        "text",
+        "image",
+      ],
+      "output": [
+        "text",
+      ],
+    },
+    "name": "codex/gpt-5.6-sol",
+    "reasoning": true,
+    "tool_call": true,
+  },
+  "deepseek/deepseek-v4-pro": {
+    "limit": {
+      "context": 1000000,
+      "output": 384000,
+    },
+    "modalities": {
+      "input": [
+        "text",
+      ],
+      "output": [
+        "text",
+      ],
+    },
+    "name": "deepseek/deepseek-v4-pro",
+    "reasoning": true,
+    "tool_call": true,
+  },
+  "glm/glm-5.3": {
+    "limit": {
+      "context": 200000,
+      "output": 128000,
+    },
+    "modalities": {
+      "input": [
+        "text",
+      ],
+      "output": [
+        "text",
+      ],
+    },
+    "name": "glm/glm-5.3",
+    "reasoning": true,
+    "tool_call": true,
+  },
+  "openai/gpt-4o": {
+    "limit": {
+      "context": 128000,
+      "output": 16384,
+    },
+    "modalities": {
+      "input": [
+        "text",
+        "image",
+      ],
+      "output": [
+        "text",
+      ],
+    },
+    "name": "openai/gpt-4o",
+    "reasoning": false,
+    "tool_call": true,
+  },
+  "openai/gpt-5": {
+    "limit": {
+      "context": 400000,
+      "output": 128000,
+    },
+    "modalities": {
+      "input": [
+        "text",
+        "image",
+      ],
+      "output": [
+        "text",
+      ],
+    },
+    "name": "openai/gpt-5",
+    "reasoning": true,
+    "tool_call": true,
+  },
+}
+`;
+
+exports[`cli model snapshot: fixed model set > omp entries carry thinking blocks only for mappable reasoning models 1`] = `
+{
+  "claude/claude-opus-4.7": {
+    "contextWindow": 1000000,
+    "id": "claude/claude-opus-4.7",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+    "thinking": {
+      "defaultLevel": "max",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ],
+      "mode": "effort",
+    },
+  },
+  "claude/claude-sonnet-4.6": {
+    "contextWindow": 1000000,
+    "id": "claude/claude-sonnet-4.6",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+    "thinking": {
+      "defaultLevel": "max",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max",
+      ],
+      "mode": "effort",
+    },
+  },
+  "codebuddy-cn/glm-5.3": {
+    "contextWindow": 1000000,
+    "id": "codebuddy-cn/glm-5.3",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 48000,
+    "reasoning": true,
+    "thinking": {
+      "defaultLevel": "max",
+      "efforts": [
+        "low",
+        "high",
+        "max",
+      ],
+      "mode": "effort",
+    },
+  },
+  "codex/gpt-5.6-sol": {
+    "contextWindow": 372000,
+    "id": "codex/gpt-5.6-sol",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+    "thinking": {
+      "defaultLevel": "max",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ],
+      "mode": "effort",
+    },
+  },
+  "deepseek/deepseek-v4-pro": {
+    "contextWindow": 1000000,
+    "id": "deepseek/deepseek-v4-pro",
+    "input": [
+      "text",
+    ],
+    "maxTokens": 384000,
+    "reasoning": true,
+    "thinking": {
+      "defaultLevel": "max",
+      "efforts": [
+        "high",
+        "max",
+      ],
+      "mode": "effort",
+    },
+  },
+  "glm/glm-5.3": {
+    "contextWindow": 200000,
+    "id": "glm/glm-5.3",
+    "input": [
+      "text",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+  },
+  "openai/gpt-4o": {
+    "contextWindow": 128000,
+    "id": "openai/gpt-4o",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 16384,
+  },
+  "openai/gpt-5": {
+    "contextWindow": 400000,
+    "id": "openai/gpt-5",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+    "thinking": {
+      "defaultLevel": "xhigh",
+      "efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ],
+      "mode": "effort",
+    },
+  },
+}
+`;
+
+exports[`cli model snapshot: fixed model set > opencode v1+v2 entries carry variants only for reasoning models 1`] = `
+{
+  "v1": {
+    "claude/claude-opus-4.7": {
+      "attachment": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000,
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+      },
+      "name": "claude/claude-opus-4.7",
+      "reasoning": true,
+      "tool_call": true,
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+        "medium": {
+          "reasoningEffort": "medium",
+        },
+        "none": {
+          "reasoningEffort": "none",
+        },
+        "xhigh": {
+          "reasoningEffort": "xhigh",
+        },
+      },
+    },
+    "claude/claude-sonnet-4.6": {
+      "attachment": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000,
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+      },
+      "name": "claude/claude-sonnet-4.6",
+      "reasoning": true,
+      "tool_call": true,
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+        "medium": {
+          "reasoningEffort": "medium",
+        },
+        "none": {
+          "reasoningEffort": "none",
+        },
+      },
+    },
+    "codebuddy-cn/glm-5.3": {
+      "attachment": true,
+      "limit": {
+        "context": 1000000,
+        "output": 48000,
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+      },
+      "name": "codebuddy-cn/glm-5.3",
+      "reasoning": true,
+      "tool_call": true,
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+      },
+    },
+    "codex/gpt-5.6-sol": {
+      "attachment": true,
+      "limit": {
+        "context": 372000,
+        "output": 128000,
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+      },
+      "name": "codex/gpt-5.6-sol",
+      "reasoning": true,
+      "tool_call": true,
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+        "medium": {
+          "reasoningEffort": "medium",
+        },
+        "minimal": {
+          "reasoningEffort": "minimal",
+        },
+        "xhigh": {
+          "reasoningEffort": "xhigh",
+        },
+      },
+    },
+    "deepseek/deepseek-v4-pro": {
+      "attachment": false,
+      "limit": {
+        "context": 1000000,
+        "output": 384000,
+      },
+      "modalities": {
+        "input": [
+          "text",
+        ],
+        "output": [
+          "text",
+        ],
+      },
+      "name": "deepseek/deepseek-v4-pro",
+      "reasoning": true,
+      "tool_call": true,
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+        "none": {
+          "reasoningEffort": "none",
+        },
+      },
+    },
+    "glm/glm-5.3": {
+      "attachment": false,
+      "limit": {
+        "context": 200000,
+        "output": 128000,
+      },
+      "modalities": {
+        "input": [
+          "text",
+        ],
+        "output": [
+          "text",
+        ],
+      },
+      "name": "glm/glm-5.3",
+      "reasoning": true,
+      "tool_call": true,
+      "variants": {
+        "none": {
+          "reasoningEffort": "none",
+        },
+      },
+    },
+    "openai/gpt-4o": {
+      "attachment": true,
+      "limit": {
+        "context": 128000,
+        "output": 16384,
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+      },
+      "name": "openai/gpt-4o",
+      "reasoning": false,
+      "tool_call": true,
+    },
+    "openai/gpt-5": {
+      "attachment": true,
+      "limit": {
+        "context": 400000,
+        "output": 128000,
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+      },
+      "name": "openai/gpt-5",
+      "reasoning": true,
+      "tool_call": true,
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "medium": {
+          "reasoningEffort": "medium",
+        },
+        "minimal": {
+          "reasoningEffort": "minimal",
+        },
+        "none": {
+          "reasoningEffort": "none",
+        },
+        "xhigh": {
+          "reasoningEffort": "xhigh",
+        },
+      },
+    },
+  },
+  "v2": {
+    "claude/claude-opus-4.7": {
+      "capabilities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+        "tools": true,
+      },
+      "limit": {
+        "context": 1000000,
+        "output": 128000,
+      },
+      "name": "claude/claude-opus-4.7",
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+        "medium": {
+          "reasoningEffort": "medium",
+        },
+        "none": {
+          "reasoningEffort": "none",
+        },
+        "xhigh": {
+          "reasoningEffort": "xhigh",
+        },
+      },
+    },
+    "claude/claude-sonnet-4.6": {
+      "capabilities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+        "tools": true,
+      },
+      "limit": {
+        "context": 1000000,
+        "output": 128000,
+      },
+      "name": "claude/claude-sonnet-4.6",
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+        "medium": {
+          "reasoningEffort": "medium",
+        },
+        "none": {
+          "reasoningEffort": "none",
+        },
+      },
+    },
+    "codebuddy-cn/glm-5.3": {
+      "capabilities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+        "tools": true,
+      },
+      "limit": {
+        "context": 1000000,
+        "output": 48000,
+      },
+      "name": "codebuddy-cn/glm-5.3",
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+      },
+    },
+    "codex/gpt-5.6-sol": {
+      "capabilities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+        "tools": true,
+      },
+      "limit": {
+        "context": 372000,
+        "output": 128000,
+      },
+      "name": "codex/gpt-5.6-sol",
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+        "medium": {
+          "reasoningEffort": "medium",
+        },
+        "minimal": {
+          "reasoningEffort": "minimal",
+        },
+        "xhigh": {
+          "reasoningEffort": "xhigh",
+        },
+      },
+    },
+    "deepseek/deepseek-v4-pro": {
+      "capabilities": {
+        "input": [
+          "text",
+        ],
+        "output": [
+          "text",
+        ],
+        "tools": true,
+      },
+      "limit": {
+        "context": 1000000,
+        "output": 384000,
+      },
+      "name": "deepseek/deepseek-v4-pro",
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "max": {
+          "reasoningEffort": "max",
+        },
+        "none": {
+          "reasoningEffort": "none",
+        },
+      },
+    },
+    "glm/glm-5.3": {
+      "capabilities": {
+        "input": [
+          "text",
+        ],
+        "output": [
+          "text",
+        ],
+        "tools": true,
+      },
+      "limit": {
+        "context": 200000,
+        "output": 128000,
+      },
+      "name": "glm/glm-5.3",
+      "variants": {
+        "none": {
+          "reasoningEffort": "none",
+        },
+      },
+    },
+    "openai/gpt-4o": {
+      "capabilities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+        "tools": true,
+      },
+      "limit": {
+        "context": 128000,
+        "output": 16384,
+      },
+      "name": "openai/gpt-4o",
+    },
+    "openai/gpt-5": {
+      "capabilities": {
+        "input": [
+          "text",
+          "image",
+        ],
+        "output": [
+          "text",
+        ],
+        "tools": true,
+      },
+      "limit": {
+        "context": 400000,
+        "output": 128000,
+      },
+      "name": "openai/gpt-5",
+      "variants": {
+        "high": {
+          "reasoningEffort": "high",
+        },
+        "low": {
+          "reasoningEffort": "low",
+        },
+        "medium": {
+          "reasoningEffort": "medium",
+        },
+        "minimal": {
+          "reasoningEffort": "minimal",
+        },
+        "none": {
+          "reasoningEffort": "none",
+        },
+        "xhigh": {
+          "reasoningEffort": "xhigh",
+        },
+      },
+    },
+  },
+}
+`;
+
+exports[`cli model snapshot: fixed model set > pi entries carry thinkingLevelMap only for mappable reasoning models 1`] = `
+{
+  "claude/claude-opus-4.7": {
+    "contextWindow": 1000000,
+    "id": "claude/claude-opus-4.7",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": "medium",
+      "minimal": null,
+      "off": "none",
+      "xhigh": "xhigh",
+    },
+  },
+  "claude/claude-sonnet-4.6": {
+    "contextWindow": 1000000,
+    "id": "claude/claude-sonnet-4.6",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": "medium",
+      "minimal": null,
+      "off": "none",
+      "xhigh": null,
+    },
+  },
+  "codebuddy-cn/glm-5.3": {
+    "contextWindow": 1000000,
+    "id": "codebuddy-cn/glm-5.3",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 48000,
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": null,
+      "minimal": null,
+      "off": "none",
+      "xhigh": null,
+    },
+  },
+  "codex/gpt-5.6-sol": {
+    "contextWindow": 372000,
+    "id": "codex/gpt-5.6-sol",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": "medium",
+      "minimal": "minimal",
+      "off": null,
+      "xhigh": "xhigh",
+    },
+  },
+  "deepseek/deepseek-v4-pro": {
+    "contextWindow": 1000000,
+    "id": "deepseek/deepseek-v4-pro",
+    "input": [
+      "text",
+    ],
+    "maxTokens": 384000,
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": null,
+      "max": "max",
+      "medium": null,
+      "minimal": null,
+      "off": "none",
+      "xhigh": null,
+    },
+  },
+  "glm/glm-5.3": {
+    "contextWindow": 200000,
+    "id": "glm/glm-5.3",
+    "input": [
+      "text",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+  },
+  "openai/gpt-4o": {
+    "contextWindow": 128000,
+    "id": "openai/gpt-4o",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 16384,
+  },
+  "openai/gpt-5": {
+    "contextWindow": 400000,
+    "id": "openai/gpt-5",
+    "input": [
+      "text",
+      "image",
+    ],
+    "maxTokens": 128000,
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": null,
+      "medium": "medium",
+      "minimal": "minimal",
+      "off": "none",
+      "xhigh": "xhigh",
+    },
+  },
+}
+`;

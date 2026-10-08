@@ -215,7 +215,10 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     expect(body.input[0].type).not.toBe("additional_tools");
     expect(body.reasoning.context).toBeUndefined();
     expect(executor.buildHeaders(credentials, true, null, "gpt-5.5")["x-openai-internal-codex-responses-lite"]).toBeUndefined();
-    expect(getThinkingLevels("codex", "gpt-6-astra")).toContain("none");
+    // gpt-6-astra cannot disable thinking (backend 400s on reasoning_effort
+    // "none", #4031), so the shared ladder omits it — same as the other gpt-6
+    // models. The legacy-transport assertion below is this test's real purpose.
+    expect(getThinkingLevels("codex", "gpt-6-astra")).not.toContain("none");
     expect(executor.buildHeaders(credentials, true, null, "gpt-6-astra")["x-openai-internal-codex-responses-lite"]).toBeUndefined();
   });
 });

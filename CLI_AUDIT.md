@@ -81,3 +81,36 @@ Next: maintain an action-level dashboard/TUI/headless matrix, implement missing
 noninteractive workflows in small tested batches, then run opt-in end-to-end checks
 against an explicitly selected disposable gateway. Existing README parity claims
 are ahead of the implementation. The pre-existing README edits are left untouched.
+
+## Model specs and reasoning efforts — 2026-10-08 (PR #33)
+
+Single resolver: `resolveReasoningLevels()` in `open-sse/providers/capabilities.js`
+(exact Codex entry → PATTERN_THINKING override → discovered models.dev ladder →
+format default → drop `none` when `thinkingCanDisable === false` → Kiro null case).
+`resolveModelSpec()` (`open-sse/providers/modelSpecs.js`) projects the full spec.
+Combos keep the union (dispatcher re-encodes via coerceLevels). Per-tool wiring:
+
+| Tool | Config file | Spec fields written | Effort field + vocabulary | Doc link |
+| --- | --- | --- | --- | --- |
+| Codex | `~/.codex/config.toml` + `afrouter-models.json` | context window, `model_reasoning_effort`, `reasoningEfforts` catalog | `reasoningEfforts` list, OpenAI vocabulary | Codex CLI docs |
+| ZCode | `~/.zcode/v2/config.json` + Personal `provider_config.json` | limit, modalities, `reasoning.variants` / `reasoningLevel.values` | ZCode values (`disabled`/`enabled`/levels, strongest last) | zai-org/ZCode `provider-config-file-codec` |
+| DeepSeek Harness Web/Desktop | `$DSH_HOME/profiles/<web\|desktop>/cordis.patch.yml` | contextWindow, maxTokens, input, `reasoningEfforts`, compat | display→wire map, `none`→`off: null` | dsh docs |
+| Kilo | `~/.local/share/kilo/auth.json` (auth only) | none (auth.json holds no model metadata) | none — Kilo's precise display→wire map lives in the catalog surfaces (`kiloReasoning.js`), not the auth file | https://api.kilo.ai catalog |
+| Pi | `~/.pi/agent/models.json` | contextWindow, maxTokens, input, reasoning | `thinkingLevelMap` (Pi keys, identity values, null hides; `off`→`"none"` or null) | https://pi.dev/docs/latest/models, earendil-works/pi v0.72.0 (#3208) |
+| OMP | `~/.omp/agent/models.yml` | contextWindow, maxTokens, input, reasoning | `thinking: {mode: effort, efforts, defaultLevel}` (lowest-first) | can1357/oh-my-pi docs/models.md |
+| OpenCode | `~/.config/opencode/opencode.json` (v1/v2) | limit, capabilities/modalities, reasoning (v1) | `variants` per level (`reasoningEffort`) | https://opencode.ai/docs/models/ |
+| MimoCode | `~/.config/mimocode/mimocode.jsonc` (V1 shape) | limit, reasoning, tool_call, modalities | none verified in MimoCode docs — reasoning bool only, no invented keys | (OpenCode-fork V1 shape) |
+| Grok Build | `~/.grok/config.toml` `[model.<slot>]` | context_window, max_completion_tokens, vision/reasoning in description | none — schema has no effort field | Grok CLI docs |
+| Crush | `~/.config/crush/crush.json` | context_window (resolved; was hardcoded 128000), multi-model list | none verified — no effort field in schema | https://github.com/charmbracelet/crush/issues/2983, deepseek crush guide |
+| Zed | `settings.json` `language_models.openai_compatible` | provider config (static per zedConfig) | none — Zed drives effort itself | Zed docs |
+| Droid | `~/.factory/settings.json` | model id + maxOutputTokens | none verified | Factory docs |
+| Copilot | VSCode `chatLanguageModels.json` | vision/maxOutputTokens (static) | none — provider-level only | VSCode docs |
+| Hermes | `~/.hermes/config.yaml` (+`.env`) | model/delegation/aux slots, `api_mode: chat_completions` (explicit) | none — single main-model slot by design; switch via `hermes model`/`/model` | https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models |
+| Claude, Cline, CodeWhale, Forge, JCode, OpenClaw, Smelt, WorkBuddy, DeepSeek TUI, Cowork, Devin | various (id/baseUrl/key only or detect-only) | id/baseUrl/key only | none — no per-model effort field in schema (Cline's effort controls are provider-level UI, not config) | per-tool docs (see research notes in PR) |
+
+Re-Apply semantics: Pi/OMP/OpenCode/MimoCode/Crush/DSH refresh specs for models
+already written (additive merge overwrites owned entries — idempotent). ZCode
+config.json preserves reasoning variants on existing entries by design (FR-005,
+user-tuned); the Personal layer rebuilds rules from the resolver (manual-rule
+overrides skipped). Hermes rewrites owned blocks (idempotent; backup + atomic).
+Grok Build rewrites owned `[model.<slot>]` sections (idempotent).

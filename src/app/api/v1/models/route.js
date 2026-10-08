@@ -610,11 +610,22 @@ export async function buildModelsList(kindFilter, options = {}) {
         if (live && (kind === LLM_KIND || allowAsLlm)) {
           caps = getCapabilitiesForLiveModel(providerId, modelId, { ...live, capabilities: caps });
           // Selectable efforts for the picker + CLI-tool consumers (dashboard,
-          // Codex, DSH, ZCode). The live display name resolves through the
-          // shared tables (family patterns, then format defaults); unknown
-          // names honestly omit the key instead of inventing levels.
+          // Codex, DSH, ZCode) come from the single resolver
+          // (getCapabilitiesForModel → resolveReasoningLevels). The live
+          // display name resolves through the shared tables (exact Codex
+          // entry, pattern overrides, discovered ladder, format defaults);
+          // unknown names honestly omit the key instead of inventing levels.
           if (caps?.reasoning && !caps.reasoningLevels && live.name && live.name !== modelId) {
             const levels = getThinkingLevels(providerId, live.name);
+            if (levels?.length) caps = { ...caps, reasoningLevels: levels };
+          }
+          // Static/custom/alias ids with no live row (or a partial service-kind
+          // row) still get the shared ladder — previously only the
+          // live-display-name path above called getThinkingLevels, so static
+          // and custom models emitted raw discovered levels (no overrides, no
+          // canDisable filter) or no levels at all.
+          if (caps?.reasoning && !caps.reasoningLevels) {
+            const levels = getThinkingLevels(providerId, modelId);
             if (levels?.length) caps = { ...caps, reasoningLevels: levels };
           }
         }

@@ -65,9 +65,17 @@
  *     OpenAI surface, so URL-based auto-detection already picks the right
  *     request shaping, and the `afrouter` provider block is entirely ours so
  *     there is no built-in catalog for overrides to patch.
- *   - `thinking`: requires an explicit `efforts` list, and declaring one would
- *     *narrow* the picker. Leaving it unset gives every level the model
- *     supports, which is the widest correct set.
+ *   - `thinking`: WRITTEN per reasoning model from the shared resolver (see
+ *     ompThinking). OMP custom models without `thinking` get OMP's local
+ *     defaults, which hide xhigh/max where supported and mishandle "off" on
+ *     models that cannot disable. `thinking: { mode: "effort", efforts,
+ *     defaultLevel }` declares exactly the model's ladder, lowest-first, with
+ *     `mode: "effort"` because AFRouter is an OpenAI `reasoning_effort` wire.
+ *     `requiresEffort` stays unset (auto): on the default openai shape,
+ *     `--thinking off` sends the first listed effort, which is the correct
+ *     clamp for no-disable models. `effortMap` stays unset (identity): our
+ *     vocabulary is already OMP's. Refs: can1357/oh-my-pi docs/models.md
+ *     ("Reasoning / thinking", "Merge and override order").
  *   - `enabledModels` / `disabledProviders`: global filters the user may have
  *     set deliberately. Narrowing them would fight the user's own config.
  *
@@ -151,8 +159,39 @@ export const buildModelEntry = (id, caps = {}) => {
   }
   if (caps.vision) entry.input.push("image");
   if (caps.reasoning === true) entry.reasoning = true;
+  const thinking = ompThinking(caps);
+  if (thinking) entry.thinking = thinking;
   return entry;
 };
+
+/**
+ * OMP effort levels, weakest-first (can1357/oh-my-pi docs/models.md).
+ */
+export const OMP_EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * Map a resolved AFRouter spec to OMP's per-model `thinking` block.
+ *
+ * `{ mode: "effort", efforts, defaultLevel }`: efforts are the model's ladder
+ * filtered to OMP's vocabulary, lowest-first (OMP sends the first listed
+ * effort when reasoning_effort is requested, so order matters);
+ * defaultLevel is the strongest listed effort. `requiresEffort` and
+ * `effortMap` stay unset (auto-clamp and identity are correct for an OpenAI
+ * `reasoning_effort` wire). Returns undefined for non-reasoning models and
+ * for toggle-only/binary ladders with no mappable effort, so the field stays
+ * out and OMP keeps its defaults.
+ *
+ * @param {{ reasoning?: boolean, reasoningLevels?: string[], defaultLevel?: string } | null} spec
+ * @returns {{ mode: string, efforts: string[], defaultLevel: string } | undefined}
+ */
+export function ompThinking(spec) {
+  if (!spec || spec.reasoning !== true) return undefined;
+  const levels = Array.isArray(spec.reasoningLevels) ? spec.reasoningLevels : [];
+  const efforts = OMP_EFFORT_LEVELS.filter((l) => levels.includes(l));
+  if (!efforts.length) return undefined;
+  const defaultLevel = efforts.includes(spec.defaultLevel) ? spec.defaultLevel : efforts[efforts.length - 1];
+  return { mode: "effort", efforts, defaultLevel };
+}
 
 /** The AFRouter provider entry OMP loads as one OpenAI-compatible provider. */
 export const buildProviderEntry = ({ baseUrl, apiKey, models = [], specs = {} } = {}) => ({

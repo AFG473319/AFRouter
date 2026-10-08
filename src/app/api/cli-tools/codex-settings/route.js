@@ -29,8 +29,12 @@ async function resolveSpecs(ids) {
       const separator = fullId.indexOf("/");
       const provider = separator > 0 ? resolveProviderAlias(fullId.slice(0, separator)) : null;
       const model = separator > 0 ? fullId.slice(separator + 1) : fullId;
+      // Single resolver wins: exact Codex entry → PATTERN_THINKING override →
+      // discovered ladder → format default (with canDisable filter). Raw caps
+      // fields are fallback only so pattern fixes (codex no-disable,
+      // codebuddy-cn sets, mimo v2.5-pro, Claude 4.6) are never bypassed.
       const reasoningEfforts = caps.reasoning
-        ? caps.reasoningEfforts || caps.reasoningLevels || getThinkingLevels(provider, model) || []
+        ? getThinkingLevels(provider, model) || caps.reasoningLevels || caps.reasoningEfforts || []
         : [];
       specs[id] = { ...caps, reasoningEfforts, name: match.name || id, source: "afrouter-catalog" };
     }
