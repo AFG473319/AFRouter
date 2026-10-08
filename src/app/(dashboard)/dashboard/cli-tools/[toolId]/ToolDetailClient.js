@@ -10,7 +10,7 @@ import {
   HermesToolCard, DefaultToolCard, OpenCodeToolCard, CoworkToolCard,
   ClineToolCard, KiloToolCard, DeepSeekTuiToolCard,
   JcodeToolCard, GrokBuildToolCard, GenericCliToolCard,
-  DeepSeekHarnessToolCard,
+  DeepSeekHarnessToolCard, ZCodeToolCard,
 } from "../components";
 
 const CLOUD_URL = process.env.NEXT_PUBLIC_CLOUD_URL;
@@ -172,6 +172,8 @@ export default function ToolDetailClient({ toolId, machineId }) {
         return <JcodeToolCard {...commonProps} activeProviders={getActiveProviders()} hasActiveProviders={hasActiveProviders} cloudEnabled={cloudEnabled} />;
       case "grok-build":
         return <GrokBuildToolCard {...commonProps} activeProviders={getActiveProviders()} hasActiveProviders={hasActiveProviders} cloudEnabled={cloudEnabled} />;
+      case "zcode":
+        return <ZCodeToolCard {...commonProps} activeProviders={getActiveProviders()} cloudEnabled={cloudEnabled} />;
       case "pi":
       case "omp":
       case "crush":
