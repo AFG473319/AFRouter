@@ -29,6 +29,7 @@ const LIMIT_TOLERANCE = 0.1;
 // it files another service's effort ladder under our id and we send levels that
 // provider rejects.
 export const PROVIDER_ALIASES = {
+  "github": "github-copilot",
   "glm": "zai",
   "glm-cn": "zhipuai",
   "claude": "anthropic",
@@ -189,6 +190,7 @@ export function build(catalog, entries, registry = null) {
         for (const local of locals) putReasoning(reasoningRows, local, id, record);
         if (!locals.includes(providerId)) putReasoning(reasoningRows, providerId, id, record);
       }
+
 
       // One entry per provider+model: several upstream ids can normalize to the
       // same model (claude-opus-4-thinking:1024, :8192, :32768 …) and must not

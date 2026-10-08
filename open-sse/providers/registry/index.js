@@ -133,6 +133,9 @@ import p130 from "./bai.js";
 // TypeSafe (SystemOne decisions API) — ours, restored after the v0.5.91 upstream
 // merge rewrote this list without it (upstream has no SystemOne concept).
 import p131 from "./typesafe.js";
+import p132 from "./tinyfish.js";
+import p133 from "./v1m.js";
+import p134 from "./muse.js";
 export default [
   p0,
   p1,
@@ -264,4 +267,7 @@ export default [
   p129,
   p130,
   p131,
+  p132,
+  p133,
+  p134,
 ];

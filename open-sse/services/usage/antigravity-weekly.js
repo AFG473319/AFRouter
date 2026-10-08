@@ -44,6 +44,7 @@ export function tierFromPaidTierId(paidTierId) {
   return null;
 }
 
+
 // — Group-name and window to stable key mapping ——————————————————————
 const GROUP_CONFIGS = [
   {

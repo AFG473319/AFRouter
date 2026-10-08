@@ -111,10 +111,13 @@ describe("parseWeeklyQuotaSummary", () => {
     expect(result).toEqual({});
   });
 
-  it("parses disabled weekly buckets with a disabled flag (weekly exhausted upstream)", () => {
-    // Pool-aware routing NEEDS the disabled flag: a disabled 5h/weekly bucket
-    // tells us the weekly window is the binding constraint for that pool, so
-    // the entry must be parsed and flagged rather than dropped.
+  it("skips disabled weekly buckets (weekly exhausted upstream)", () => {
+    // Both the fork and upstream skip a disabled weekly bucket outright: the
+    // pool-aware routing reads exhaustion from the live quota cache
+    // (isAntigravityPoolBlocked + resetAt), not from a `disabled` flag on the
+    // parsed row — nothing consumes such a flag. The sibling 5h bucket below
+    // still parses (with remainingFraction 0) so the pool keeps its session
+    // row while the weekly window is the binding constraint.
     const data = {
       groups: [{
         displayName: "Gemini Models",
@@ -128,11 +131,7 @@ describe("parseWeeklyQuotaSummary", () => {
       }],
     };
     const result = parseWeeklyQuotaSummary(data);
-    expect(result.gemini_weekly).toMatchObject({
-      remainingPercentage: 75,
-      disabled: true,
-      resetAt: "2026-09-15T00:00:00.000Z",
-    });
+    expect(result.gemini_weekly).toBeUndefined();
   });
 
   it("returns empty object for null/undefined input", () => {

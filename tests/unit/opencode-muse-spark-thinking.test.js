@@ -64,7 +64,7 @@ describe("OpenCode Free Muse Spark thinking", () => {
   });
 
   it("retired Union Alpha no longer routes anywhere special", () => {
-    // union-alpha is gone upstream: no registry entry, no claude target, no
+    // union-alpha stays retired: no registry entry, no claude target, no
     // Messages routing. The executor's Messages branch is registry-driven, so
     // retirement needed zero code changes beyond dropping the entries.
     expect(PROVIDER_MODELS.oc?.some((model) => model.id === "union-alpha")).toBe(false);

@@ -266,6 +266,8 @@ export async function GET(request, { params }) {
         "qoder-cn",
         "grok-cli",
         "nous-portal",
+        "muse",
+        "glm",
       ];
       let deviceData;
       if (noPkceDeviceProviders.includes(provider)) {
@@ -499,7 +501,7 @@ export async function POST(request, { params }) {
       }
 
       // Providers that don't use PKCE for device code
-      const noPkceProviders = ["github", "kimi", "kimi-coding", "kilocode", "codebuddy-cn", "codebuddy-intl", "nous-portal"];
+      const noPkceProviders = ["github", "kimi", "kimi-coding", "kilocode", "codebuddy-cn", "codebuddy-intl", "nous-portal", "glm"];
       let result;
       if (noPkceProviders.includes(provider)) {
         // kimi needs extraData._kimiDeviceId for stable X-Msh-Device-Id (CLIProxyAPI parity)
@@ -547,12 +549,14 @@ export async function POST(request, { params }) {
 
       // Still pending or error - don't create connection for pending states
       const isPending = result.pending || result.error === "authorization_pending" || result.error === "slow_down";
-      
+
       return NextResponse.json({
         success: false,
         error: result.error,
         errorDescription: result.errorDescription,
         pending: isPending,
+        // fatal: unrecoverable (e.g. post-exchange failure) — client must stop polling and show it
+        ...(result.fatal ? { fatal: true } : {}),
       });
     }
 
