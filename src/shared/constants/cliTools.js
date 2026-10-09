@@ -1,3 +1,5 @@
+import { HERMES_AUX_TASKS } from "@/lib/hermesConfig.js";
+
 // MITM Tools — IDE tools intercepted via MITM proxy
 export const MITM_TOOLS = {
   antigravity: {
@@ -259,21 +261,33 @@ export const CLI_TOOLS = {
     color: "#8B5CF6",
     description: "Nous Research self-improving AI agent",
     configType: "custom",
-    // Model slots Hermes supports besides the default ("model:" block).
-    // "default" is not listed — the card renders it as the main model picker.
-    roles: [
-      { id: "delegation", label: "Delegation (subagents)" },
-      { id: "vision", label: "Vision" },
-      { id: "web_extract", label: "Web Extract" },
-      { id: "compression", label: "Compression" },
-      { id: "title_generation", label: "Title Generation" },
-      { id: "approval", label: "Approval" },
-      { id: "skills_hub", label: "Skills Hub" },
-      { id: "mcp", label: "MCP" },
-      { id: "memory_query_rewrite", label: "Memory Query Rewrite" },
-      { id: "background_review", label: "Background Review" },
-      { id: "curator", label: "Curator" },
-      { id: "monitor", label: "Monitor" },
+    docsUrl: "https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models",
+    // One named provider (`providers.afrouter`) serves every model — Hermes
+    // references it from slots as `provider: custom:afrouter`, so the same
+    // endpoint is declared once instead of once per slot. `delegation` is a
+    // top-level block of its own and is rendered separately from these.
+    roles: HERMES_AUX_TASKS.map(({ id, label }) => ({ id, label })),
+    notes: [
+      {
+        type: "info",
+        text: "Hermes Agent reads ~/.hermes/config.yaml. AFRouter writes one named provider under providers: (api, transport chat_completions, key_env) with a models: mapping, so every model you add here shows up in Hermes' own model picker (hermes model, /model, /model custom:afrouter:<model-id>).",
+      },
+      {
+        type: "info",
+        text: "Specs are written per model: context_length (the context-window pin) and supports_vision. Hermes' documented resolution chain reads providers.<name>.models.<id>.context_length right after the top-level model.context_length pin.",
+      },
+      {
+        type: "info",
+        text: "Apply and Reset are idempotent — the provider block and our slot references are rewritten, and a timestamped backup is written first. Switch main models any time with hermes model, /model inside a chat, or by changing the Default Model above and re-applying.",
+      },
+      {
+        type: "warning",
+        text: "config.yaml is rewritten as a whole document, so comments may be normalized — the same trade-off DeepSeek Harness makes. Restore the newest config.yaml.bak-* next to it if you need the original text.",
+      },
+      {
+        type: "warning",
+        text: "hermes model and /model read the config at the next new session; use /model inside an open chat to hot-swap it. Run hermes config check if a slot looks stale.",
+      },
     ],
   },
   droid: {

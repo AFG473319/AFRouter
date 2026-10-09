@@ -105,12 +105,70 @@ Combos keep the union (dispatcher re-encodes via coerceLevels). Per-tool wiring:
 | Zed | `settings.json` `language_models.openai_compatible` | provider config (static per zedConfig) | none — Zed drives effort itself | Zed docs |
 | Droid | `~/.factory/settings.json` | model id + maxOutputTokens | none verified | Factory docs |
 | Copilot | VSCode `chatLanguageModels.json` | vision/maxOutputTokens (static) | none — provider-level only | VSCode docs |
-| Hermes | `~/.hermes/config.yaml` (+`.env`) | model/delegation/aux slots, `api_mode: chat_completions` (explicit) | none — single main-model slot by design; switch via `hermes model`/`/model` | https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models |
+| Hermes | `~/.hermes/config.yaml` (+`.env`) | `providers.afrouter.models.<id>.context_length` + `.supports_vision` (per model, multi-model additive list); slots reference `provider: custom:afrouter` | none — schema has no per-model ladder field. `agent.reasoning_overrides` is one effort per model and our resolver's `defaultLevel` is the *strongest* level, so writing it would silently inflate reasoning-token cost; omitted (`reasoning_effort: medium` is the documented chat_completions default) | https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models, /docs/integrations/providers
 | Claude, Cline, CodeWhale, Forge, JCode, OpenClaw, Smelt, WorkBuddy, DeepSeek TUI, Cowork, Devin | various (id/baseUrl/key only or detect-only) | id/baseUrl/key only | none — no per-model effort field in schema (Cline's effort controls are provider-level UI, not config) | per-tool docs (see research notes in PR) |
 
 Re-Apply semantics: Pi/OMP/OpenCode/MimoCode/Crush/DSH refresh specs for models
 already written (additive merge overwrites owned entries — idempotent). ZCode
 config.json preserves reasoning variants on existing entries by design (FR-005,
 user-tuned); the Personal layer rebuilds rules from the resolver (manual-rule
-overrides skipped). Hermes rewrites owned blocks (idempotent; backup + atomic).
+overrides skipped). Hermes upserts `providers.afrouter` additively by model id
+(idempotent; backup + atomic) and rewrites only the slot blocks that point at us.
+
+### Hermes: one named provider, many models
+
+Hermes' `providers:` dict holds named custom endpoints, and each entry's
+`models:` mapping (list **or** id→metadata map) serves several models. Slots
+reference the entry by name — `provider: custom:afrouter` — instead of
+re-declaring `base_url` per slot. The previous implementation wrote an anonymous
+`provider: custom` with an inline `base_url` into every slot, which is one
+endpoint per model: `hermes model` / `/model` could never list a second AFRouter
+model. Now:
+
+```yaml
+providers:
+  afrouter:
+    name: AFRouter
+    api: http://127.0.0.1:20128/v1
+    transport: chat_completions     # dict form; legacy list called it api_mode
+    key_env: AFROUTER_API_KEY       # key lives in ~/.hermes/.env
+    discover_models: false          # this mapping IS the picker's catalog
+    models:
+      openai/gpt-4o:
+        context_length: 128000
+        supports_vision: true
+      deepseek/deepseek-v4-pro:
+        context_length: 1000000
+
+model:
+  default: openai/gpt-4o
+  provider: custom:afrouter
+delegation:
+  model: deepseek/deepseek-v4-pro
+  provider: custom:afrouter
+auxiliary:
+  vision:
+    model: openai/gpt-4o
+    provider: custom:afrouter
+```
+
+Switch between them with `hermes model`, `/model` inside a chat, or
+`/model custom:afrouter:<model-id>`. Docs:
+[configuring-models](https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models),
+[providers](https://hermes-agent.nousresearch.com/docs/integrations/providers).
+
+Verified against the source (`hermes_cli/config_defaults.py`): the canonical
+auxiliary task ids are `vision, compression, skills_hub, approval, review, mcp,
+title_generation, memory_query_rewrite, tts_audio_tags, triage_specifier,
+kanban_decomposer, profile_describer, goal_judge, curator, monitor,
+background_review, moa_reference, moa_aggregator`. `auxiliary.web_extract` and
+`auxiliary.session_search` are dead — Hermes ignores leftover blocks — so the
+role list no longer offers Web Extract, and `delegation` is a top-level block
+rather than an auxiliary task.
+
+Per-model keys are limited to what the docs define for
+`providers.<name>.models.<id>`: `context_length` (2nd link of Hermes' context
+resolution chain) and `supports_vision`. `max_output_tokens` is **not** written —
+"Hermes no longer reads … `model_overrides.*.*.max_output_tokens`".
+
 Grok Build rewrites owned `[model.<slot>]` sections (idempotent).

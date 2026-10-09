@@ -521,7 +521,7 @@ async function buildHermesHeader() {
   const result = await api.getCliToolSettings("hermes");
   if (!result.success) return `  ${COLORS.red}Failed to load settings${COLORS.reset}`;
 
-  const { installed, hasAFRouter, settings } = result.data;
+  const { installed, hasAFRouter, settings, provider, models } = result.data;
   if (!installed) return `Status:   ${COLORS.red}✗ Hermes Agent not installed${COLORS.reset}`;
 
   if (!hasAFRouter) {
@@ -533,8 +533,13 @@ async function buildHermesHeader() {
 
   const model = settings?.model || {};
   const lines = [`Status:   ${COLORS.green}✓ Configured${COLORS.reset}`];
-  if (model.base_url) lines.push(`Endpoint: ${COLORS.cyan}${model.base_url}${COLORS.reset}`);
+  if (provider?.api) lines.push(`Endpoint: ${COLORS.cyan}${provider.api}${COLORS.reset}`);
   if (model.default)  lines.push(`Model:    ${COLORS.dim}${model.default}${COLORS.reset}`);
+  const declared = Array.isArray(models) ? models : [];
+  if (declared.length > 0) {
+    lines.push(`Models:   ${COLORS.dim}${declared.length} under providers.afrouter${COLORS.reset}`);
+    for (const id of declared) lines.push(`  ${COLORS.dim}- ${id}${COLORS.reset}`);
+  }
   return lines.join("\n");
 }
 
@@ -548,10 +553,19 @@ async function hermesQuickSetup(port) {
     return;
   }
 
+  // Hermes keeps one main model per session, so the quick setup pins that and
+  // declares it under the shared `afrouter` provider. Add more models from the
+  // dashboard card — they all land in `providers.afrouter.models` and are
+  // offered by `hermes model` / `/model`.
   const model = await selectModelFromList("Select Hermes Model", "", { excludeCombos: true });
   if (!model) return;
 
-  const result = await api.applyCliToolSettings("hermes", { baseUrl: endpoint, apiKey, model });
+  const result = await api.applyCliToolSettings("hermes", {
+    baseUrl: endpoint,
+    apiKey,
+    model,
+    models: [model],
+  });
   showStatus(result.success ? "Hermes setup completed!" : `Failed: ${result.error}`, result.success ? "success" : "error");
   await pause();
 }

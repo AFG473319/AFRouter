@@ -6,125 +6,249 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { parseYAML, stringifyYAML } from "confbox/yaml";
+import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { resolveProviderAlias } from "open-sse/services/model.js";
+import {
+  HERMES_API_KEY_ENV,
+  HERMES_AUX_TASKS,
+  HERMES_CONFIG_DIR_SEGMENTS,
+  HERMES_CONFIG_FILE,
+  HERMES_DELEGATION_SLOT,
+  HERMES_ENV_FILE,
+  HERMES_FALLBACK_SPEC,
+  HERMES_PROVIDER_ID,
+  HERMES_PROVIDER_REF,
+  buildHermesMainBlock,
+  buildHermesSlot,
+  clearSlotReference,
+  isOurSlot,
+  normalizeHermesBaseUrl,
+  readHermesModelIds,
+  readHermesProvider,
+  removeHermesProvider,
+  upsertHermesProvider,
+} from "@/lib/hermesConfig.js";
 
 const execAsync = promisify(exec);
 
-const PROVIDER_NAME = "9router";
-const API_KEY_ENV = "OPENAI_API_KEY";
+const getHermesDir = () => path.join(os.homedir(), ...HERMES_CONFIG_DIR_SEGMENTS);
+const getHermesConfigPath = () => path.join(getHermesDir(), HERMES_CONFIG_FILE);
+const getHermesEnvPath = () => path.join(getHermesDir(), HERMES_ENV_FILE);
 
-const getHermesDir = () => path.join(os.homedir(), ".hermes");
-const getHermesConfigPath = () => path.join(getHermesDir(), "config.yaml");
-const getHermesEnvPath = () => path.join(getHermesDir(), ".env");
+const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-// Match top-level "model:" block (until next non-indented, non-empty line)
-const MODEL_BLOCK_RE = /^model:[ \t]*\r?\n((?:[ \t]+.*\r?\n?|[ \t]*\r?\n)*)/m;
-// Fresh installs ship the single-line empty-string sentinel (`model: ""` —
-// Nous docs "configuring-models", schema "empty string vs. mapping"). It has
-// no mapping body for MODEL_BLOCK_RE to match, so rewrite it into block form
-// first; otherwise upsert would prepend a second `model:` key and Hermes would
-// read the stale sentinel. Quotes required: a bare `model:` line starts a
-// real mapping and must keep going through MODEL_BLOCK_RE.
-const MODEL_SENTINEL_RE = /^model:[ \t]*(""|'')[ \t]*\r?$/m;
-const DELEGATION_BLOCK_RE = /^delegation:[ \t]*\r?\n((?:[ \t]+.*\r?\n?|[ \t]*\r?\n)*)/m;
-// "auxiliary:" block; children are 2-space-indented role keys with 4+-space fields
-const AUX_BLOCK_RE = /^auxiliary:[ \t]*\r?\n((?:(?:[ \t]+.*\r?\n?)|(?:[ \t]*\r?\n))*)/m;
-const auxRoleRe = (role) => new RegExp(`^  ${role}:[ \\t]*\\r?\\n(?:(?:[ \\t]{4,}.*\\r?\\n?)|(?:[ \\t]*\\r?\\n))*`, "m");
-
-// AFRouter serves OpenAI chat completions, so declare it explicitly: api_mode
-// "" means auto-detect, and a wrong guess would mistranslate every request.
-// (Nous docs: integrations/providers "Custom Endpoint", configuration
-// "providers:" + api_mode chat_completions/codex_responses/anthropic_messages.)
-const HERMES_API_MODE = "chat_completions";
-
-const buildModelBlock = (model, baseUrl) =>
-  `model:\n  default: "${model}"\n  provider: "custom"\n  base_url: "${baseUrl}"\n  api_mode: "${HERMES_API_MODE}"\n  api_key: \${OPENAI_API_KEY}\n`;
-
-const buildDelegationBlock = (model, baseUrl) =>
-  `delegation:\n  model: "${model}"\n  provider: "custom"\n  base_url: "${baseUrl}"\n  api_mode: "${HERMES_API_MODE}"\n  api_key: \${OPENAI_API_KEY}\n`;
-
-const buildAuxRoleBlock = (role, model, baseUrl) =>
-  `  ${role}:\n    provider: "custom"\n    model: "${model}"\n    base_url: "${baseUrl}"\n    api_mode: "${HERMES_API_MODE}"\n    api_key: \${OPENAI_API_KEY}\n`;
-
-// Parse current model block back to fields (best-effort, simple key:value)
-const parseModelBlock = (yaml) => {
-  const match = yaml.match(MODEL_BLOCK_RE);
-  if (!match) return null;
-  const body = match[1] || "";
-  const get = (key) => {
-    const m = body.match(new RegExp(`^[ \\t]+${key}:[ \\t]*["']?([^"'\\r\\n]+)["']?`, "m"));
-    return m ? m[1].trim() : null;
-  };
-  return {
-    default: get("default"),
-    provider: get("provider"),
-    base_url: get("base_url"),
-    api_key: get("api_key"),
-  };
-};
-
-const upsertModelBlock = (yaml, newBlock) => {
-  if (MODEL_SENTINEL_RE.test(yaml)) return yaml.replace(MODEL_SENTINEL_RE, newBlock.trimEnd());
-  if (MODEL_BLOCK_RE.test(yaml)) return yaml.replace(MODEL_BLOCK_RE, newBlock);
-  return yaml.length > 0 ? `${newBlock}\n${yaml}` : newBlock;
-};
-
-const upsertDelegationBlock = (yaml, newBlock) => {
-  if (DELEGATION_BLOCK_RE.test(yaml)) return yaml.replace(DELEGATION_BLOCK_RE, newBlock);
-  return yaml.endsWith("\n") || yaml.length === 0 ? `${yaml}${newBlock}` : `${yaml}\n${newBlock}`;
-};
-
-const removeDelegationBlock = (yaml) => yaml.replace(DELEGATION_BLOCK_RE, "");
-
-const upsertAuxRole = (yaml, role, roleBlock) => {
-  const re = auxRoleRe(role);
-  const m = yaml.match(AUX_BLOCK_RE);
-  if (!m) {
-    const block = `auxiliary:\n${roleBlock}`;
-    return yaml.endsWith("\n") || yaml.length === 0 ? `${yaml}${block}` : `${yaml}\n${block}`;
+// ─── YAML read/write ────────────────────────────────────────────────────────
+//
+// config.yaml is a real YAML document with a nested `providers:` mapping, so it
+// is round-tripped through a parser rather than rewritten line-by-line. A
+// document that parses but is not a mapping (an array, a bare scalar) counts as
+// corrupt too: treating it as {} would silently overwrite whatever the user
+// actually had there.
+const readYamlDocument = async (filePath) => {
+  let raw;
+  try {
+    raw = await fs.readFile(filePath, "utf-8");
+  } catch (error) {
+    if (error.code === "ENOENT") return { missing: true };
+    return { corrupt: true };
   }
-  const body = re.test(m[1]) ? m[1].replace(re, roleBlock) : `${m[1]}${roleBlock}`;
-  return yaml.replace(AUX_BLOCK_RE, `auxiliary:\n${body}`);
-};
-
-const removeAuxRole = (yaml, role) => {
-  const m = yaml.match(AUX_BLOCK_RE);
-  if (!m) return yaml;
-  const body = m[1].replace(auxRoleRe(role), "");
-  if (body.trim() === "") return yaml.replace(AUX_BLOCK_RE, "");
-  return yaml.replace(AUX_BLOCK_RE, `auxiliary:\n${body}`);
-};
-
-// role -> { model, provider, base_url } for every entry under "auxiliary:"
-const parseAuxRoles = (yaml) => {
-  const m = yaml.match(AUX_BLOCK_RE);
-  if (!m) return {};
-  const roles = {};
-  const subRe = /^  ([A-Za-z0-9_]+):[ \t]*\r?\n((?:(?:[ \t]{4,}.*\r?\n?)|(?:[ \t]*\r?\n))*)/gm;
-  let sm;
-  while ((sm = subRe.exec(m[1]))) {
-    const get = (key) => {
-      const km = sm[2].match(new RegExp(`^[ \\t]+${key}:[ \\t]*["']?([^"'\\r\\n]+)["']?`, "m"));
-      return km ? km[1].trim() : null;
-    };
-    roles[sm[1]] = { model: get("model"), provider: get("provider"), base_url: get("base_url") };
+  try {
+    const data = parseYAML(raw);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return { corrupt: true };
+    return { data };
+  } catch {
+    return { corrupt: true };
   }
-  return roles;
 };
 
-const parseDelegationBlock = (yaml) => {
-  const match = yaml.match(DELEGATION_BLOCK_RE);
-  if (!match) return null;
-  const body = match[1] || "";
-  const get = (key) => {
-    const m = body.match(new RegExp(`^[ \\t]+${key}:[ \\t]*["']?([^"'\\r\\n]+)["']?`, "m"));
-    return m ? m[1].trim() : null;
-  };
-  return { model: get("model"), provider: get("provider"), base_url: get("base_url") };
+const timestamp = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${d.getHours()}${p(d.getMinutes())}${p(d.getSeconds())}`;
 };
 
-const removeModelBlock = (yaml) => yaml.replace(MODEL_BLOCK_RE, "").replace(/^\n+/, "");
+// Timestamped backup -> temp file -> atomic rename, with EPERM/EACCES retries
+// (Windows file-lock races with Hermes or an AV scanner). No backup when the
+// target does not exist yet, which is the normal first-apply case.
+const writeAtomic = async (filePath, content) => {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  let backupPath = null;
+  try {
+    backupPath = `${filePath}.bak-${timestamp()}`;
+    await fs.copyFile(filePath, backupPath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    backupPath = null;
+  }
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  await fs.writeFile(tmpPath, content, "utf-8");
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rename(tmpPath, filePath);
+      break;
+    } catch (error) {
+      if ((error.code === "EPERM" || error.code === "EACCES") && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 150));
+        continue;
+      }
+      throw error;
+    }
+  }
+  return { backupPath };
+};
 
-// .env helpers — upsert/remove single KEY=VALUE line
+const npmPathEnv = () => {
+  const isWindows = process.platform === "win32";
+  return isWindows && process.env.APPDATA
+    ? { ...process.env, PATH: `${process.env.APPDATA}\\npm;${process.env.PATH || ""}` }
+    : process.env;
+};
+
+// Detection: a `hermes` binary, or any of ~/.hermes's own files. A config file
+// may not exist yet on a fresh install — that is "installed, not configured",
+// not "not installed".
+const checkHermesInstalled = async () => {
+  try {
+    const isWindows = process.platform() === "win32";
+    await execAsync(isWindows ? "where hermes" : "which hermes", {
+      windowsHide: true,
+      env: npmPathEnv(),
+    });
+    return true;
+  } catch {
+    for (const candidate of [getHermesConfigPath(), getHermesEnvPath(), getHermesDir()]) {
+      try {
+        await fs.access(candidate);
+        return true;
+      } catch {
+        /* try next */
+      }
+    }
+    return false;
+  }
+};
+
+// ─── spec resolution ────────────────────────────────────────────────────────
+//
+// Live catalog first (our own /v1/models, indexed by exact id and by the
+// alias-translated spelling), then the static registry, then the conservative
+// fallback. Never invent values: an unresolved id is reported `unverified`.
+const resolveSelfOrigin = (request) => {
+  try {
+    const url = new URL(request?.url || "");
+    if (url.port) return `http://127.0.0.1:${url.port}`;
+  } catch {
+    // fall through
+  }
+  return `http://127.0.0.1:${process.env.PORT || 20128}`;
+};
+
+const resolveLiveCatalog = async (origin) => {
+  try {
+    const res = await fetch(`${origin}/v1/models`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const models = Array.isArray(json?.data) ? json.data : [];
+    const byId = new Map();
+    const byAliasId = new Map();
+    for (const m of models) {
+      if (!m?.id || !m.capabilities) continue;
+      const caps = { ...m.capabilities, name: m.name || m.id };
+      byId.set(m.id, caps);
+      const bare = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
+      const owner = m.owned_by || (m.id.includes("/") ? m.id.slice(0, m.id.indexOf("/")) : null);
+      if (bare && owner) byAliasId.set(`${owner}/${bare}`, caps);
+    }
+    return { byId, byAliasId };
+  } catch {
+    return null;
+  }
+};
+
+const capsToSpec = (caps) => ({
+  name: caps.name || undefined,
+  contextWindow: Math.floor(Number(caps.contextWindow)),
+  maxOutput: Math.floor(Number(caps.maxOutput)),
+  vision: caps.vision === true,
+  reasoning: caps.reasoning === true,
+});
+
+const resolveModelSpecs = async (ids, catalog) => {
+  const specs = {};
+  const unverified = [];
+  for (const id of ids) {
+    const slash = id.indexOf("/");
+    const prefix = slash > 0 ? id.slice(0, slash) : null;
+    const bare = slash > 0 ? id.slice(slash + 1) : id;
+
+    let caps = catalog?.byId?.get(id) || null;
+    if (!caps && prefix) {
+      const translated = resolveProviderAlias(prefix);
+      caps =
+        catalog?.byAliasId?.get(`${translated}/${bare}`) ||
+        catalog?.byAliasId?.get(`${prefix}/${bare}`) ||
+        null;
+    }
+    if (!caps) {
+      const staticCaps = getCapabilitiesForModel(prefix, bare);
+      if (staticCaps && Number.isFinite(staticCaps.contextWindow)) caps = staticCaps;
+    }
+    if (caps && Number.isFinite(caps.contextWindow)) {
+      specs[id] = capsToSpec(caps);
+    } else {
+      specs[id] = { ...HERMES_FALLBACK_SPEC };
+      unverified.push(id);
+    }
+  }
+  return { specs, unverified };
+};
+
+// ─── slot helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Read one slot block back to the fields the card displays. `key` is the field
+ * the slot spells its model id in — `default:` for the main block, `model:`
+ * everywhere else — so the response mirrors the file's own key names.
+ */
+const readSlot = (block, key = "model") => {
+  if (!isObject(block)) return null;
+  const value = block[key];
+  if (value === null || value === undefined || value === "") return null;
+  return { [key]: String(value), provider: block.provider ?? null };
+};
+
+const slotIsOurs = (block, baseUrl) => isOurSlot(block, baseUrl);
+
+/**
+ * Write our reference into one slot block, keeping every field we do not own.
+ * `base_url`/`api_key`/`api_mode` are stripped first: `delegation.base_url`
+ * takes precedence over `provider`, so a stale inline endpoint left from an
+ * older AFRouter build would silently override the named provider.
+ *
+ * The main block spells the id `default:` (Hermes also accepts `model:` there);
+ * every other slot spells it `model:`.
+ */
+const writeSlot = (previous, model, isMain = false) => {
+  const base = isObject(previous) ? clearSlotReference(previous) : {};
+  return { ...base, ...(isMain ? buildHermesMainBlock(model) : buildHermesSlot(model)) };
+};
+
+/**
+ * Strip our reference out of one slot block. Other keys are preserved so a
+ * user's own timeout/extra_body tuning survives; the block is dropped only when
+ * nothing is left in it.
+ */
+const stripSlot = (previous) => {
+  if (!isObject(previous)) return null;
+  const stripped = clearSlotReference(previous);
+  return Object.keys(stripped).length > 0 ? stripped : null;
+};
+
+// ─── .env helpers ───────────────────────────────────────────────────────────
+// Only the API key lives here; Hermes' own docs put API keys in ~/.hermes/.env
+// and name them from the provider entry with `key_env`.
+
 const upsertEnvVar = (envText, key, value) => {
   const re = new RegExp(`^${key}=.*$`, "m");
   const line = `${key}=${value}`;
@@ -132,35 +256,7 @@ const upsertEnvVar = (envText, key, value) => {
   return envText.length > 0 && !envText.endsWith("\n") ? `${envText}\n${line}\n` : `${envText}${line}\n`;
 };
 
-const removeEnvVar = (envText, key) => {
-  const re = new RegExp(`^${key}=.*\\r?\\n?`, "m");
-  return envText.replace(re, "");
-};
-
-const checkHermesInstalled = async () => {
-  try {
-    const isWindows = os.platform() === "win32";
-    const command = isWindows ? "where hermes" : "which hermes";
-    await execAsync(command, { windowsHide: true });
-    return true;
-  } catch {
-    try {
-      await fs.access(getHermesConfigPath());
-      return true;
-    } catch {
-      return false;
-    }
-  }
-};
-
-const readConfigYaml = async () => {
-  try {
-    return await fs.readFile(getHermesConfigPath(), "utf-8");
-  } catch (error) {
-    if (error.code === "ENOENT") return "";
-    throw error;
-  }
-};
+const removeEnvVar = (envText, key) => envText.replace(new RegExp(`^${key}=.*\\r?\\n?`, "m"), "");
 
 const readEnvFile = async () => {
   try {
@@ -171,27 +267,84 @@ const readEnvFile = async () => {
   }
 };
 
-// Detect 9router by base_url containing localhost/127.0.0.1 or matching tunnel URL
-const has9RouterConfig = (modelCfg) => {
-  if (!modelCfg?.base_url) return false;
-  return modelCfg.provider === "custom" && /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(modelCfg.base_url);
-};
+// ─── GET ────────────────────────────────────────────────────────────────────
 
-export async function GET() {
+export async function GET(request) {
   try {
     const installed = await checkHermesInstalled();
     if (!installed) {
-      return NextResponse.json({ installed: false, settings: null, message: "Hermes Agent is not installed" });
+      return NextResponse.json({
+        installed: false,
+        hasAFRouter: false,
+        configPath: getHermesConfigPath(),
+        envPath: getHermesEnvPath(),
+        settings: null,
+        provider: null,
+        models: [],
+        message: "Hermes Agent is not installed",
+      });
     }
-    const yaml = await readConfigYaml();
-    const model = parseModelBlock(yaml);
-    const delegation = parseDelegationBlock(yaml);
-    const auxiliary = parseAuxRoles(yaml);
+
+    const configPath = getHermesConfigPath();
+    const result = await readYamlDocument(configPath);
+    if (result.corrupt) {
+      return NextResponse.json({
+        installed: true,
+        corrupt: true,
+        hasAFRouter: false,
+        configPath,
+        envPath: getHermesEnvPath(),
+        settings: null,
+        provider: null,
+        models: [],
+      });
+    }
+
+    const doc = result.data || {};
+    const provider = readHermesProvider(doc);
+    const models = readHermesModelIds(doc);
+
+    const auxiliary = {};
+    for (const { id } of HERMES_AUX_TASKS) {
+      const slot = readSlot(doc.auxiliary?.[id]);
+      if (slot) auxiliary[id] = slot;
+    }
+
+    // Unverified ids are computed from what is actually in the file, so the
+    // notice follows the config rather than the last thing the card sent.
+    let unverified = [];
+    if (models.length > 0) {
+      const catalog =
+        (await resolveLiveCatalog(resolveSelfOrigin(request))) ||
+        (await resolveLiveCatalog(`http://127.0.0.1:${process.env.PORT || 20128}`));
+      const resolved = await resolveModelSpecs(models, catalog);
+      unverified = models.filter((id) => resolved.unverified.includes(id));
+    }
+
     return NextResponse.json({
       installed: true,
-      settings: { model, delegation, auxiliary },
-      has9Router: has9RouterConfig(model) || has9RouterConfig(delegation) || Object.values(auxiliary).some(has9RouterConfig),
-      configPath: getHermesConfigPath(),
+      corrupt: false,
+      hasAFRouter: !!provider,
+      configPath,
+      envPath: getHermesEnvPath(),
+      settings: {
+        model: readSlot(doc.model, "default"),
+        delegation: readSlot(doc.delegation),
+        auxiliary,
+      },
+      provider: provider
+        ? {
+            name: provider.name ?? HERMES_PROVIDER_ID,
+            api: provider.api ?? provider.base_url ?? null,
+            transport: provider.transport ?? provider.api_mode ?? null,
+            discoverModels: provider.discover_models !== false,
+            hasApiKey: typeof provider.api_key === "string" && provider.api_key.length > 0,
+            keyEnv: provider.key_env ?? null,
+            models,
+          }
+        : null,
+      models,
+      unverified,
     });
   } catch (error) {
     console.log("Error checking hermes settings:", error);
@@ -199,61 +352,111 @@ export async function GET() {
   }
 }
 
+// ─── POST ───────────────────────────────────────────────────────────────────
+
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, model, selections } = await request.json();
-    // selections: [{role, model}] — "default" plus any auxiliary/delegation slots.
-    // Legacy callers (CLI quick setup) send a bare `model` → treat as default role.
+    const { baseUrl, apiKey, models, model: legacyModel, selections } = await request.json();
+
+    // `models` is the additive list declared under `providers.afrouter` — this
+    // is what makes Hermes offer many AFRouter models. `selections` assigns
+    // them to slots: [{ role, model }], where "default" is the main model,
+    // "delegation" the top-level subagent block, and anything else an
+    // `auxiliary.<task>` block. Legacy callers (the CLI quick setup) send a
+    // bare `model`, which is treated as the default slot.
+    const modelList = Array.isArray(models)
+      ? models.filter((m) => typeof m === "string" && m.trim()).map((m) => m.trim())
+      : [];
     const sel = Array.isArray(selections) && selections.some((s) => s?.role && s?.model)
       ? selections.filter((s) => s?.role && s?.model)
-      : model ? [{ role: "default", model }] : [];
-    const defaultSel = sel.find((s) => s.role === "default");
-    if (!baseUrl || !defaultSel) {
-      return NextResponse.json({ error: "baseUrl and model are required" }, { status: 400 });
-    }
-
-    const dir = getHermesDir();
-    await fs.mkdir(dir, { recursive: true });
-
-    const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-
-    // Update config.yaml — upsert each role block, keep everything else
-    let newYaml = await readConfigYaml();
-    for (const { role, model: roleModel } of sel) {
-      if (role === "default") {
-        newYaml = upsertModelBlock(newYaml, buildModelBlock(roleModel, normalizedBaseUrl));
-      } else if (role === "delegation") {
-        newYaml = upsertDelegationBlock(newYaml, buildDelegationBlock(roleModel, normalizedBaseUrl));
-      } else {
-        newYaml = upsertAuxRole(newYaml, role, buildAuxRoleBlock(role, roleModel, normalizedBaseUrl));
+      : legacyModel ? [{ role: "default", model: legacyModel }] : [];
+    const roles = new Map();
+    for (const { role, model } of sel) {
+      if (typeof role === "string" && typeof model === "string" && model.trim()) {
+        roles.set(role, model.trim());
       }
     }
-    const configPath = getHermesConfigPath();
-    // Backup + atomic write: never leave a half-written config.yaml behind.
-    let backupPath = null;
-    try {
-      await fs.access(configPath);
-      backupPath = `${configPath}.bak-${Date.now()}`;
-      await fs.copyFile(configPath, backupPath);
-    } catch {
-      /* No existing config — nothing to back up */
+    const defaultModel = roles.get("default");
+    if (!baseUrl || !defaultModel) {
+      return NextResponse.json({ error: "baseUrl and a default model are required" }, { status: 400 });
     }
-    const tmpPath = `${configPath}.tmp-${process.pid}-${Date.now()}`;
-    await fs.writeFile(tmpPath, newYaml, "utf-8");
-    await fs.rename(tmpPath, configPath);
 
-    // Update .env — upsert OPENAI_API_KEY only when caller provides one
+    const configPath = getHermesConfigPath();
+    const existing = await readYamlDocument(configPath);
+    if (existing.corrupt) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "~/.hermes/config.yaml is unreadable — fix or restore the latest backup before applying",
+        },
+        { status: 409 },
+      );
+    }
+
+    // The default model is always part of the provider's catalog, so a caller
+    // that only sends a slot assignment still gets a usable picker entry.
+    const declaredModels = defaultModel && !modelList.includes(defaultModel)
+      ? [defaultModel, ...modelList]
+      : modelList;
+
+    const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
+    const { specs, unverified } = await resolveModelSpecs(declaredModels, catalog);
+
+    const normalizedBaseUrl = normalizeHermesBaseUrl(baseUrl);
+    let doc = upsertHermesProvider(existing.data || {}, {
+      baseUrl: normalizedBaseUrl,
+      keyEnv: HERMES_API_KEY_ENV,
+      models: declaredModels,
+      specs,
+    });
+
+    // Main model.
+    doc.model = writeSlot(doc.model, defaultModel, true);
+
+    // Delegation — its own top-level block, not an auxiliary task.
+    if (roles.has(HERMES_DELEGATION_SLOT)) {
+      doc[HERMES_DELEGATION_SLOT] = writeSlot(doc[HERMES_DELEGATION_SLOT], roles.get(HERMES_DELEGATION_SLOT));
+    } else if (slotIsOurs(doc[HERMES_DELEGATION_SLOT], normalizedBaseUrl)) {
+      const stripped = stripSlot(doc[HERMES_DELEGATION_SLOT]);
+      if (stripped) doc[HERMES_DELEGATION_SLOT] = stripped;
+      else delete doc[HERMES_DELEGATION_SLOT];
+    }
+
+    // Auxiliary tasks. An unset role whose block still points at us is cleared,
+    // so "remove the override" round-trips instead of sticking forever.
+    const auxiliary = isObject(doc.auxiliary) ? { ...doc.auxiliary } : {};
+    for (const { id } of HERMES_AUX_TASKS) {
+      if (roles.has(id)) {
+        auxiliary[id] = writeSlot(auxiliary[id], roles.get(id));
+      } else if (slotIsOurs(auxiliary[id], normalizedBaseUrl)) {
+        const stripped = stripSlot(auxiliary[id]);
+        if (stripped) auxiliary[id] = stripped;
+        else delete auxiliary[id];
+      }
+    }
+    doc.auxiliary = auxiliary;
+
+    const { backupPath } = await writeAtomic(configPath, stringifyYAML(doc));
+
+    // .env: upsert the key the entry resolves through `key_env`. Only written
+    // when the caller supplies one, so an existing key on this machine is never
+    // clobbered with an empty value.
+    let envWritten = false;
     if (apiKey) {
-      const existingEnv = await readEnvFile();
-      const newEnv = upsertEnvVar(existingEnv, API_KEY_ENV, apiKey);
-      await fs.writeFile(getHermesEnvPath(), newEnv);
+      const newEnv = upsertEnvVar(await readEnvFile(), HERMES_API_KEY_ENV, apiKey);
+      await writeAtomic(getHermesEnvPath(), newEnv);
+      envWritten = true;
     }
 
     return NextResponse.json({
       success: true,
-      message: "Hermes settings applied successfully!",
-      configPath: getHermesConfigPath(),
+      message: `Hermes settings applied — ${declaredModels.length} model${declaredModels.length === 1 ? "" : "s"} under the ${HERMES_PROVIDER_ID} provider. Switch between them with hermes model, /model, or /model ${HERMES_PROVIDER_REF}:<model-id>.`,
+      configPath,
+      envPath: getHermesEnvPath(),
       backupPath,
+      envWritten,
+      models: declaredModels,
+      unverified,
     });
   } catch (error) {
     console.log("Error updating hermes settings:", error);
@@ -261,27 +464,95 @@ export async function POST(request) {
   }
 }
 
-export async function DELETE() {
+// ─── DELETE ─────────────────────────────────────────────────────────────────
+
+export async function DELETE(request) {
   try {
-    const configPath = getHermesConfigPath();
-    let yaml = "";
+    // Accept both an absolute URL (what Next passes) and an origin-relative one,
+    // and treat a missing `?model=` as "remove the whole provider".
+    let modelToRemove = null;
     try {
-      yaml = await fs.readFile(configPath, "utf-8");
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        return NextResponse.json({ success: true, message: "No config file to reset" });
+      modelToRemove = new URL(String(request?.url || ""), "http://localhost").searchParams.get("model");
+    } catch {
+      modelToRemove = null;
+    }
+
+    const configPath = getHermesConfigPath();
+    const existing = await readYamlDocument(configPath);
+    if (existing.missing) {
+      return NextResponse.json({ success: true, message: "No config file to reset", removed: 0 });
+    }
+    if (existing.corrupt) {
+      return NextResponse.json(
+        { success: false, error: "~/.hermes/config.yaml is unreadable — nothing was removed" },
+        { status: 409 },
+      );
+    }
+
+    let doc = existing.data || {};
+    if (!readHermesProvider(doc)) {
+      return NextResponse.json({
+        success: true,
+        message: "No AFRouter provider in Hermes config.yaml",
+        removed: 0,
+      });
+    }
+
+    const baseUrl = normalizeHermesBaseUrl(readHermesProvider(doc)?.api || "");
+    let removed = 0;
+    if (modelToRemove) {
+      const result = removeHermesProvider(doc, modelToRemove);
+      doc = result.doc;
+      removed = result.removed;
+      if (removed === 0) {
+        return NextResponse.json({
+          success: true,
+          message: `"${modelToRemove}" is not under the ${HERMES_PROVIDER_ID} provider — left untouched`,
+          removed: 0,
+        });
       }
-      throw error;
+    } else {
+      const result = removeHermesProvider(doc, null);
+      doc = result.doc;
+      removed = result.removed;
     }
-    let newYaml = removeModelBlock(yaml);
-    newYaml = removeDelegationBlock(newYaml);
-    // Only drop auxiliary entries we manage (custom provider, any base URL — covers tunnels)
-    for (const [role, cfg] of Object.entries(parseAuxRoles(yaml))) {
-      if (cfg?.provider === "custom") newYaml = removeAuxRole(newYaml, role);
+
+    // Drop every reference to us, including one to a model we just removed, so
+    // no slot is left pointing at a provider entry that no longer exists. A
+    // slot block that names no provider is not a usable model, so the whole
+    // block goes — the same contract the previous implementation had.
+    const entryGone = !readHermesProvider(doc);
+    if (slotIsOurs(doc.model, baseUrl)) delete doc.model;
+    if (slotIsOurs(doc[HERMES_DELEGATION_SLOT], baseUrl)) delete doc[HERMES_DELEGATION_SLOT];
+
+    if (isObject(doc.auxiliary)) {
+      const auxiliary = { ...doc.auxiliary };
+      for (const { id } of HERMES_AUX_TASKS) {
+        if (!slotIsOurs(auxiliary[id], baseUrl)) continue;
+        // A single-model delete also clears a slot pinned to that model: it can
+        // never be selected again, so leaving it would be a dangling reference.
+        const gone = modelToRemove && auxiliary[id]?.model === modelToRemove;
+        if (entryGone || gone) delete auxiliary[id];
+      }
+      doc.auxiliary = auxiliary;
     }
-    newYaml = newYaml.replace(/^\n+/, "");
-    await fs.writeFile(configPath, newYaml);
-    return NextResponse.json({ success: true, message: `${PROVIDER_NAME} model blocks removed` });
+
+    await writeAtomic(configPath, stringifyYAML(doc));
+
+    // Only the key we own is removed; a user's own OPENAI_API_KEY (Hermes'
+    // documented fallback for hand-written custom endpoints) is theirs.
+    const envText = await readEnvFile();
+    const newEnv = removeEnvVar(envText, HERMES_API_KEY_ENV);
+    if (newEnv !== envText) await writeAtomic(getHermesEnvPath(), newEnv);
+
+    return NextResponse.json({
+      success: true,
+      message: entryGone
+        ? `AFRouter provider and ${removed} model${removed === 1 ? "" : "s"} removed from Hermes config.yaml`
+        : `${removed} model${removed === 1 ? "" : "s"} removed from the ${HERMES_PROVIDER_ID} provider`,
+      configPath,
+      removed,
+    });
   } catch (error) {
     console.log("Error resetting hermes settings:", error);
     return NextResponse.json({ error: "Failed to reset hermes settings" }, { status: 500 });
