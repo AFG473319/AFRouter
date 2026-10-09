@@ -1,3 +1,8 @@
+# v0.5.95 (2026-10-09)
+
+## Fixes
+- **OpenCode dropped the whole AFRouter provider.** OpenCode V2 catalogs per-model variants as an array of `{ id, settings: { reasoningEffort } }`, but the writer emitted V1's named-object map with a top-level `reasoningEffort`. OpenCode logged the entry as malformed and skipped the provider, so no AFRouter models appeared in its picker. V2 output now uses the array form; V1 output is unchanged.
+
 # v0.5.94 (2026-10-09)
 
 ## Features
