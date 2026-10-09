@@ -748,26 +748,44 @@ exports[`cli model snapshot: fixed model set > opencode v1+v2 entries carry vari
         "output": 128000,
       },
       "name": "claude/claude-opus-4.7",
-      "variants": {
-        "high": {
-          "reasoningEffort": "high",
+      "variants": [
+        {
+          "id": "none",
+          "settings": {
+            "reasoningEffort": "none",
+          },
         },
-        "low": {
-          "reasoningEffort": "low",
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low",
+          },
         },
-        "max": {
-          "reasoningEffort": "max",
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium",
+          },
         },
-        "medium": {
-          "reasoningEffort": "medium",
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high",
+          },
         },
-        "none": {
-          "reasoningEffort": "none",
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh",
+          },
         },
-        "xhigh": {
-          "reasoningEffort": "xhigh",
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max",
+          },
         },
-      },
+      ],
     },
     "claude/claude-sonnet-4.6": {
       "capabilities": {
@@ -785,23 +803,38 @@ exports[`cli model snapshot: fixed model set > opencode v1+v2 entries carry vari
         "output": 128000,
       },
       "name": "claude/claude-sonnet-4.6",
-      "variants": {
-        "high": {
-          "reasoningEffort": "high",
+      "variants": [
+        {
+          "id": "none",
+          "settings": {
+            "reasoningEffort": "none",
+          },
         },
-        "low": {
-          "reasoningEffort": "low",
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low",
+          },
         },
-        "max": {
-          "reasoningEffort": "max",
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium",
+          },
         },
-        "medium": {
-          "reasoningEffort": "medium",
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high",
+          },
         },
-        "none": {
-          "reasoningEffort": "none",
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max",
+          },
         },
-      },
+      ],
     },
     "codebuddy-cn/glm-5.3": {
       "capabilities": {
@@ -819,17 +852,26 @@ exports[`cli model snapshot: fixed model set > opencode v1+v2 entries carry vari
         "output": 48000,
       },
       "name": "codebuddy-cn/glm-5.3",
-      "variants": {
-        "high": {
-          "reasoningEffort": "high",
+      "variants": [
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low",
+          },
         },
-        "low": {
-          "reasoningEffort": "low",
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high",
+          },
         },
-        "max": {
-          "reasoningEffort": "max",
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max",
+          },
         },
-      },
+      ],
     },
     "codex/gpt-5.6-sol": {
       "capabilities": {
@@ -847,26 +889,44 @@ exports[`cli model snapshot: fixed model set > opencode v1+v2 entries carry vari
         "output": 128000,
       },
       "name": "codex/gpt-5.6-sol",
-      "variants": {
-        "high": {
-          "reasoningEffort": "high",
+      "variants": [
+        {
+          "id": "minimal",
+          "settings": {
+            "reasoningEffort": "minimal",
+          },
         },
-        "low": {
-          "reasoningEffort": "low",
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low",
+          },
         },
-        "max": {
-          "reasoningEffort": "max",
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium",
+          },
         },
-        "medium": {
-          "reasoningEffort": "medium",
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high",
+          },
         },
-        "minimal": {
-          "reasoningEffort": "minimal",
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh",
+          },
         },
-        "xhigh": {
-          "reasoningEffort": "xhigh",
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max",
+          },
         },
-      },
+      ],
     },
     "deepseek/deepseek-v4-pro": {
       "capabilities": {
@@ -883,17 +943,26 @@ exports[`cli model snapshot: fixed model set > opencode v1+v2 entries carry vari
         "output": 384000,
       },
       "name": "deepseek/deepseek-v4-pro",
-      "variants": {
-        "high": {
-          "reasoningEffort": "high",
+      "variants": [
+        {
+          "id": "none",
+          "settings": {
+            "reasoningEffort": "none",
+          },
         },
-        "max": {
-          "reasoningEffort": "max",
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high",
+          },
         },
-        "none": {
-          "reasoningEffort": "none",
+        {
+          "id": "max",
+          "settings": {
+            "reasoningEffort": "max",
+          },
         },
-      },
+      ],
     },
     "glm/glm-5.3": {
       "capabilities": {
@@ -910,11 +979,14 @@ exports[`cli model snapshot: fixed model set > opencode v1+v2 entries carry vari
         "output": 128000,
       },
       "name": "glm/glm-5.3",
-      "variants": {
-        "none": {
-          "reasoningEffort": "none",
+      "variants": [
+        {
+          "id": "none",
+          "settings": {
+            "reasoningEffort": "none",
+          },
         },
-      },
+      ],
     },
     "openai/gpt-4o": {
       "capabilities": {
@@ -949,26 +1021,44 @@ exports[`cli model snapshot: fixed model set > opencode v1+v2 entries carry vari
         "output": 128000,
       },
       "name": "openai/gpt-5",
-      "variants": {
-        "high": {
-          "reasoningEffort": "high",
+      "variants": [
+        {
+          "id": "none",
+          "settings": {
+            "reasoningEffort": "none",
+          },
         },
-        "low": {
-          "reasoningEffort": "low",
+        {
+          "id": "minimal",
+          "settings": {
+            "reasoningEffort": "minimal",
+          },
         },
-        "medium": {
-          "reasoningEffort": "medium",
+        {
+          "id": "low",
+          "settings": {
+            "reasoningEffort": "low",
+          },
         },
-        "minimal": {
-          "reasoningEffort": "minimal",
+        {
+          "id": "medium",
+          "settings": {
+            "reasoningEffort": "medium",
+          },
         },
-        "none": {
-          "reasoningEffort": "none",
+        {
+          "id": "high",
+          "settings": {
+            "reasoningEffort": "high",
+          },
         },
-        "xhigh": {
-          "reasoningEffort": "xhigh",
+        {
+          "id": "xhigh",
+          "settings": {
+            "reasoningEffort": "xhigh",
+          },
         },
-      },
+      ],
     },
   },
 }
