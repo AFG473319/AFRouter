@@ -62,6 +62,15 @@ export const buildModelCapabilities = (caps) => {
   return { tools: caps.tools !== false, input, output: ["text"] };
 };
 
+/**
+ * V2 catalogs variants as an array of `{ id, settings }`, with the effort under
+ * `settings` (opencode.ai/v2/docs/models). V1 keeps the named-object map.
+ */
+export const toV2Variants = (variants) =>
+  variants
+    ? Object.entries(variants).map(([id, { reasoningEffort }]) => ({ id, settings: { reasoningEffort } }))
+    : undefined;
+
 export const buildModelEntry = (id, caps, format = DEFAULT_FORMAT) => {
   const limit = {
     context: Math.floor(caps.contextWindow),
@@ -69,7 +78,10 @@ export const buildModelEntry = (id, caps, format = DEFAULT_FORMAT) => {
   };
   const capabilities = buildModelCapabilities(caps);
   const variants = opencodeReasoningVariants(caps);
-  if (format === "v2") return { name: id, limit, capabilities, ...(variants ? { variants } : null) };
+  if (format === "v2") {
+    const v2Variants = toV2Variants(variants);
+    return { name: id, limit, capabilities, ...(v2Variants ? { variants: v2Variants } : null) };
+  }
   return {
     name: id,
     limit,

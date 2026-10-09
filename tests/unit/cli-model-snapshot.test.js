@@ -121,7 +121,15 @@ describe("cli model snapshot: fixed model set", () => {
     );
     expect(v1[MODELS.codex].variants.none).toBeUndefined();
     expect(v1[MODELS.visionFlat].variants).toBeUndefined();
-    expect(v2[MODELS.gpt].variants).toEqual(v1[MODELS.gpt].variants);
+    expect(v2[MODELS.gpt].variants).toEqual([
+      { id: "none", settings: { reasoningEffort: "none" } },
+      { id: "minimal", settings: { reasoningEffort: "minimal" } },
+      { id: "low", settings: { reasoningEffort: "low" } },
+      { id: "medium", settings: { reasoningEffort: "medium" } },
+      { id: "high", settings: { reasoningEffort: "high" } },
+      { id: "xhigh", settings: { reasoningEffort: "xhigh" } },
+    ]);
+    expect(v2[MODELS.visionFlat].variants).toBeUndefined();
     expect(opencodeReasoningVariants({ reasoning: false })).toBeUndefined();
     expect({ v1, v2 }).toMatchSnapshot();
   });
