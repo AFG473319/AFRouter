@@ -7,6 +7,7 @@ import { buildModelEntry as buildOmpEntry, ompThinking } from "../../src/lib/omp
 import { buildModelEntry as buildDshEntry } from "../../src/lib/dshModelSpecs.js";
 import { buildModelEntry as buildOpenCodeEntry, opencodeReasoningVariants } from "../../src/lib/opencodeConfig.js";
 import { buildModelEntry as buildMimocodeEntry } from "../../src/lib/mimocodeConfig.js";
+import { buildHermesModelEntry } from "../../src/lib/hermesConfig.js";
 import { mapReasoningLevels } from "../../src/lib/zcodeReasoningLevels.js";
 import { applyGrokBuildConfig } from "../../src/lib/grokBuildConfig.js";
 
@@ -155,6 +156,25 @@ describe("cli model snapshot: fixed model set", () => {
     expect(toml).toContain(`context_window = ${specFor(MODELS.gpt).contextWindow}`);
     expect(toml).toContain("reasoning");
     expect(toml).toMatchSnapshot();
+  });
+
+  it("hermes model entries carry the documented per-model keys only", () => {
+    const entries = Object.fromEntries(
+      Object.values(MODELS).map((id) => [id, buildHermesModelEntry(specFor(id))]),
+    );
+    // context_length is resolved from the real spec, never invented.
+    expect(entries[MODELS.gpt].context_length).toBe(specFor(MODELS.gpt).contextWindow);
+    expect(entries[MODELS.visionFlat].context_length).toBe(specFor(MODELS.visionFlat).contextWindow);
+    // supports_vision only when the model really takes images.
+    expect(entries[MODELS.visionFlat].supports_vision).toBe(true);
+    expect(entries[MODELS.deepseek].supports_vision).toBeUndefined();
+    // Hermes no longer reads max_output_tokens, so it is never written.
+    for (const entry of Object.values(entries)) {
+      expect(Object.keys(entry).sort()).toEqual(
+        entry.supports_vision ? ["context_length", "supports_vision"] : ["context_length"],
+      );
+    }
+    expect(entries).toMatchSnapshot();
   });
 
   it("combos keep the union; the dispatcher reconciles per member", () => {
