@@ -8,6 +8,7 @@ import CapacityBadges from "./CapacityBadges";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
+import { scopeLiveCatalogModels } from "@/shared/utils/liveCatalogModels";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
 const PROVIDER_ORDER = [
@@ -99,8 +100,11 @@ export default function ModelSelectModal({
   const [providerNodes, setProviderNodes] = useState([]);
   const [customModels, setCustomModels] = useState([]);
   const [disabledModels, setDisabledModels] = useState({});
-  // Cursor and Cline expose the usable catalog per account, so the static catalog is
-  // kept only as a fallback: it goes stale quickly and entitlements differ per account.
+  // Cursor, Cline, ClinePass and Zed expose the usable catalog per account.
+  // The static catalog stays as the row set and the live one as metadata (see
+  // scopeLiveCatalogModels): it goes stale quickly, entitlements differ per
+  // account, and Cline's answer is its entire resale catalog (400+ ids) — which
+  // as rows buried everything the user had actually enabled.
   // Single map driven by LIVE_CATALOG_PROVIDERS so the constant cannot drift
   // from the memos below; per-provider arrays stay referentially stable unless
   // activeProviders itself changes.
@@ -352,10 +356,14 @@ export default function ModelSelectModal({
           hasModels: mergedModels.length > 0,
         };
       } else {
+        const registryModels = getModelsByProviderId(providerId);
         const liveModels = providerId === "cursor" ? cursorModels : providerId === "cline" ? clineModels : providerId === "clinepass" ? clinepassModels : providerId === "zed" ? zedModels : [];
-        const hardcodedModels = liveModels.length > 0
-          ? liveModels
-          : getModelsByProviderId(providerId);
+        // The live catalog is per-account metadata, not a bigger menu: Cline's
+        // /models answers with its whole resale catalog (400+ ids), which buried
+        // the handful of models the user had enabled. Scope it to the enabled
+        // set (registry + custom models + aliases for this provider) and let a
+        // live row only rename a row that is already there.
+        const hardcodedModels = scopeLiveCatalogModels({ liveModels, registryModels, customModels, modelAliases, alias });
         const hardcodedIds = new Set(hardcodedModels.map((m) => m.id));
 
         // Custom models: if no hardcoded models (e.g. openrouter), show all aliases for this provider
