@@ -6,6 +6,8 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { specForCli } from "@/lib/cliModelSpec.js";
+import { editJsoncText } from "@/lib/cliConfigIO.js";
 import {
   ZED_PROVIDER_ID,
   readZedModelIds,
@@ -226,8 +228,19 @@ export async function POST(request) {
     }
 
     const current = result.data || {};
-    const next = upsertZedProvider(current, { baseUrl, models: modelsArray });
-    const { backupPath } = await writeAtomic(configPath, stringifyJsonDocument(next));
+    const specs = {};
+    for (const id of modelsArray) specs[id] = specForCli(id);
+    const next = upsertZedProvider(current, { baseUrl, models: modelsArray, specs });
+    // Zed's settings.json is JSONC: edit through the JSONC writer so a user's
+    // comments and formatting survive an Apply instead of being reformatted away.
+    const provider = readZedProvider(next);
+    const languageModels = next.language_models;
+    let text = result.raw || "{}";
+    text = editJsoncText(text, [
+      { path: ["language_models", "openai_compatible", ZED_PROVIDER_ID], value: provider },
+    ]);
+    void languageModels;
+    const { backupPath } = await writeAtomic(configPath, text);
 
     return NextResponse.json({
       success: true,

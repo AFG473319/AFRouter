@@ -86,10 +86,11 @@ describe("cli model snapshot: fixed model set", () => {
     expect(entries[MODELS.gpt].thinking).toEqual({
       mode: "effort",
       efforts: ["minimal", "low", "medium", "high", "xhigh"],
-      defaultLevel: "xhigh",
+      // #39 made defaultLevel "high" when declared, so OMP follows.
+      defaultLevel: "high",
     });
     expect(entries[MODELS.codebuddy].thinking).toEqual({
-      mode: "effort", efforts: ["low", "high", "max"], defaultLevel: "max",
+      mode: "effort", efforts: ["low", "high", "max"], defaultLevel: "high",
     });
     expect(entries[MODELS.zai].thinking).toBeUndefined();
     expect(entries[MODELS.visionFlat].thinking).toBeUndefined();

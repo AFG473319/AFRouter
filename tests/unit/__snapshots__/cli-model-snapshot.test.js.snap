@@ -133,6 +133,7 @@ description = "Routed via AFRouter gateway · vision · reasoning · 400K contex
 api_backend = "chat_completions"
 context_window = 400000
 max_completion_tokens = 128000
+supports_reasoning_effort = true
 
 [model.openai-gpt-4o]
 model = "openai/gpt-4o"
@@ -342,7 +343,7 @@ exports[`cli model snapshot: fixed model set > omp entries carry thinking blocks
     "maxTokens": 128000,
     "reasoning": true,
     "thinking": {
-      "defaultLevel": "max",
+      "defaultLevel": "high",
       "efforts": [
         "low",
         "medium",
@@ -363,7 +364,7 @@ exports[`cli model snapshot: fixed model set > omp entries carry thinking blocks
     "maxTokens": 128000,
     "reasoning": true,
     "thinking": {
-      "defaultLevel": "max",
+      "defaultLevel": "high",
       "efforts": [
         "low",
         "medium",
@@ -383,7 +384,7 @@ exports[`cli model snapshot: fixed model set > omp entries carry thinking blocks
     "maxTokens": 48000,
     "reasoning": true,
     "thinking": {
-      "defaultLevel": "max",
+      "defaultLevel": "high",
       "efforts": [
         "low",
         "high",
@@ -402,7 +403,7 @@ exports[`cli model snapshot: fixed model set > omp entries carry thinking blocks
     "maxTokens": 128000,
     "reasoning": true,
     "thinking": {
-      "defaultLevel": "max",
+      "defaultLevel": "high",
       "efforts": [
         "minimal",
         "low",
@@ -423,7 +424,7 @@ exports[`cli model snapshot: fixed model set > omp entries carry thinking blocks
     "maxTokens": 384000,
     "reasoning": true,
     "thinking": {
-      "defaultLevel": "max",
+      "defaultLevel": "high",
       "efforts": [
         "high",
         "max",
@@ -459,7 +460,7 @@ exports[`cli model snapshot: fixed model set > omp entries carry thinking blocks
     "maxTokens": 128000,
     "reasoning": true,
     "thinking": {
-      "defaultLevel": "xhigh",
+      "defaultLevel": "high",
       "efforts": [
         "minimal",
         "low",
