@@ -8,6 +8,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { specForCli } from "@/lib/cliModelSpec.js";
 import {
   applyGrokBuildConfig,
   GROK_SUBAGENT_TYPES,
@@ -17,7 +18,13 @@ import {
 
 const execAsync = promisify(exec);
 
-const getGrokDir = () => path.join(os.homedir(), ".grok");
+// docs.x.ai/build/settings/reference: effort is low | medium | high, and the
+// per-model `reasoning_effort` / global `[models].default_reasoning_effort` use
+// the same vocabulary.
+export const GROK_EFFORT_LEVELS = ["low", "medium", "high"];
+
+// $GROK_HOME (default ~/.grok) is the single home for config/auth/sessions.
+const getGrokDir = () => path.resolve(process.env.GROK_HOME || path.join(os.homedir(), ".grok"));
 const getGrokConfigPath = () => path.join(getGrokDir(), "config.toml");
 const getGrokBinPath = () => path.join(getGrokDir(), "bin", "grok");
 
@@ -55,21 +62,27 @@ const normalizeContextWindow = (value, model) => {
   return getCapabilitiesForModel(provider, modelId).contextWindow;
 };
 
-// Fill each model's specs from AFRouter's capability tables, letting explicit
-// values win. Grok exposes context_window / max_completion_tokens natively;
-// vision/reasoning ride along in the section description.
+// Fill each model's specs from the shared resolver, letting explicit values win.
+// Grok exposes context_window / max_completion_tokens natively and, since the
+// settings reference documents them, supports_reasoning_effort / reasoning_effort
+// per model plus [models].default_reasoning_effort.
 const resolveModelSpec = (id, explicit = {}) => {
-  const slash = id.indexOf("/");
-  const provider = slash > 0 ? id.slice(0, slash) : null;
-  const modelId = slash > 0 ? id.slice(slash + 1) : id;
-  const caps = getCapabilitiesForModel(provider, modelId) || {};
+  const caps = specForCli(id);
   const pick = (value, fallback) =>
     value === undefined || value === null || value === "" ? fallback : value;
+  const levels = Array.isArray(caps.levels) ? caps.levels : [];
+  // Grok's documented vocabulary: low | medium | high. A level it cannot express
+  // is dropped rather than renamed into a neighbouring one; a ladder with no
+  // Grok-expressible level yields no effort at all.
+  const effort = caps.defaultLevel && GROK_EFFORT_LEVELS.includes(caps.defaultLevel)
+    ? caps.defaultLevel
+    : levels.filter((level) => GROK_EFFORT_LEVELS.includes(level)).at(-1);
   return {
     contextWindow: normalizeContextWindow(explicit.contextWindow, id),
     maxOutput: Math.floor(Number(pick(explicit.maxOutput, caps.maxOutput))) || undefined,
     vision: Boolean(pick(explicit.vision, caps.vision)),
     reasoning: Boolean(pick(explicit.reasoning, caps.reasoning)),
+    effort,
   };
 };
 

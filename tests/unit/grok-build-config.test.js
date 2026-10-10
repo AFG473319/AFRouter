@@ -30,8 +30,8 @@ enabled = true
 `;
 
 const MODELS = [
-  { model: "cx/gpt-5.6-sol", contextWindow: 400000, maxOutput: 128000, vision: true, reasoning: true },
-  { model: "cc/claude-sonnet-5", contextWindow: 1000000, maxOutput: 128000 },
+  { model: "cx/gpt-5.6-sol", contextWindow: 400000, maxOutput: 128000, vision: true, reasoning: true, effort: "high" },
+  { model: "cc/claude-sonnet-5", contextWindow: 1000000, maxOutput: 128000, reasoning: true, effort: "medium" },
 ];
 
 const APPLY_INPUT = {
@@ -80,6 +80,25 @@ describe("grokBuildConfig", () => {
     expect(result).toContain("[model.cx-gpt-5-6-sol]");
     expect(result).toContain("[model.cc-claude-sonnet-5]");
     expect(result).not.toContain("[model.afrouter]");
+  });
+
+  it("writes supports_reasoning_effort / reasoning_effort per model and the [models] default", () => {
+    const result = applyGrokBuildConfig(BASE_CONFIG, APPLY_INPUT);
+    // docs.x.ai/build/settings/reference [model.<id>]: both are real controls.
+    expect(result).toContain("supports_reasoning_effort = true");
+    expect(result).toContain('reasoning_effort = "high"');
+    // The global default mirrors the first (default) model's effort.
+    expect(result).toContain('default_reasoning_effort = "high"');
+    expect(result.match(/^default_reasoning_effort = /gm)).toHaveLength(1);
+  });
+
+  it("omits the effort keys for a non-reasoning model and clears a stale default", () => {
+    const result = applyGrokBuildConfig(BASE_CONFIG, {
+      ...APPLY_INPUT,
+      models: [{ model: "openai/gpt-4o", contextWindow: 128000, reasoning: false }],
+    });
+    expect(result).not.toContain("supports_reasoning_effort");
+    expect(result).not.toContain("default_reasoning_effort");
   });
 
   it("preserves unrelated config sections", () => {
