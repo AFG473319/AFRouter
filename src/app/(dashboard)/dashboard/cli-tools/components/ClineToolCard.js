@@ -38,7 +38,8 @@ export default function ClineToolCard({ tool, isExpanded, onToggle, baseUrl, api
   }, [isExpanded]);
 
   useEffect(() => {
-    if (status?.settings?.openAiModelId) setSelectedModel(status.settings.openAiModelId);
+    const m = status?.settings?.model || status?.settings?.actModeOpenAiModelId;
+    if (m) setSelectedModel(m);
   }, [status]);
 
   const fetchModelAliases = async () => {
@@ -51,12 +52,12 @@ export default function ClineToolCard({ tool, isExpanded, onToggle, baseUrl, api
     }
   };
 
-  const currentBaseUrl = status?.settings?.openAiBaseUrl || "";
+  const currentBaseUrl = status?.settings?.baseUrl || status?.settings?.openAiBaseUrl || "";
 
   const getConfigStatus = () => {
     if (!status?.installed) return null;
     if (!status.hasAFRouter) return "not_configured";
-    const url = status.settings?.openAiBaseUrl || "";
+    const url = status.settings?.baseUrl || status.settings?.openAiBaseUrl || "";
     return matchKnownEndpoint(url, { tunnelPublicUrl, tailscaleUrl }) ? "configured" : "other";
   };
 
@@ -135,23 +136,31 @@ export default function ClineToolCard({ tool, isExpanded, onToggle, baseUrl, api
     const keyToUse = (selectedApiKey && selectedApiKey.trim())
       ? selectedApiKey
       : (!cloudEnabled ? "sk_afrouter" : "<API_KEY_FROM_DASHBOARD>");
-    const effectiveUrl = getEffectiveBaseUrl();
-    const baseWithoutV1 = effectiveUrl.endsWith("/v1") ? effectiveUrl.slice(0, -3) : effectiveUrl;
+    const modelId = selectedModel || "provider/model-id";
 
     return [
       {
-        filename: "~/.cline/data/globalState.json",
+        filename: "~/.cline/data/settings/providers.json",
         content: JSON.stringify({
-          actModeApiProvider: "openai",
-          planModeApiProvider: "openai",
-          openAiBaseUrl: baseWithoutV1,
-          openAiModelId: selectedModel || "provider/model-id",
-          planModeOpenAiModelId: selectedModel || "provider/model-id",
+          version: 1,
+          lastUsedProvider: "openai-compatible",
+          providers: {
+            "openai-compatible": {
+              settings: {
+                provider: "openai-compatible",
+                apiKey: keyToUse,
+                model: modelId,
+                baseUrl: getEffectiveBaseUrl(),
+                headers: {},
+              },
+              tokenSource: "manual",
+            },
+          },
         }, null, 2),
       },
       {
-        filename: "~/.cline/data/secrets.json",
-        content: JSON.stringify({ openAiApiKey: keyToUse }, null, 2),
+        filename: "terminal (equivalent)",
+        content: `cline auth --provider openai-compatible --apikey ${keyToUse} --modelid ${modelId} --baseurl ${getEffectiveBaseUrl()}`,
       },
     ];
   };
