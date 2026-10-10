@@ -251,7 +251,7 @@ const buildModelEntry = (spec) => {
     entry.reasoning = {
       enabled: true,
       variants,
-      defaultVariant: variants.includes("max") ? "max" : variants[variants.length - 1],
+      defaultVariant: variants.includes("high") ? "high" : variants.includes("medium") ? "medium" : variants[0],
     };
   }
   return entry;

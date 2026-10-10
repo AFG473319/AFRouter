@@ -21,8 +21,9 @@
 //   a reasoning toggle only and must NOT invent levels. (Previously the
 //   L.base fallback invented [none,low,medium,high] for unknown formats.)
 // - Non-reasoning models omit `reasoningLevels`.
-// - `defaultLevel` is the strongest declared level (`max` > `xhigh` > `high`
-//   …), or undefined when no levels are known.
+// - `defaultLevel` is "high" if declared, else "medium", else the highest level
+//   below xhigh (never "none"; max/xhigh only if nothing else). Undefined when
+//   no levels are known.
 // - `contextWindow` / `maxOutput` always finite (DEFAULT floor when unknown).
 // - Combos keep the UNION of member levels (capabilities.js): the dispatcher
 //   re-encodes the chosen level onto the serving member's nearest supported
@@ -44,10 +45,13 @@ export function resolveModelSpec(provider, model) {
     : undefined;
   let defaultLevel;
   if (levels) {
-    for (let i = DEFAULT_ORDER.length - 1; i >= 0; i--) {
-      if (levels.includes(DEFAULT_ORDER[i])) { defaultLevel = DEFAULT_ORDER[i]; break; }
+    const usable = levels.filter((l) => l !== "none");
+    if (usable.includes("high")) defaultLevel = "high";
+    else if (usable.includes("medium")) defaultLevel = "medium";
+    else {
+      const below = usable.filter((l) => l !== "xhigh" && l !== "max" && l !== "ultra");
+      defaultLevel = below.length ? below[below.length - 1] : usable[0];
     }
-    defaultLevel = defaultLevel ?? levels[levels.length - 1];
   }
   const spec = {
     reasoning: caps.reasoning === true,
