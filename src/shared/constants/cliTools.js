@@ -46,12 +46,18 @@ export const MITM_TOOLS = {
       // Both need a mappable slot — otherwise getMappedModel returns null and the chat call
       // is passed through to AWS instead of being routed to the chosen provider.
       { id: "auto", name: "Auto (Kiro Agent)", alias: "auto" },
+      { id: "claude-opus-5.5", name: "Claude Opus 5.5", alias: "claude-opus-5.5" },
+      { id: "claude-opus-5", name: "Claude Opus 5", alias: "claude-opus-5" },
+      { id: "claude-opus-4.8", name: "Claude Opus 4.8", alias: "claude-opus-4.8" },
+      { id: "claude-opus-4.7", name: "Claude Opus 4.7", alias: "claude-opus-4.7" },
+      { id: "claude-opus-4.5", name: "Claude Opus 4.5", alias: "claude-opus-4.5" },
       { id: "claude-sonnet-5", name: "Claude Sonnet 5", alias: "claude-sonnet-5" },
       { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5", alias: "claude-sonnet-4.5" },
       { id: "claude-sonnet-4", name: "Claude Sonnet 4", alias: "claude-sonnet-4" },
       { id: "claude-haiku-4.5", name: "Claude Haiku 4.5", alias: "claude-haiku-4.5" },
       { id: "deepseek-3.2", name: "DeepSeek 3.2", alias: "deepseek-3.2" },
       { id: "minimax-m2.1", name: "MiniMax M2.1", alias: "minimax-m2.1" },
+      { id: "glm-5", name: "GLM 5", alias: "glm-5" },
       { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", alias: "gpt-5.6-sol", contextLength: 272000, rateMultiplier: 2.4 },
       { id: "gpt-5.6-terra", name: "GPT 5.6 Terra", alias: "gpt-5.6-terra", contextLength: 272000, rateMultiplier: 1.2 },
       { id: "gpt-5.6-luna", name: "GPT 5.6 Luna", alias: "gpt-5.6-luna", contextLength: 272000, rateMultiplier: 0.6 },
@@ -270,7 +276,7 @@ export const CLI_TOOLS = {
     notes: [
       {
         type: "info",
-        text: "Hermes Agent reads ~/.hermes/config.yaml. AFRouter writes one named provider under providers: (api, transport chat_completions, key_env) with a models: mapping, so every model you add here shows up in Hermes' own model picker (hermes model, /model, /model custom:afrouter:<model-id>).",
+        text: "Hermes Agent reads config.yaml from its home directory — ~/.hermes/config.yaml on macOS/Linux, %LOCALAPPDATA%\\hermes\\config.yaml on native Windows, or wherever $HERMES_HOME points. AFRouter writes one named provider under providers: (api, transport chat_completions, key_env) with a models: mapping, so every model you add here shows up in Hermes' own model picker (hermes model, /model, /model custom:afrouter:<model-id>).",
       },
       {
         type: "info",

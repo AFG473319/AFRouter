@@ -24,7 +24,7 @@
  * global.fetch are stubbed so spec resolution is deterministic.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -67,7 +67,7 @@ vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })
 
 const ENDPOINT_URL = "/api/cli-tools/hermes-settings";
 
-const dir = () => path.join(state.home, ".hermes");
+const dir = () => process.env.HERMES_HOME || path.join(state.home, ".hermes");
 const configPath = () => path.join(dir(), "config.yaml");
 const envPath = () => path.join(dir(), ".env");
 const readYaml = () => fs.readFileSync(configPath(), "utf-8");
@@ -90,7 +90,14 @@ const MODEL_TEXT_ONLY = "deepseek/deepseek-v4-pro";
 
 beforeEach(() => {
   state.home = fs.mkdtempSync(path.join(os.tmpdir(), "hermes-home-"));
+  // Pin the Hermes home so path resolution is platform-independent
+  // (native Windows defaults to %LOCALAPPDATA%\hermes).
+  vi.stubEnv("HERMES_HOME", path.join(state.home, ".hermes"));
   fetch.mockClear();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("hermes-settings", () => {
