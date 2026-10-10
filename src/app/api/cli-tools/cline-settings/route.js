@@ -16,19 +16,19 @@ import {
 
 const execAsync = promisify(exec);
 
-export const CLINE_PROVIDER_ID = "openai-compatible";
+const CLINE_PROVIDER_ID = "openai-compatible";
 
 // Cline keeps provider settings for the extension, CLI and SDK in one file:
 // ~/.cline/data/settings/providers.json (docs.cline.bot/getting-started/config,
 // docs.cline.bot/cli/cli-reference). Env overrides: CLINE_DATA_DIR replaces
 // ~/.cline/data, CLINE_DIR replaces ~/.cline (composition CLINE_DIR/data is
 // our fallback; docs never state it explicitly).
-export const getDataDir = () => {
+const getDataDir = () => {
   if (process.env.CLINE_DATA_DIR) return process.env.CLINE_DATA_DIR;
   if (process.env.CLINE_DIR) return path.join(process.env.CLINE_DIR, "data");
   return path.join(os.homedir(), ".cline", "data");
 };
-export const getProvidersPath = () => path.join(getDataDir(), "settings", "providers.json");
+const getProvidersPath = () => path.join(getDataDir(), "settings", "providers.json");
 
 const checkInstalled = async () => {
   try {
@@ -62,7 +62,7 @@ const normalizeBaseUrl = (baseUrl) => {
 
 const readProvidersEntry = (doc) => doc?.providers?.[CLINE_PROVIDER_ID] || null;
 
-export const hasAFRouterConfig = (doc) => {
+const hasAFRouterConfig = (doc) => {
   const entry = readProvidersEntry(doc);
   if (!entry) return false;
   const baseUrl = entry?.settings?.baseUrl || "";

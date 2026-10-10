@@ -12,12 +12,12 @@ import { CliConfigParseError, readConfig, writeWithBackup } from "@/lib/cliConfi
 
 const execAsync = promisify(exec);
 
-export const JCODE_PROVIDER_ID = "afrouter";
-export const JCODE_API_KEY_ENV = "JCODE_AFROUTER_API_KEY";
+const JCODE_PROVIDER_ID = "afrouter";
+const JCODE_API_KEY_ENV = "JCODE_AFROUTER_API_KEY";
 
-export const getJcodeConfigDir = () => path.join(os.homedir(), ".jcode");
+const getJcodeConfigDir = () => path.join(os.homedir(), ".jcode");
 // JCODE_HOME relocates the whole config tree (mirrors app_config_dir).
-export const getConfigPath = () =>
+const getConfigPath = () =>
   process.env.JCODE_HOME
     ? path.join(process.env.JCODE_HOME, "config", "jcode", "config.toml")
     : path.join(getJcodeConfigDir(), "config.toml");
@@ -26,7 +26,7 @@ export const getConfigPath = () =>
 // dirs::config_dir()/jcode — ~/.config/jcode (Linux),
 // ~/Library/Application Support/jcode (macOS), %APPDATA%\jcode (Windows);
 // JCODE_HOME set → $JCODE_HOME/config/jcode.
-export const getAppConfigDir = () => {
+const getAppConfigDir = () => {
   if (process.env.JCODE_HOME) return path.join(process.env.JCODE_HOME, "config", "jcode");
   if (os.platform() === "win32") {
     return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "jcode");
@@ -36,7 +36,7 @@ export const getAppConfigDir = () => {
   }
   return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "jcode");
 };
-export const getProviderEnvPath = () => path.join(getAppConfigDir(), "provider-afrouter.env");
+const getProviderEnvPath = () => path.join(getAppConfigDir(), "provider-afrouter.env");
 
 const checkJcodeInstalled = async () => {
   try {
@@ -91,7 +91,7 @@ const buildModelEntry = (id) => {
   return entry;
 };
 
-export const hasAFRouterConfig = (config) => Boolean(config?.providers?.[JCODE_PROVIDER_ID]);
+const hasAFRouterConfig = (config) => Boolean(config?.providers?.[JCODE_PROVIDER_ID]);
 
 const readProviderEnv = async () => {
   try {

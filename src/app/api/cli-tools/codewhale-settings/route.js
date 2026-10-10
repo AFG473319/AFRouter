@@ -12,16 +12,16 @@ import { CliConfigParseError, readConfig, writeWithBackup } from "@/lib/cliConfi
 
 const execAsync = promisify(exec);
 
-export const CODEWHALE_PROVIDER_ID = "afrouter";
+const CODEWHALE_PROVIDER_ID = "afrouter";
 // codewhale-hq/Codewhale docs/CONFIGURATION.md ("Where It Looks"): default
 // ~/.codewhale/config.toml, legacy fallback ~/.deepseek/config.toml,
 // overrides CLI --config, env CODEWHALE_CONFIG_PATH, legacy DEEPSEEK_CONFIG_PATH.
-export const getCodewhaleConfigPath = () => {
+const getCodewhaleConfigPath = () => {
   if (process.env.CODEWHALE_CONFIG_PATH) return process.env.CODEWHALE_CONFIG_PATH;
   if (process.env.DEEPSEEK_CONFIG_PATH) return process.env.DEEPSEEK_CONFIG_PATH;
   return path.join(os.homedir(), ".codewhale", "config.toml");
 };
-export const getLegacyConfigPath = () => path.join(os.homedir(), ".deepseek", "config.toml");
+const getLegacyConfigPath = () => path.join(os.homedir(), ".deepseek", "config.toml");
 
 const checkCodewhaleInstalled = async () => {
   const isWindows = os.platform() === "win32";

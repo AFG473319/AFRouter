@@ -11,17 +11,17 @@ import { writeWithBackup } from "@/lib/cliConfigIO.js";
 
 const execAsync = promisify(exec);
 
-export const SMELT_PROVIDER_ID = "afrouter";
-export const SMELT_API_KEY_ENV = "AFROUTER_API_KEY";
+const SMELT_PROVIDER_ID = "afrouter";
+const SMELT_API_KEY_ENV = "AFROUTER_API_KEY";
 // Smelt only reads ~/.config/smelt/init.lua (leonardcser/smelt;
 // leonardcser.github.io/smelt). ~/.smelt/config.json is never loaded.
-export const getSmeltConfigDir = () => {
+const getSmeltConfigDir = () => {
   if (os.platform() === "win32") {
     return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "smelt");
   }
   return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "smelt");
 };
-export const getSmeltConfigPath = () => path.join(getSmeltConfigDir(), "init.lua");
+const getSmeltConfigPath = () => path.join(getSmeltConfigDir(), "init.lua");
 
 const START_MARKER = "-- AFRouter managed block (start): do not hand-edit";
 const END_MARKER = "-- AFRouter managed block (end)";

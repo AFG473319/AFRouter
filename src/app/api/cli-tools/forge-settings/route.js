@@ -12,11 +12,11 @@ import { CliConfigParseError, readConfig, writeWithBackup } from "@/lib/cliConfi
 
 const execAsync = promisify(exec);
 
-export const FORGE_PROVIDER_ID = "afrouter";
-export const FORGE_API_KEY_VAR = "AFROUTER_API_KEY";
+const FORGE_PROVIDER_ID = "afrouter";
+const FORGE_API_KEY_VAR = "AFROUTER_API_KEY";
 // tailcallhq/forgecode crates/forge_config/src/reader.rs: base is $FORGE_CONFIG,
 // else ~/forge when it exists (legacy), else ~/.forge; file is .forge.toml.
-export const getForgeBaseDir = async () => {
+const getForgeBaseDir = async () => {
   if (process.env.FORGE_CONFIG) return process.env.FORGE_CONFIG;
   const legacy = path.join(os.homedir(), "forge");
   try {
@@ -26,7 +26,7 @@ export const getForgeBaseDir = async () => {
     return path.join(os.homedir(), ".forge");
   }
 };
-export const getForgeConfigPath = async () => path.join(await getForgeBaseDir(), ".forge.toml");
+const getForgeConfigPath = async () => path.join(await getForgeBaseDir(), ".forge.toml");
 
 const checkForgeInstalled = async () => {
   const isWindows = os.platform() === "win32";
