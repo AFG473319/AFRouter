@@ -17,12 +17,12 @@ import { promisify } from "util";
 
 const execAsync = promisify(exec);
 
-export const CRUSH_PROVIDER_ID = "afrouter";
-export const CRUSH_SCHEMA_URL = "https://charm.land/crush.json";
+const CRUSH_PROVIDER_ID = "afrouter";
+const CRUSH_SCHEMA_URL = "https://charm.land/crush.json";
 
 // charmbracelet/crush README (Configuration): $CRUSH_GLOBAL_CONFIG then
 // $HOME/.config/crush/crush.json. XDG is honoured by the same expression.
-export const getCrushConfigPath = () => {
+const getCrushConfigPath = () => {
   if (process.env.CRUSH_GLOBAL_CONFIG) return path.join(process.env.CRUSH_GLOBAL_CONFIG, "crush.json");
   const configDir = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
   return path.join(configDir, "crush", "crush.json");

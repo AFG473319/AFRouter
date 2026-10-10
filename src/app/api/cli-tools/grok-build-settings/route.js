@@ -21,7 +21,7 @@ const execAsync = promisify(exec);
 // docs.x.ai/build/settings/reference: effort is low | medium | high, and the
 // per-model `reasoning_effort` / global `[models].default_reasoning_effort` use
 // the same vocabulary.
-export const GROK_EFFORT_LEVELS = ["low", "medium", "high"];
+const GROK_EFFORT_LEVELS = ["low", "medium", "high"];
 
 // $GROK_HOME (default ~/.grok) is the single home for config/auth/sessions.
 const getGrokDir = () => path.resolve(process.env.GROK_HOME || path.join(os.homedir(), ".grok"));

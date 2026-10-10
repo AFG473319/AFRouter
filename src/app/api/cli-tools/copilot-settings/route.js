@@ -17,7 +17,7 @@ import os from "os";
 // <userDataDir>/User (microsoft/vscode userDataProfile.ts languageModelsResource).
 // Non-default profiles, portable installs and Insiders live elsewhere; this is
 // the default profile path for each OS.
-export const getConfigPath = () => {
+const getConfigPath = () => {
   const home = os.homedir();
   const platform = os.platform();
   if (platform === "win32") {
@@ -29,7 +29,7 @@ export const getConfigPath = () => {
   return path.join(home, ".config", "Code", "User", "chatLanguageModels.json");
 };
 
-export const PROVIDER_NAME = "AFRouter";
+const PROVIDER_NAME = "AFRouter";
 
 // A VS Code settings.json-style file may carry trailing commas, so it goes through
 // the shared parser: an unparseable file aborts with 409 instead of being wiped
@@ -82,7 +82,7 @@ const buildEntry = (baseUrl, apiKey, models) => {
   };
 };
 
-export const hasAFRouterConfig = (config) => Array.isArray(config) && config.some((entry) => entry?.name === PROVIDER_NAME);
+const hasAFRouterConfig = (config) => Array.isArray(config) && config.some((entry) => entry?.name === PROVIDER_NAME);
 
 export async function GET() {
   try {
