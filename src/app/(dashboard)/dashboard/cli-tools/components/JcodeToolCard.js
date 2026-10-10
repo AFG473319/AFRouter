@@ -188,7 +188,10 @@ export default function JcodeToolCard({
       ? selectedApiKey
       : (!cloudEnabled ? "sk_afrouter" : "<API_KEY_FROM_DASHBOARD>");
 
-    const configToml = `[providers.afrouter]
+    const configToml = `[provider]
+default_provider = "afrouter"
+
+[providers.afrouter]
 type = "openai-compatible"
 base_url = "${getEffectiveBaseUrl()}"
 auth = "bearer"
@@ -204,11 +207,11 @@ id = "${selectedModel || "cc/claude-opus-4-7"}"`;
 
     return [
       {
-        filename: "~/.jcode/config.toml",
+        filename: "{jcode config dir}/config.toml (Linux ~/.config/jcode, macOS ~/Library/Application Support/jcode, Windows %APPDATA%\\jcode)",
         content: configToml,
       },
       {
-        filename: "~/.config/jcode/provider-afrouter.env",
+        filename: "{jcode config dir}/provider-afrouter.env",
         content: envContent,
       },
     ];
@@ -252,7 +255,7 @@ id = "${selectedModel || "cc/claude-opus-4-7"}"`;
                     <p className="font-medium text-yellow-600 dark:text-yellow-400">jcode CLI not detected locally</p>
                     <p className="text-sm text-text-muted mt-1">Install jcode to enable automatic configuration:</p>
                     <code className="block mt-2 p-2 bg-black/20 rounded text-xs font-mono">
-                      curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash
+                      curl -fsSL https://jcode.sh/install | bash
                     </code>
                     <p className="text-sm text-text-muted mt-2">Manual configuration is still available if afrouter is deployed on a remote server.</p>
                   </div>

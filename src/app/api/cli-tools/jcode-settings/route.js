@@ -7,16 +7,36 @@ import os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { parseTOML, stringifyTOML } from "confbox";
+import { resolveModelSpec } from "../../../../../open-sse/providers/modelSpecs.js";
+import { CliConfigParseError, readConfig, writeWithBackup } from "@/lib/cliConfigIO.js";
 
 const execAsync = promisify(exec);
 
-const getJcodeConfigDir = () => path.join(os.homedir(), ".jcode");
-const getConfigPath = () => path.join(getJcodeConfigDir(), "config.toml");
+export const JCODE_PROVIDER_ID = "afrouter";
+export const JCODE_API_KEY_ENV = "JCODE_AFROUTER_API_KEY";
 
-const getProviderEnvPath = () => {
-  const configDir = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  return path.join(configDir, "jcode", "provider-afrouter.env");
+export const getJcodeConfigDir = () => path.join(os.homedir(), ".jcode");
+// JCODE_HOME relocates the whole config tree (mirrors app_config_dir).
+export const getConfigPath = () =>
+  process.env.JCODE_HOME
+    ? path.join(process.env.JCODE_HOME, "config", "jcode", "config.toml")
+    : path.join(getJcodeConfigDir(), "config.toml");
+
+// 1jehuang/jcode crates/jcode-storage/src/lib.rs app_config_dir():
+// dirs::config_dir()/jcode — ~/.config/jcode (Linux),
+// ~/Library/Application Support/jcode (macOS), %APPDATA%\jcode (Windows);
+// JCODE_HOME set → $JCODE_HOME/config/jcode.
+export const getAppConfigDir = () => {
+  if (process.env.JCODE_HOME) return path.join(process.env.JCODE_HOME, "config", "jcode");
+  if (os.platform() === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "jcode");
+  }
+  if (os.platform() === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "jcode");
+  }
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "jcode");
 };
+export const getProviderEnvPath = () => path.join(getAppConfigDir(), "provider-afrouter.env");
 
 const checkJcodeInstalled = async () => {
   try {
@@ -26,7 +46,7 @@ const checkJcodeInstalled = async () => {
     return true;
   } catch {
     try {
-      await fs.access(getJcodeConfigDir());
+      await fs.access(path.dirname(getConfigPath()));
       return true;
     } catch {
       return false;
@@ -34,78 +54,61 @@ const checkJcodeInstalled = async () => {
   }
 };
 
-const readConfig = async () => {
+const normalizeBaseUrl = (baseUrl) => {
+  const trimmed = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
+};
+
+const parseTomlStrict = (raw) => {
   try {
-    const configPath = getConfigPath();
-    const content = await fs.readFile(configPath, "utf-8");
-    return parseTOML(content);
+    return parseTOML(raw);
   } catch (error) {
-    return { providers: {} };
+    throw new CliConfigParseError("config.toml", String(error?.message || error).split("\n")[0]);
   }
 };
 
-const hasAFRouterConfig = (config) => {
-  if (!config || !config.providers) return false;
-
-  const providers = config.providers;
-
-  if (providers["afrouter"]) return true;
-
-  for (const [name, provider] of Object.entries(providers)) {
-    if (provider.base_url && (provider.base_url.includes("localhost:") || provider.base_url.includes("127.0.0.1:"))) {
-      return true;
-    }
-  }
-
-  return false;
-};
-
-const writeConfig = async (config) => {
-  const configPath = getConfigPath();
-  const content = stringifyTOML(config);
-  await fs.writeFile(configPath, content, "utf-8");
-};
-
-const readProviderEnv = async () => {
+const capsForModel = (id) => {
+  const str = String(id || "");
+  const slash = str.indexOf("/");
   try {
-    const envPath = getProviderEnvPath();
-    const content = await fs.readFile(envPath, "utf-8");
-    const env = {};
-
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-
-      const eqIndex = trimmed.indexOf("=");
-      if (eqIndex > 0) {
-        const key = trimmed.slice(0, eqIndex).trim();
-        let value = trimmed.slice(eqIndex + 1).trim();
-
-        if ((value.startsWith('"') && value.endsWith('"')) ||
-            (value.startsWith("'") && value.endsWith("'"))) {
-          value = value.slice(1, -1);
-        }
-
-        env[key] = value;
-      }
-    }
-
-    return env;
+    return resolveModelSpec(slash > 0 ? str.slice(0, slash) : null, slash > 0 ? str.slice(slash + 1) : str);
   } catch {
     return {};
   }
 };
 
-const writeProviderEnv = async (env) => {
-  const envPath = getProviderEnvPath();
-  let content = "# jcode provider environment variables\n";
-
-  for (const [key, value] of Object.entries(env)) {
-    content += `${key}="${value}"\n`;
+const buildModelEntry = (id) => {
+  const caps = capsForModel(id) || {};
+  const entry = { id };
+  const context = Math.floor(Number(caps.contextWindow));
+  if (Number.isFinite(context) && context > 0) entry.context_window = context;
+  if (caps.reasoning === true) entry.reasoning = true;
+  if (Array.isArray(caps.reasoningLevels) && caps.reasoningLevels.length && caps.defaultLevel) {
+    entry.reasoning_effort = caps.defaultLevel;
   }
-
-  await fs.writeFile(envPath, content, "utf-8");
+  entry.input = caps.vision === true ? ["text", "image"] : ["text"];
+  return entry;
 };
+
+export const hasAFRouterConfig = (config) => Boolean(config?.providers?.[JCODE_PROVIDER_ID]);
+
+const readProviderEnv = async () => {
+  try {
+    return await fs.readFile(getProviderEnvPath(), "utf-8");
+  } catch {
+    return "";
+  }
+};
+
+const upsertEnvValue = (text, key, value) => {
+  const re = new RegExp(`^${key}=.*$`, "m");
+  const line = `${key}="${value}"`;
+  if (re.test(text)) return text.replace(re, line);
+  return text.length > 0 && !text.endsWith("\n") ? `${text}\n${line}\n` : `${text}${line}\n`;
+};
+
+const removeEnvValue = (text, key) => text.replace(new RegExp(`^${key}=.*\\r?\\n?`, "m"), "");
 
 export async function GET() {
   const isInstalled = await checkJcodeInstalled();
@@ -113,104 +116,112 @@ export async function GET() {
   if (!isInstalled) {
     return NextResponse.json({
       installed: false,
-      message: "jcode not installed. Install via: curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash",
+      message: "jcode not installed. Install via: curl -fsSL https://jcode.sh/install | bash",
     });
   }
 
-  const config = await readConfig();
-  const hasAFRouter = hasAFRouterConfig(config);
+  const configPath = getConfigPath();
+  const { exists, raw } = await readConfig(configPath, "toml");
+  if (!exists) {
+    return NextResponse.json({ installed: true, config: null, hasAFRouter: false, configPath });
+  }
+  let config;
+  try {
+    config = parseTomlStrict(raw);
+  } catch (error) {
+    if (error instanceof CliConfigParseError) {
+      return NextResponse.json({ installed: true, corrupt: true, config: null, hasAFRouter: false, configPath }, { status: 409 });
+    }
+    throw error;
+  }
 
-  return NextResponse.json({
-    installed: true,
-    config,
-    hasAFRouter,
-    configPath: getConfigPath(),
-  });
+  return NextResponse.json({ installed: true, config, hasAFRouter: hasAFRouterConfig(config), configPath });
 }
 
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, models } = await request.json();
+    const { baseUrl, apiKey, models, model } = await request.json();
+    const modelList = Array.isArray(models)
+      ? models.filter((m) => typeof m === "string" && m.trim()).map((m) => m.trim())
+      : typeof model === "string" && model.trim() ? [model.trim()] : [];
 
-    if (!baseUrl || !apiKey) {
-      return NextResponse.json(
-        { error: "baseUrl and apiKey are required" },
-        { status: 400 }
-      );
+    if (!baseUrl || !apiKey || modelList.length === 0) {
+      return NextResponse.json({ error: "baseUrl, apiKey and models are required" }, { status: 400 });
     }
 
-    const normalizedBaseUrl = baseUrl.endsWith("/v1")
-      ? baseUrl
-      : `${baseUrl}/v1`;
+    const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+    const configPath = getConfigPath();
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    const { exists, raw } = await readConfig(configPath, "toml");
+    const config = exists ? parseTomlStrict(raw) : {};
+    const doc = config && typeof config === "object" ? config : {};
 
-    let config = await readConfig();
-
-    if (!config.providers) {
-      config.providers = {};
-    }
-
-    config.providers["afrouter"] = {
+    doc.providers = doc.providers && typeof doc.providers === "object" ? doc.providers : {};
+    doc.providers[JCODE_PROVIDER_ID] = {
+      ...(doc.providers[JCODE_PROVIDER_ID] && typeof doc.providers[JCODE_PROVIDER_ID] === "object"
+        ? doc.providers[JCODE_PROVIDER_ID]
+        : {}),
       type: "openai-compatible",
       base_url: normalizedBaseUrl,
       auth: "bearer",
-      api_key_env: "JCODE_AFROUTER_API_KEY",
+      api_key_env: JCODE_API_KEY_ENV,
       env_file: "provider-afrouter.env",
-      default_model: models && models.length > 0 ? models[0] : "cc/claude-opus-4-7",
+      default_model: modelList[0],
       requires_api_key: true,
+      models: modelList.map(buildModelEntry),
     };
+    // Without a default the profile stays inert until --provider-profile afrouter.
+    doc.provider = doc.provider && typeof doc.provider === "object" ? doc.provider : {};
+    doc.provider.default_provider = JCODE_PROVIDER_ID;
+    doc.provider.default_model = modelList[0];
 
-    const configDir = getJcodeConfigDir();
-    await fs.mkdir(configDir, { recursive: true });
+    await writeWithBackup(configPath, stringifyTOML(doc));
 
-    await writeConfig(config);
-
-    const xdgConfigDir = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-    const jcodeConfigDir = path.join(xdgConfigDir, "jcode");
-    await fs.mkdir(jcodeConfigDir, { recursive: true });
-
-    const env = await readProviderEnv();
-    env.JCODE_AFROUTER_API_KEY = apiKey;
-    await writeProviderEnv(env);
+    await fs.mkdir(getAppConfigDir(), { recursive: true });
+    const envPath = getProviderEnvPath();
+    const next = upsertEnvValue(await readProviderEnv(), JCODE_API_KEY_ENV, String(apiKey));
+    await writeWithBackup(envPath, next, { secret: true });
 
     return NextResponse.json({
       success: true,
       message: "jcode configured successfully. Use: jcode --provider-profile afrouter",
-      configPath: getConfigPath(),
+      configPath,
     });
   } catch (error) {
+    if (error instanceof CliConfigParseError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     console.error("Error configuring jcode:", error);
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
 export async function DELETE() {
   try {
-    const config = await readConfig();
-
-    if (!config.providers) {
-      return NextResponse.json({ success: true, message: "No configuration to remove" });
+    const configPath = getConfigPath();
+    const { exists, raw } = await readConfig(configPath, "toml");
+    if (exists) {
+      const config = parseTomlStrict(raw);
+      if (config.providers) delete config.providers[JCODE_PROVIDER_ID];
+      if (config.providers && Object.keys(config.providers).length === 0) delete config.providers;
+      if (config.provider?.default_provider === JCODE_PROVIDER_ID) delete config.provider.default_provider;
+      if (config.provider?.default_model !== undefined) delete config.provider.default_model;
+      if (config.provider && Object.keys(config.provider).length === 0) delete config.provider;
+      await writeWithBackup(configPath, stringifyTOML(config));
     }
 
-    delete config.providers["afrouter"];
+    const envPath = getProviderEnvPath();
+    const current = await readProviderEnv();
+    if (current.includes(JCODE_API_KEY_ENV)) {
+      await writeWithBackup(envPath, removeEnvValue(current, JCODE_API_KEY_ENV), { secret: true });
+    }
 
-    await writeConfig(config);
-
-    const env = await readProviderEnv();
-    delete env.JCODE_AFROUTER_API_KEY;
-    await writeProviderEnv(env);
-
-    return NextResponse.json({
-      success: true,
-      message: "afrouter configuration removed from jcode",
-    });
+    return NextResponse.json({ success: true, message: "afrouter configuration removed from jcode" });
   } catch (error) {
+    if (error instanceof CliConfigParseError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     console.error("Error removing jcode configuration:", error);
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
