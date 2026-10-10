@@ -262,16 +262,16 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
 
     const effectiveSubagentModel = subagentModel || selectedModel;
 
-    const configContent = `# 9Router Configuration for Codex CLI
+    const configContent = `# AFRouter configuration for Codex CLI
 model = "${selectedModel}"
-model_provider = "9router"
+model_provider = "afrouter"
 
-[model_providers.9router]
-name = "9Router"
+[model_providers.afrouter]
+name = "AFRouter"
 base_url = "${getEffectiveBaseUrl()}"
 wire_api = "responses"
 
-[model_providers.9router.http_headers]
+[model_providers.afrouter.http_headers]
 Authorization = "Bearer ${keyToUse}"
 
 [agents]
