@@ -171,11 +171,12 @@ export default function CopilotToolCard({ tool, isExpanded, onToggle, baseUrl, a
       filename: "~/Library/Application Support/Code/User/chatLanguageModels.json",
       content: JSON.stringify([{
         name: "AFRouter",
-        vendor: "azure",
+        vendor: "customendpoint",
+        apiType: "chat-completions",
         apiKey: keyToUse,
         models: modelsToShow.map((id) => ({
           id, name: id,
-          url: `${effectiveBaseUrl}/chat/completions#models.ai.azure.com`,
+          url: `${effectiveBaseUrl}/chat/completions`,
           toolCalling: true, vision: false,
           maxInputTokens: 128000, maxOutputTokens: 16000,
         })),
