@@ -142,28 +142,23 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
     }
   };
 
-  // Sync only when config content changes so local form edits are retained.
+  // Sync only when the reported config changes so local form edits are retained.
   useEffect(() => {
-    const config = codexStatus?.config;
-    if (config) {
-      const { baseUrl, apiKey } = getCurrentCodexProviderSettings(config);
-      setCustomBaseUrl(baseUrl);
-      setSelectedApiKey(apiKey);
-
-      const modelMatch = config.match(/^model\s*=\s*"([^"]+)"/m);
-      if (modelMatch) setSelectedModel(modelMatch[1]);
-
-      // Parse subagent settings
-      const subagentModelMatch = config.match(/^default_subagent_model\s*=\s*"([^"]+)"/m);
-      if (subagentModelMatch) setSubagentModel(subagentModelMatch[1]);
+    const codex = codexStatus?.codex;
+    if (codex) {
+      if (codex.baseUrl) setCustomBaseUrl(codex.baseUrl);
+      if (codex.activeModel) setSelectedModel(codex.activeModel);
+      if (codex.subagentModel) setSubagentModel(codex.subagentModel);
     }
-  }, [codexStatus?.config]);
+  }, [codexStatus?.codex]);
 
-  const currentBaseUrl = getCurrentCodexProviderSettings(codexStatus?.config).baseUrl;
+  // Never prefilled from the stored config: config.toml carries the key in an
+  // Authorization header, and the status endpoint deliberately does not echo it.
+  const currentBaseUrl = codexStatus?.codex?.baseUrl || "";
 
   const getConfigStatus = () => {
     if (!codexStatus?.installed) return null;
-    if (!codexStatus.config) return "not_configured";
+    if (!codexStatus.hasAFRouter) return "not_configured";
     return matchKnownEndpoint(currentBaseUrl, { tunnelPublicUrl, tailscaleUrl }) ? "configured" : "other";
   };
 
@@ -194,10 +189,10 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
     setApplying(true);
     setMessage(null);
     try {
-      // Use sk_9router for localhost if no key, otherwise use selected key
+      // Use sk_afrouter for localhost if no key, otherwise use selected key
       const keyToUse = (selectedApiKey && selectedApiKey.trim())
         ? selectedApiKey
-        : (!cloudEnabled ? "sk_9router" : selectedApiKey);
+        : (!cloudEnabled ? "sk_afrouter" : selectedApiKey);
 
       const res = await fetch("/api/cli-tools/codex-settings", {
         method: "POST",
@@ -258,7 +253,7 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
   const getManualConfigs = () => {
     const keyToUse = (selectedApiKey && selectedApiKey.trim())
       ? selectedApiKey
-      : (!cloudEnabled ? "sk_9router" : "<API_KEY_FROM_DASHBOARD>");
+      : (!cloudEnabled ? "sk_afrouter" : "<API_KEY_FROM_DASHBOARD>");
 
     const effectiveSubagentModel = subagentModel || selectedModel;
 
@@ -322,7 +317,7 @@ default_subagent_model = "${effectiveSubagentModel}"
                   <span className="material-symbols-outlined text-yellow-500">warning</span>
                   <div className="flex-1">
                     <p className="font-medium text-yellow-600 dark:text-yellow-400">Codex CLI not detected locally</p>
-                    <p className="text-sm text-text-muted">Manual configuration is still available if 9router is deployed on a remote server.</p>
+                    <p className="text-sm text-text-muted">Manual configuration is still available if AFRouter is deployed on a remote server.</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 pl-9">

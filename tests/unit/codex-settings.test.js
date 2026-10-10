@@ -56,7 +56,11 @@ it("writes a BOM-free multi-model catalog and selects the requested provider and
   expect(catalog.models[0].input_modalities).toEqual(["text", "image"]);
   expect(catalog.models[1].input_modalities).toEqual(["text"]);
   expect(catalog.models[0].experimental_supported_tools).toEqual([]);
-  expect(catalog.models[0].supports_parallel_tool_calls).toBe(false);
+  expect(catalog.models[0].supports_reasoning_summary_parameter).toBe(false);
+  // `supports_parallel_tool_calls` is a request field, not a catalog one, and
+  // `supports_reasoning_summaries` is read by no Codex release.
+  expect(catalog.models[0].supports_parallel_tool_calls).toBeUndefined();
+  expect(catalog.models[0].supports_reasoning_summaries).toBeUndefined();
 });
 
 it("preserves unrelated TOML and credentials, redacts status, and restores owned settings", async () => {
@@ -166,29 +170,56 @@ it("keeps the browser catalog helper independent from Node-only imports", async 
   const card = await fs.readFile(new URL("../../src/app/(dashboard)/dashboard/cli-tools/components/CodexToolCard.js", import.meta.url), "utf8");
   expect(helper).not.toMatch(/\bimport\s/);
   expect(card).not.toMatch(/from\s+["'](?:confbox|node:)/);
-  expect(buildCodexCatalog(["test/model"], { "test/model": { reasoningEfforts: "invalid" } }).models[0].supported_reasoning_levels).toEqual([{ effort: "none", description: "none" }]);
+  // A non-array ladder is ignored rather than turned into a fake "none".
+  expect(buildCodexCatalog(["test/model"], { "test/model": { reasoningEfforts: "invalid" } }).models[0].supported_reasoning_levels).toBeUndefined();
 });
 
-it("publishes a selectable default for nous/stealth/union-alpha with no declared effort ladder", async () => {
+it("publishes no effort for a reasoning model with no declared ladder", async () => {
   const id = "nous/stealth/union-alpha";
   const response = await apply({ models: [id], activeModel: id });
   expect(response.status).toBe(200);
   const config = parseTOML(await fs.readFile(path.join(home, "config.toml"), "utf8"));
   const catalog = JSON.parse(await fs.readFile(config.model_catalog_json, "utf8"));
   expect(config.model).toBe(id);
-  expect(catalog.models[0]).toMatchObject({
-    slug: id,
-    context_window: 200000,
-    default_reasoning_level: "medium",
-    supported_reasoning_levels: [{ effort: "medium", description: "medium" }],
-  });
+  const entry = catalog.models[0];
+  expect(entry).toMatchObject({ slug: id, context_window: 200000 });
+  // An invented "medium" would become the wire reasoning.effort for a model that
+  // declares no ladder, so neither key is written.
+  expect(entry.default_reasoning_level).toBeUndefined();
+  expect(entry.supported_reasoning_levels).toBeUndefined();
 });
 
-it("always includes the default in the selectable efforts without inventing a ladder", () => {
-  for (const spec of [{}, { reasoning: true }, { reasoning: false }, { reasoning: true, reasoningEfforts: ["thinking"] }, { reasoning: true, reasoningEfforts: ["low", "high", "low"] }]) {
+it("passes the resolved ladder through, including max and ultra", () => {
+  const entry = buildCodexCatalog(["codex/gpt-5.6-sol"], {
+    "codex/gpt-5.6-sol": { reasoning: true, reasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultLevel: "high" },
+  }).models[0];
+  expect(entry.supported_reasoning_levels.map((l) => l.effort)).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+  expect(entry.default_reasoning_level).toBe("high");
+});
+
+it("omits every effort key for a non-reasoning model", () => {
+  // Even a stale ladder in the spec must not surface on a non-reasoning model:
+  // Codex would forward reasoning.effort upstream.
+  const entry = buildCodexCatalog(["test/model"], { "test/model": { reasoning: false, reasoningEfforts: ["low"] } }).models[0];
+  expect(entry.default_reasoning_level).toBeUndefined();
+  expect(entry.supported_reasoning_levels).toBeUndefined();
+  expect(entry.supports_reasoning_summary_parameter).toBe(false);
+});
+
+it("omits the ladder when the model does not reason, whatever the ladder says", () => {
+  for (const spec of [{}, { reasoning: true }, { reasoning: false }]) {
     const entry = buildCodexCatalog(["test/model"], { "test/model": spec }).models[0];
-    expect(entry.supported_reasoning_levels.map((level) => level.effort)).toContain(entry.default_reasoning_level);
+    if (spec.reasoning !== true) {
+      expect(entry.default_reasoning_level).toBeUndefined();
+      expect(entry.supported_reasoning_levels).toBeUndefined();
+    }
   }
-  const entry = buildCodexCatalog(["test/model"], { "test/model": { reasoning: true, reasoningEfforts: ["low", "high", "low"] } }).models[0];
-  expect(entry.supported_reasoning_levels.map((level) => level.effort)).toEqual(["low", "high"]);
+});
+
+it("keeps the default inside the selectable efforts when both are declared", () => {
+  const entry = buildCodexCatalog(["test/model"], {
+    "test/model": { reasoning: true, reasoningEfforts: ["low", "high", "low"], defaultLevel: "high" },
+  }).models[0];
+  expect(entry.supported_reasoning_levels.map((l) => l.effort)).toEqual(["low", "high"]);
+  expect(entry.supported_reasoning_levels.map((l) => l.effort)).toContain(entry.default_reasoning_level);
 });
