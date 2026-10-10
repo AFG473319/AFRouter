@@ -1,3 +1,11 @@
+# v0.5.96 (2026-10-10)
+
+## Fixes
+- **Every CLI tool integration now writes a config the tool actually loads.** An audit compared each tool's docs and source against our writers and found the writers were configuring files the tools never read. Fixed: Kilo writes `provider.afrouter` + `model` into `kilo.jsonc` (its `auth.json` schema drops anything but oauth/api/wellknown; the VS Code keys never existed); Cline writes `settings/providers.json` with provider `openai-compatible` keeping `/v1` (`globalState.json` is the legacy path); Smelt owns a `provider.register("afrouter", …)` block in `~/.config/smelt/init.lua` (`~/.smelt/config.json` is never loaded; the key is export-only via `AFROUTER_API_KEY`); CodeWhale writes `[providers.afrouter]` + root `provider` (`[openai]` is unread); Forge writes `<base>/.forge.toml` (`$FORGE_CONFIG` → `~/forge` → `~/.forge`) with `[[providers]]` + `[session]`; jcode's env file moved to the platform config dir with per-model `[[providers.afrouter.models]]` specs and `[provider]` defaults; Hermes honours `HERMES_HOME` (`%LOCALAPPDATA%\hermes` on native Windows); Grok Build and DeepSeek TUI Apply 500s fixed; Codex profiles point at the `afrouter` provider; Zed uses `~/.config/zed` on macOS.
+- **Shared groundwork for all writers.** `src/lib/cliConfigIO.js` parses JSON/JSONC/JSON5/TOML/YAML and aborts with 409 instead of wiping user files, with backup + atomic writes (0600 for secrets); `src/lib/cliModelSpec.js` resolves per-model specs (context, output, vision, reasoning ladder) from the shared resolver so no writer invents limits; `src/lib/cliPaths.js` resolves per-OS config dirs and env overrides.
+
+Tests: `tests/unit/cli-kilo-settings-route.test.js`, `tests/unit/cli-cline-settings-route.test.js` and `tests/unit/cli-config-tools.test.js` (new — fresh install, commented-file preservation, 409 on parse errors, idempotent re-Apply, Reset scoping for kilo/cline/smelt/codewhale/forge/jcode).
+
 # v0.5.95 (2026-10-09)
 
 ## Fixes
