@@ -22,7 +22,7 @@ describe("Codex profiles configuration", () => {
   it("builds and parses profile TOML", () => {
     const toml = buildCodexProfileToml({ name: "claude", model: "anthropic/claude-3-7-sonnet" });
     expect(toml).toContain('model = "anthropic/claude-3-7-sonnet"');
-    expect(toml).toContain('model_provider = "9router"');
+    expect(toml).toContain('model_provider = "afrouter"');
     expect(parseCodexProfileModel(toml)).toBe("anthropic/claude-3-7-sonnet");
   });
 });

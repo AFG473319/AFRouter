@@ -46,12 +46,18 @@ export const MITM_TOOLS = {
       // Both need a mappable slot — otherwise getMappedModel returns null and the chat call
       // is passed through to AWS instead of being routed to the chosen provider.
       { id: "auto", name: "Auto (Kiro Agent)", alias: "auto" },
+      { id: "claude-opus-5.5", name: "Claude Opus 5.5", alias: "claude-opus-5.5" },
+      { id: "claude-opus-5", name: "Claude Opus 5", alias: "claude-opus-5" },
+      { id: "claude-opus-4.8", name: "Claude Opus 4.8", alias: "claude-opus-4.8" },
+      { id: "claude-opus-4.7", name: "Claude Opus 4.7", alias: "claude-opus-4.7" },
+      { id: "claude-opus-4.5", name: "Claude Opus 4.5", alias: "claude-opus-4.5" },
       { id: "claude-sonnet-5", name: "Claude Sonnet 5", alias: "claude-sonnet-5" },
       { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5", alias: "claude-sonnet-4.5" },
       { id: "claude-sonnet-4", name: "Claude Sonnet 4", alias: "claude-sonnet-4" },
       { id: "claude-haiku-4.5", name: "Claude Haiku 4.5", alias: "claude-haiku-4.5" },
       { id: "deepseek-3.2", name: "DeepSeek 3.2", alias: "deepseek-3.2" },
       { id: "minimax-m2.1", name: "MiniMax M2.1", alias: "minimax-m2.1" },
+      { id: "glm-5", name: "GLM 5", alias: "glm-5" },
       { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", alias: "gpt-5.6-sol", contextLength: 272000, rateMultiplier: 2.4 },
       { id: "gpt-5.6-terra", name: "GPT 5.6 Terra", alias: "gpt-5.6-terra", contextLength: 272000, rateMultiplier: 1.2 },
       { id: "gpt-5.6-luna", name: "GPT 5.6 Luna", alias: "gpt-5.6-luna", contextLength: 272000, rateMultiplier: 0.6 },
@@ -270,7 +276,7 @@ export const CLI_TOOLS = {
     notes: [
       {
         type: "info",
-        text: "Hermes Agent reads ~/.hermes/config.yaml. AFRouter writes one named provider under providers: (api, transport chat_completions, key_env) with a models: mapping, so every model you add here shows up in Hermes' own model picker (hermes model, /model, /model custom:afrouter:<model-id>).",
+        text: "Hermes Agent reads config.yaml from its home directory — ~/.hermes/config.yaml on macOS/Linux, %LOCALAPPDATA%\\hermes\\config.yaml on native Windows, or wherever $HERMES_HOME points. AFRouter writes one named provider under providers: (api, transport chat_completions, key_env) with a models: mapping, so every model you add here shows up in Hermes' own model picker (hermes model, /model, /model custom:afrouter:<model-id>).",
       },
       {
         type: "info",
@@ -460,7 +466,7 @@ amp --model "{{model}}"
     image: "/providers/deepseek-tui.png",
     color: "#4D6BFE",
     description: "DeepSeek Terminal Coding Agent (Rust TUI)",
-    docsUrl: "https://github.com/DeepSeek-TUI/DeepSeek-TUI",
+    docsUrl: "https://github.com/Hmbown/DeepSeek-TUI",
     configType: "custom",
     defaultCommand: "deepseek",
     modelAliases: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
@@ -522,18 +528,19 @@ amp --model "{{model}}"
     description: "High-performance Rust-based coding agent harness",
     configType: "custom",
     docsUrl: "https://github.com/1jehuang/jcode",
+    defaultCommand: "jcode",
     notes: [
       {
         type: "info",
-        text: "jcode is a Rust-based coding agent with semantic memory, multi-agent swarms, and extreme performance (27.8 MB RAM, 14ms boot)."
+        text: "jcode reads ~/.jcode/config.toml. AFRouter writes providers.afrouter (type openai-compatible, base_url, api_key_env, env_file, default_model, requires_api_key) with [[providers.afrouter.models]] entries (context_window, reasoning, reasoning_effort, input) plus [provider] default_provider so the profile is selected.",
       },
       {
         type: "info",
-        text: "Configure afrouter as an OpenAI-compatible provider to route all jcode requests through afrouter's optimization layer."
+        text: "The key lives in provider-afrouter.env under jcode's app config dir (Linux ~/.config/jcode, macOS ~/Library/Application Support/jcode, Windows %APPDATA%\\jcode; $JCODE_HOME/config/jcode when JCODE_HOME is set).",
       },
       {
         type: "warning",
-        text: "Requires jcode installed. Install via: curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash"
+        text: "Requires jcode installed. Install via: curl -fsSL https://jcode.sh/install | bash (Windows: irm https://jcode.sh/install.ps1 | iex)",
       },
     ],
     defaultModels: [
@@ -611,7 +618,7 @@ amp --model "{{model}}"
       },
       {
         type: "warning",
-        text: "Config path: Linux ~/.config/zed/settings.json • macOS ~/Library/Application Support/Zed/settings.json • Windows %APPDATA%\\Zed\\settings.json",
+        text: "Config path: Linux $XDG_CONFIG_HOME/zed/settings.json (default ~/.config/zed) • macOS ~/.config/zed/settings.json • Windows %APPDATA%\\Zed\\settings.json",
       },
       {
         type: "warning",
@@ -761,13 +768,18 @@ gemini extensions install https://github.com/manalkaff/opendesign
     name: "ForgeCode",
     image: "/providers/forge.png",
     color: "#EAB308",
-    description: "Antinomy HQ ForgeCode agent harness",
+    description: "Tailcall ForgeCode agent harness",
     configType: "custom",
-    docsUrl: "https://github.com/antinomyhq/forge",
+    docsUrl: "https://github.com/tailcallhq/forgecode",
+    defaultCommand: "forge",
     notes: [
       {
         type: "info",
-        text: "ForgeCode uses ~/.forge/config.toml. 9Router updates the [openai] section with your baseUrl, apiKey, and model.",
+        text: "ForgeCode reads <base>/.forge.toml where base is $FORGE_CONFIG, else ~/forge when it exists, else ~/.forge. AFRouter writes [[providers]] id \"afrouter\" (url <base>/v1/chat/completions, response_type \"OpenAI\", api_key_var AFROUTER_API_KEY) with its models plus [session] provider_id/model_id.",
+      },
+      {
+        type: "warning",
+        text: "Export AFROUTER_API_KEY with your AFRouter key before running forge — the key is never written into the TOML. Install via: curl -fsSL https://forgecode.dev/cli | sh",
       },
     ],
   },
@@ -778,11 +790,16 @@ gemini extensions install https://github.com/manalkaff/opendesign
     color: "#EF4444",
     description: "Smelt terminal AI coding assistant",
     configType: "custom",
-    docsUrl: "https://github.com/leonardcser/smelt",
+    docsUrl: "https://leonardcser.github.io/smelt/",
+    defaultCommand: "smelt",
     notes: [
       {
         type: "info",
-        text: "Smelt uses ~/.smelt/config.json for OpenAI-compatible endpoint configuration.",
+        text: "Smelt only reads ~/.config/smelt/init.lua (%APPDATA%\\smelt\\init.lua on Windows). AFRouter owns a managed smelt.provider.register(\"afrouter\", { type openai-compatible, api_base <base>/v1, api_key_env AFROUTER_API_KEY, models with context/max_tokens }) block there.",
+      },
+      {
+        type: "warning",
+        text: "Smelt has no API-key field: export AFROUTER_API_KEY with your AFRouter key before running smelt. Install via: cargo install --locked --git https://github.com/leonardcser/smelt.git smelt-agent",
       },
     ],
   },
@@ -793,11 +810,16 @@ gemini extensions install https://github.com/manalkaff/opendesign
     color: "#4F46E5",
     description: "CodeWhale terminal coding agent (successor to DeepSeek TUI)",
     configType: "custom",
-    docsUrl: "https://github.com/Hmbown/CodeWhale",
+    docsUrl: "https://github.com/codewhale-hq/Codewhale",
+    defaultCommand: "codewhale",
     notes: [
       {
         type: "info",
-        text: "CodeWhale uses ~/.codewhale/config.toml. 9Router configures the [openai] provider with your base_url, api_key, and model.",
+        text: "CodeWhale reads ~/.codewhale/config.toml (legacy fallback ~/.deepseek/config.toml; $CODEWHALE_CONFIG_PATH overrides). AFRouter writes root provider = \"afrouter\" plus [providers.afrouter] (kind openai-compatible, base_url, api_key, model) and default_text_model. A root [openai] table is never read — `codewhale config doctor` flags it.",
+      },
+      {
+        type: "warning",
+        text: "Install via: curl -fsSL https://codewhale.net/install.sh | sh",
       },
     ],
   },

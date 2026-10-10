@@ -5,7 +5,7 @@
  * Zed (https://zed.dev) keeps user settings in a single JSON document:
  *
  *   Linux   ~/.config/zed/settings.json
- *   macOS   ~/Library/Application Support/Zed/settings.json
+ *   macOS   ~/.config/zed/settings.json
  *   Windows %APPDATA%\Zed\settings.json
  *
  * AI configuration lives under `language_models.openai_compatible`:

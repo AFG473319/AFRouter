@@ -127,15 +127,18 @@ export default function KiloToolCard({ tool, isExpanded, onToggle, baseUrl, apiK
     const keyToUse = (selectedApiKey && selectedApiKey.trim())
       ? selectedApiKey
       : (!cloudEnabled ? "sk_afrouter" : "<API_KEY_FROM_DASHBOARD>");
+    const modelId = selectedModel || "provider/model-id";
 
     return [{
-      filename: "~/.local/share/kilo/auth.json",
+      filename: "~/.config/kilo/kilo.jsonc",
       content: JSON.stringify({
-        "openai-compatible": {
-          type: "api-key",
-          apiKey: keyToUse,
-          baseUrl: getEffectiveBaseUrl(),
-          model: selectedModel || "provider/model-id",
+        model: `afrouter/${modelId}`,
+        provider: {
+          afrouter: {
+            npm: "@ai-sdk/openai-compatible",
+            options: { baseURL: getEffectiveBaseUrl(), apiKey: keyToUse },
+            models: { [modelId]: { name: modelId } },
+          },
         },
       }, null, 2),
     }];

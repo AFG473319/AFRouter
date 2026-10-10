@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
+import { getCodexHome } from "@/lib/codexConfig.js";
 
 export const dynamic = "force-dynamic";
 
-const getCodexDir = () => path.join(os.homedir(), ".codex");
+const getCodexDir = () => getCodexHome();
 
 const isValidProfileName = (name) => {
   return typeof name === "string" && /^[a-zA-Z0-9_-]+$/.test(name) && name.length <= 64 && name.toLowerCase() !== "config";
@@ -78,7 +78,7 @@ export async function POST(request) {
     await fs.mkdir(codexDir, { recursive: true });
 
     const filePath = path.join(codexDir, `${cleanName}.config.toml`);
-    const content = `# codex -p ${cleanName}\nmodel = "${cleanModel}"\nmodel_provider = "9router"\n`;
+    const content = `# codex -p ${cleanName}\nmodel = "${cleanModel}"\nmodel_provider = "afrouter"\n`;
     await fs.writeFile(filePath, content, "utf-8");
 
     return NextResponse.json({

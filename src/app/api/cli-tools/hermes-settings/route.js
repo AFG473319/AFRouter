@@ -32,7 +32,17 @@ import {
 
 const execAsync = promisify(exec);
 
-const getHermesDir = () => path.join(os.homedir(), ...HERMES_CONFIG_DIR_SEGMENTS);
+const getHermesDir = () => {
+  // Official layout (hermes-agent.nousresearch.com/docs/getting-started/installation):
+  // HERMES_HOME selects user data; default is ~/.hermes on POSIX and
+  // %LOCALAPPDATA%\hermes on native Windows.
+  if (process.env.HERMES_HOME) return process.env.HERMES_HOME;
+  if (os.platform() === "win32") {
+    const base = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    return path.join(base, "hermes");
+  }
+  return path.join(os.homedir(), ...HERMES_CONFIG_DIR_SEGMENTS);
+};
 const getHermesConfigPath = () => path.join(getHermesDir(), HERMES_CONFIG_FILE);
 const getHermesEnvPath = () => path.join(getHermesDir(), HERMES_ENV_FILE);
 
@@ -387,7 +397,7 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error: "~/.hermes/config.yaml is unreadable — fix or restore the latest backup before applying",
+          error: `${configPath} is unreadable — fix or restore the latest backup before applying`,
         },
         { status: 409 },
       );
@@ -484,7 +494,7 @@ export async function DELETE(request) {
     }
     if (existing.corrupt) {
       return NextResponse.json(
-        { success: false, error: "~/.hermes/config.yaml is unreadable — nothing was removed" },
+        { success: false, error: `${configPath} is unreadable — nothing was removed` },
         { status: 409 },
       );
     }

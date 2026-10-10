@@ -8,11 +8,20 @@ import os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { parseTOML, stringifyTOML } from "confbox";
+import { CliConfigParseError, readConfig, writeWithBackup } from "@/lib/cliConfigIO.js";
 
 const execAsync = promisify(exec);
 
-const getCodewhaleDir = () => path.join(os.homedir(), ".codewhale");
-const getCodewhaleConfigPath = () => path.join(getCodewhaleDir(), "config.toml");
+const CODEWHALE_PROVIDER_ID = "afrouter";
+// codewhale-hq/Codewhale docs/CONFIGURATION.md ("Where It Looks"): default
+// ~/.codewhale/config.toml, legacy fallback ~/.deepseek/config.toml,
+// overrides CLI --config, env CODEWHALE_CONFIG_PATH, legacy DEEPSEEK_CONFIG_PATH.
+const getCodewhaleConfigPath = () => {
+  if (process.env.CODEWHALE_CONFIG_PATH) return process.env.CODEWHALE_CONFIG_PATH;
+  if (process.env.DEEPSEEK_CONFIG_PATH) return process.env.DEEPSEEK_CONFIG_PATH;
+  return path.join(os.homedir(), ".codewhale", "config.toml");
+};
+const getLegacyConfigPath = () => path.join(os.homedir(), ".deepseek", "config.toml");
 
 const checkCodewhaleInstalled = async () => {
   const isWindows = os.platform() === "win32";
@@ -21,50 +30,63 @@ const checkCodewhaleInstalled = async () => {
     await execAsync(command, { windowsHide: true });
     return true;
   } catch {
-    try {
-      await fs.access(getCodewhaleConfigPath());
-      return true;
-    } catch {
-      return false;
+    for (const candidate of [getCodewhaleConfigPath(), getLegacyConfigPath()]) {
+      try {
+        await fs.access(candidate);
+        return true;
+      } catch {
+        /* try next */
+      }
     }
+    return false;
   }
 };
 
-const has9RouterConfig = (content) => {
-  if (!content) return false;
-  return content.includes("managed by 9Router") || content.includes("localhost:20128");
+const normalizeBaseUrl = (baseUrl) => {
+  const trimmed = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
 };
 
-const readConfig = async () => {
+const parseTomlStrict = (raw, file) => {
   try {
-    return await fs.readFile(getCodewhaleConfigPath(), "utf-8");
-  } catch {
-    return null;
+    return parseTOML(raw);
+  } catch (error) {
+    throw new CliConfigParseError(file, String(error?.message || error).split("\n")[0]);
   }
+};
+
+const readPrimary = async (configPath) => {
+  const { exists, raw } = await readConfig(configPath, "toml");
+  if (!exists) return { exists: false, raw: "", config: {} };
+  return { exists: true, raw, config: parseTomlStrict(raw, "config.toml") };
+};
+
+const hasAFRouterConfig = (config) => {
+  if (!config || typeof config !== "object") return false;
+  if (config.provider === CODEWHALE_PROVIDER_ID) return true;
+  return Boolean(config.providers?.[CODEWHALE_PROVIDER_ID]);
 };
 
 export async function GET() {
   try {
     const installed = await checkCodewhaleInstalled();
+    const configPath = getCodewhaleConfigPath();
     if (!installed) {
-      return NextResponse.json({
-        installed: false,
-        config: null,
-        message: "CodeWhale CLI is not installed",
-      });
+      return NextResponse.json({ installed: false, config: null, message: "CodeWhale CLI is not installed" });
     }
-
-    const content = await readConfig();
-    let config = null;
-    try {
-      if (content) config = parseTOML(content);
-    } catch {}
-
+    const { exists, config } = await readPrimary(configPath).catch((error) => {
+      if (error instanceof CliConfigParseError) return { exists: true, config: null, parseError: error };
+      throw error;
+    });
+    if (config === null) {
+      return NextResponse.json({ installed: true, corrupt: true, config: null, hasAFRouter: false, configPath }, { status: 409 });
+    }
     return NextResponse.json({
       installed: true,
-      config,
-      has9Router: has9RouterConfig(content),
-      configPath: getCodewhaleConfigPath(),
+      config: exists ? config : null,
+      hasAFRouter: exists ? hasAFRouterConfig(config) : false,
+      configPath,
     });
   } catch (err) {
     return NextResponse.json({ error: { message: err.message } }, { status: 500 });
@@ -81,38 +103,39 @@ export async function POST(request) {
 
   try {
     const { baseUrl, apiKey, model } = rawBody || {};
-    if (!baseUrl) {
-      return NextResponse.json({ error: { message: "baseUrl is required" } }, { status: 400 });
+    if (!baseUrl || !model) {
+      return NextResponse.json({ error: { message: "baseUrl and model are required" } }, { status: 400 });
     }
 
     const configPath = getCodewhaleConfigPath();
-    await fs.mkdir(getCodewhaleDir(), { recursive: true });
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    const { exists, raw, config: parsed } = await readPrimary(configPath);
+    const config = parsed && typeof parsed === "object" ? parsed : {};
+    void exists;
+    void raw;
 
-    let existing = {};
-    try {
-      const raw = await fs.readFile(configPath, "utf-8");
-      existing = parseTOML(raw);
-    } catch {}
-
-    const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-
-    existing.openai = {
+    const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+    const modelId = String(model).trim();
+    config.providers = config.providers && typeof config.providers === "object" ? config.providers : {};
+    config.providers[CODEWHALE_PROVIDER_ID] = {
+      ...(config.providers[CODEWHALE_PROVIDER_ID] && typeof config.providers[CODEWHALE_PROVIDER_ID] === "object"
+        ? config.providers[CODEWHALE_PROVIDER_ID]
+        : {}),
+      kind: "openai-compatible",
       base_url: normalizedBaseUrl,
       api_key: await resolveCliApiKey(apiKey),
-      model: model || "provider/model-id",
+      model: modelId,
     };
+    config.provider = CODEWHALE_PROVIDER_ID;
+    config.default_text_model = modelId;
 
-    const header = "# CodeWhale config — managed by 9Router\n\n";
-    const content = header + stringifyTOML(existing);
+    await writeWithBackup(configPath, stringifyTOML(config));
 
-    await fs.writeFile(configPath, content, "utf-8");
-
-    return NextResponse.json({
-      success: true,
-      message: "CodeWhale settings applied successfully!",
-      configPath,
-    });
+    return NextResponse.json({ success: true, message: "CodeWhale settings applied successfully!", configPath });
   } catch (err) {
+    if (err instanceof CliConfigParseError) {
+      return NextResponse.json({ error: { message: err.message } }, { status: 409 });
+    }
     return NextResponse.json({ error: { message: err.message } }, { status: 500 });
   }
 }
@@ -120,24 +143,25 @@ export async function POST(request) {
 export async function DELETE() {
   try {
     const configPath = getCodewhaleConfigPath();
-    let existing = {};
-    try {
-      const raw = await fs.readFile(configPath, "utf-8");
-      existing = parseTOML(raw);
-    } catch {
+    const { exists, config } = await readPrimary(configPath);
+    if (!exists) {
       return NextResponse.json({ success: true, message: "No config file to reset" });
     }
+    if (config.providers) delete config.providers[CODEWHALE_PROVIDER_ID];
+    if (config.providers && Object.keys(config.providers).length === 0) delete config.providers;
+    if (config.provider === CODEWHALE_PROVIDER_ID) delete config.provider;
+    if (typeof config.default_text_model === "string") delete config.default_text_model;
 
-    delete existing.openai;
-
-    if (Object.keys(existing).length === 0) {
+    if (Object.keys(config).length === 0) {
       await fs.rm(configPath, { force: true });
     } else {
-      await fs.writeFile(configPath, stringifyTOML(existing), "utf-8");
+      await writeWithBackup(configPath, stringifyTOML(config));
     }
-
-    return NextResponse.json({ success: true, message: "9Router removed from CodeWhale" });
+    return NextResponse.json({ success: true, message: "AFRouter removed from CodeWhale" });
   } catch (err) {
+    if (err instanceof CliConfigParseError) {
+      return NextResponse.json({ error: { message: err.message } }, { status: 409 });
+    }
     return NextResponse.json({ error: { message: err.message } }, { status: 500 });
   }
 }

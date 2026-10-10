@@ -189,7 +189,7 @@ export function ompThinking(spec) {
   const levels = Array.isArray(spec.reasoningLevels) ? spec.reasoningLevels : [];
   const efforts = OMP_EFFORT_LEVELS.filter((l) => levels.includes(l));
   if (!efforts.length) return undefined;
-  const defaultLevel = efforts.includes(spec.defaultLevel) ? spec.defaultLevel : efforts[efforts.length - 1];
+  const defaultLevel = efforts.includes(spec.defaultLevel) ? spec.defaultLevel : (efforts.includes("high") ? "high" : efforts.includes("medium") ? "medium" : efforts.filter((l) => l !== "xhigh" && l !== "max" && l !== "ultra").at(-1) ?? efforts[0]);
   return { mode: "effort", efforts, defaultLevel };
 }
 

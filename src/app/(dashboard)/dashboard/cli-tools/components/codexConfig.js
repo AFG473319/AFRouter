@@ -75,7 +75,7 @@ export function deriveProfileNameFromModel(modelId, existingNames = []) {
 }
 
 export function buildCodexProfileToml({ name, model }) {
-  return `# codex -p ${name}\nmodel = "${model}"\nmodel_provider = "9router"\n`;
+  return `# codex -p ${name}\nmodel = "${model}"\nmodel_provider = "afrouter"\n`;
 }
 
 export function parseCodexProfileModel(content) {
