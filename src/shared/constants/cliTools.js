@@ -611,7 +611,7 @@ amp --model "{{model}}"
       },
       {
         type: "warning",
-        text: "Config path: Linux ~/.config/zed/settings.json • macOS ~/Library/Application Support/Zed/settings.json • Windows %APPDATA%\\Zed\\settings.json",
+        text: "Config path: Linux $XDG_CONFIG_HOME/zed/settings.json (default ~/.config/zed) • macOS ~/.config/zed/settings.json • Windows %APPDATA%\\Zed\\settings.json",
       },
       {
         type: "warning",

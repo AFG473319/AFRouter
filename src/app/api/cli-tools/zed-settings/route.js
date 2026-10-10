@@ -17,16 +17,19 @@ import {
 
 const execAsync = promisify(exec);
 
-// Zed resolves the settings path per-platform.
+// Mirrors zed crates/paths/src/paths.rs config_dir(): macOS uses ~/.config/zed
+// (Library/Application Support is the data dir), Linux honours the Flatpak then
+// XDG config home, Windows uses %APPDATA%\Zed.
 const getConfigDir = () => {
   const home = os.homedir();
   if (os.platform() === "win32") {
     return path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Zed");
   }
   if (os.platform() === "darwin") {
-    return path.join(home, "Library", "Application Support", "Zed");
+    return path.join(home, ".config", "zed");
   }
-  return path.join(home, ".config", "zed");
+  const xdg = process.env.FLATPAK_XDG_CONFIG_HOME || process.env.XDG_CONFIG_HOME || path.join(home, ".config");
+  return path.join(xdg, "zed");
 };
 
 const getConfigPath = () => path.join(getConfigDir(), "settings.json");
