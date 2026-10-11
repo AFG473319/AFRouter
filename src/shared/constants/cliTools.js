@@ -349,11 +349,14 @@ export const CLI_TOOLS = {
     description: "Roo AI Assistant",
     configType: "guide",
     guideSteps: [
-      { step: 1, title: "Open Settings", desc: "Go to Roo Settings panel" },
-      { step: 2, title: "Select Provider", desc: "Choose API Provider → Ollama" },
+      { step: 1, title: "Open Settings", desc: "Go to the Roo Settings panel (gear icon)" },
+      { step: 2, title: "Select Provider", desc: "Choose API Provider → OpenAI Compatible" },
       { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
       { step: 4, title: "API Key", type: "apiKeySelector" },
       { step: 5, title: "Select Model", type: "modelSelector" },
+    ],
+    notes: [
+      { type: "info", text: "Roo's OpenAI Compatible provider (not Ollama) is the one that accepts an arbitrary base URL and key." },
     ],
   },
   continue: {
@@ -364,20 +367,23 @@ export const CLI_TOOLS = {
     description: "Continue AI Assistant",
     configType: "guide",
     guideSteps: [
-      { step: 1, title: "Open Config", desc: "Open Continue configuration file" },
+      { step: 1, title: "Open Config", desc: "Open ~/.continue/config.yaml (the current format; config.json is the deprecated one)" },
       { step: 2, title: "API Key", type: "apiKeySelector" },
       { step: 3, title: "Select Model", type: "modelSelector" },
-      { step: 4, title: "Add Model Config", desc: "Add the following configuration to your models array:" },
+      { step: 4, title: "Add Model Config", desc: "Add an entry under models: in config.yaml:" },
     ],
     codeBlock: {
-      language: "json",
-      code: `{
-  "apiBase": "{{baseUrl}}",
-  "title": "{{model}}",
-  "model": "{{model}}",
-  "provider": "openai",
-  "apiKey": "{{apiKey}}"
-}`,
+      language: "yaml",
+      code: `name: My Config
+version: 0.0.1
+schema: v1
+
+models:
+  - name: {{model}}
+    provider: openai
+    model: {{model}}
+    apiBase: {{baseUrl}}
+    apiKey: {{apiKey}}`,
     },
   },
   amp: {
@@ -391,24 +397,26 @@ export const CLI_TOOLS = {
     defaultCommand: "amp",
     modelAliases: ["g25p", "g25f", "cs45", "g54"],
     notes: [
-      { type: "info", text: "Use AFRouter model aliases to keep Amp shorthand mappings stable across provider updates." },
-      { type: "warning", text: "Suggested shorthand examples: g25p → gemini/gemini-2.5-pro, g25f → gemini/gemini-2.5-flash, cs45 → cc/claude-sonnet-4-5-20250929." },
+      { type: "info", text: "Add a Model Routing connection: Personal settings → Model Routing → Add → Custom URL (OpenAI-compatible). From the CLI: `amp config model-providers` lists, adds, tests and reorders connections." },
+      { type: "warning", text: "A localhost URL is not reachable from Amp's cloud runners — expose the gateway with a tunnel or a public address before adding the Custom URL connection." },
+      { type: "info", text: "Use AFRouter model aliases to keep Amp model mappings stable across provider updates." },
+      { type: "warning", text: "Suggested aliases: g25p → gemini/gemini-2.5-pro, g25f → gemini/gemini-2.5-flash, cs45 → cc/claude-sonnet-4-5-20250929." },
     ],
     guideSteps: [
       { step: 1, title: "Install Amp", desc: "Install the Amp CLI using the package manager supported by your environment." },
-      { step: 2, title: "API Key", type: "apiKeySelector" },
+      { step: 2, title: "Open Model Routing", desc: "In Personal Settings → Model Routing, choose Add → Custom URL (or run `amp config model-providers`)." },
       { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "Select Model", type: "modelSelector" },
-      { step: 5, title: "Add Shorthands", desc: "Map Amp shorthand names such as g25p or cs45 to AFRouter aliases in your local config." },
+      { step: 4, title: "API Key", type: "apiKeySelector" },
+      { step: 5, title: "Map Models", desc: "Set the connection's model mapping so the models you want route through AFRouter; verify with `amp config model-providers check-access`." },
     ],
     codeBlock: {
       language: "bash",
-      code: `export OPENAI_API_KEY="{{apiKey}}"
-export OPENAI_BASE_URL="{{baseUrl}}"
-amp --model "{{model}}"
-# Example shorthand aliases you can map locally:
-# g25p -> gemini/gemini-2.5-pro
-# cs45 -> cc/claude-sonnet-4-5-20250929`,
+      code: `# Model Routing is a settings-managed connection in Amp, not an env var.
+# Add a Custom URL (OpenAI-compatible) connection, then map models to it:
+amp config model-providers list
+amp config model-providers check-access --provider-model {{model}}
+# A localhost base URL is not reachable from Amp's cloud runners — use a tunnel:
+# {{baseUrl}}`,
     },
   },
   qwen: {
@@ -421,10 +429,11 @@ amp --model "{{model}}"
     configType: "guide",
     defaultCommand: "qwen",
     notes: [
-      { type: "info", text: "Qwen Code supports multiple provider types (openai, anthropic, gemini) via modelProviders in settings.json. AFRouter works as an OpenAI-compatible endpoint." },
+      { type: "info", text: "Qwen Code declares models under modelProviders in settings.json; each entry is a bare ModelConfig[] array (the older {protocol, models} wrapper is reverted and silently skipped). AFRouter works as an openai route." },
+      { type: "info", text: "Credentials are never persisted in settings: the runtime reads them from process.env[envKey], so set the env var named by envKey before launching." },
       { type: "info", text: "Any model available in AFRouter can be used — not just Qwen models. Select from Qwen, Claude, Gemini, GPT, and more." },
       { type: "warning", text: "Config path: Linux/macOS ~/.qwen/settings.json • Windows %USERPROFILE%\\.qwen\\settings.json" },
-      { type: "error", text: "Qwen OAuth free tier was discontinued on 2026-04-15. Use AFRouter with alicode/openrouter/anthropic/gemini providers instead." },
+      { type: "error", text: "Qwen OAuth free tier was discontinued on 2026-04-15, and security.auth.* is deprecated. Use modelProviders with an envKey instead." },
     ],
     modelAliases: ["coder-model", "qwen3-coder-plus", "qwen3-coder-flash", "vision-model", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gemini-3-flash", "gemini-3.1-pro-high"],
     defaultModels: [
@@ -439,23 +448,22 @@ amp --model "{{model}}"
     ],
     guideSteps: [
       { step: 1, title: "Install Qwen Code", desc: "npm install -g @qwen-code/qwen-code" },
-      { step: 2, title: "API Key", type: "apiKeySelector" },
-      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "Select Model", type: "modelSelector" },
-      { step: 5, title: "Save Config", desc: "Copy the JSON below to your ~/.qwen/settings.json file." },
+      { step: 2, title: "Set the env var", desc: "Qwen reads the key from the env var named by envKey (never from settings.json)." },
+      { step: 3, title: "Add to modelProviders", desc: "Add an openai route to modelProviders in ~/.qwen/settings.json." },
+      { step: 4, title: "Select Model", desc: "Run /model and pick the AFRouter entry (it hot-reloads ~300ms after save)." },
     ],
     codeBlock: {
       language: "json",
       code: `{
-  "security": {
-    "auth": {
-      "selectedType": "openai",
-      "apiKey": "{{apiKey}}",
-      "baseUrl": "{{baseUrl}}"
-    }
-  },
-  "model": {
-    "name": "{{model}}"
+  "modelProviders": {
+    "openai": [
+      {
+        "id": "{{model}}",
+        "name": "AFRouter - {{model}}",
+        "baseUrl": "{{baseUrl}}",
+        "envKey": "AFROUTER_API_KEY"
+      }
+    ]
   }
 }`,
     },
@@ -717,36 +725,6 @@ gemini extensions install https://github.com/manalkaff/opendesign
 # OpenCode
 # Fetch and follow .opencode/INSTALL.md from the repo`,
     },
-  },
-  pi: {
-    id: "pi",
-    name: "Pi (pi-coding-agent)",
-    image: "/providers/pi.svg",
-    color: "#6366F1",
-    description: "Pi coding agent — minimal, extensible agent harness (pi.dev)",
-    configType: "custom",
-    docsUrl: "https://pi.dev",
-    notes: [
-      {
-        type: "info",
-        text: "Pi uses ~/.pi/agent/models.json. 9Router is configured under providers.9router as an OpenAI-compatible endpoint.",
-      },
-    ],
-  },
-  omp: {
-    id: "omp",
-    name: "Oh My Pi",
-    image: "/providers/omp.png",
-    color: "#EC4899",
-    description: "Oh My Pi terminal AI agent with auto-discovery support",
-    configType: "custom",
-    docsUrl: "https://github.com/can1357/oh-my-pi",
-    notes: [
-      {
-        type: "info",
-        text: "Oh My Pi uses ~/.omp/agent/models.yml and agent.db. 9Router is configured with proxy discovery so all models appear automatically under /model.",
-      },
-    ],
   },
   crush: {
     id: "crush",
