@@ -86,7 +86,7 @@ export const buildModelInput = (caps = {}) => {
 export const buildModelEntry = (id, caps = {}) => {
   const context = Math.floor(caps.contextWindow ?? FALLBACK_SPEC.contextWindow);
   const output = Math.floor(caps.maxOutput ?? FALLBACK_SPEC.maxOutput);
-  return {
+  const entry = {
     name: id,
     limit: {
       context: Number.isFinite(context) && context > 0 ? context : FALLBACK_SPEC.contextWindow,
@@ -99,6 +99,26 @@ export const buildModelEntry = (id, caps = {}) => {
       output: ["text"],
     },
   };
+  // Per-model reasoning variants (MiMoCode is an OpenCode fork and reads the V1
+  // named-object map). Without them the effort picker never appears and effort
+  // control is unreachable; a foreign level would be rejected, so the map is
+  // built only from the model's own ladder.
+  const variants = mimocodeReasoningVariants(caps);
+  if (variants) entry.variants = variants;
+  return entry;
+};
+
+// MiMoCode's V1 `variants` map, keyed by level with `reasoningEffort` inside.
+// `none` (disable) is included only when the model can actually disable thinking.
+export const mimocodeReasoningVariants = (caps = {}) => {
+  if (caps.reasoning !== true) return undefined;
+  const levels = Array.isArray(caps.reasoningLevels) ? caps.reasoningLevels : [];
+  const canDisable = caps.thinkingCanDisable !== false && caps.canDisable !== false;
+  const names = levels.filter((level) => level !== "none" || canDisable);
+  if (!names.length) return undefined;
+  const variants = {};
+  for (const name of names) variants[name] = { reasoningEffort: name };
+  return variants;
 };
 
 /**

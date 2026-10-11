@@ -236,15 +236,15 @@ export const CLI_TOOLS = {
     notes: [
       {
         type: "info",
-        text: "MiMo Desktop uses MiMo Code as its core engine and both share the same config file (~/.config/mimocode/mimocode.jsonc, or %LOCALAPPDATA%\\mimocode\\mimocode.jsonc on Windows).",
+        text: "MiMo Desktop uses MiMo Code as its core engine and both share one config file. It resolves through $MIMOCODE_HOME/config/mimocode.jsonc when that is set, else $XDG_CONFIG_HOME/mimocode/mimocode.jsonc (~/.config/mimocode/mimocode.jsonc).",
       },
       {
         type: "info",
-        text: "AFRouter writes an `afrouter` provider entry so MiMo's model picker offers AFRouter models. MiMoCode splits provider/model on the first '/' only, so ids like afrouter/9router/... or afrouter/cc/... work.",
+        text: "AFRouter writes an `afrouter` provider entry so MiMo's model picker offers AFRouter models. MiMoCode splits provider/model on the first '/' only, so ids like afrouter/cc/claude-sonnet-4-5 work.",
       },
       {
         type: "warning",
-        text: "Config path: Linux/macOS ~/.config/mimocode/mimocode.jsonc • Windows %LOCALAPPDATA%\\mimocode\\mimocode.jsonc (or $MIMOCODE_HOME when set).",
+        text: "Config path: $MIMOCODE_HOME/config/mimocode.jsonc when MIMOCODE_HOME is set, otherwise Linux/macOS ~/.config/mimocode/mimocode.jsonc. On native Windows the bundled xdg-basedir has no Windows branch, so the runtime path is %USERPROFILE%\\.config\\mimocode\\mimocode.jsonc; %LOCALAPPDATA%\\mimocode is also read if present.",
       },
       {
         type: "warning",
