@@ -35,9 +35,38 @@ describe("Kiro MITM model slots", () => {
 
   it("offers mappable slots for GPT-5.6 family models", () => {
     const models = new Map(kiro.defaultModels.map((m) => [m.id, m]));
-    expect(models.get("gpt-5.6-sol")).toMatchObject({ alias: "gpt-5.6-sol", contextLength: 272000, rateMultiplier: 2.4 });
-    expect(models.get("gpt-5.6-terra")).toMatchObject({ alias: "gpt-5.6-terra", contextLength: 272000, rateMultiplier: 1.2 });
-    expect(models.get("gpt-5.6-luna")).toMatchObject({ alias: "gpt-5.6-luna", contextLength: 272000, rateMultiplier: 0.6 });
+    expect(models.get("gpt-5.6-sol")).toMatchObject({ alias: "gpt-5.6-sol", contextLength: 1000000, rateMultiplier: 4.4 });
+    expect(models.get("gpt-5.6-terra")).toMatchObject({ alias: "gpt-5.6-terra", contextLength: 1000000, rateMultiplier: 2.2 });
+    expect(models.get("gpt-5.6-luna")).toMatchObject({ alias: "gpt-5.6-luna", contextLength: 1000000, rateMultiplier: 0.6 });
+  });
+
+  it("maps every slot to a real Kiro registry id", () => {
+    // Kiro has no fallback: a slot whose id is not in the provider registry never
+    // routes, so the request bypasses AFRouter. The agent/sub-task pseudo-ids are
+    // intentional aliases handled by the MITM mapper.
+    const registryIds = new Set((PROVIDER_MODELS.kr || []).map((model) => model.id));
+    const exempt = new Set(["auto", "simple-task"]);
+    const orphans = kiro.defaultModels
+      .map((model) => model.id)
+      .filter((id) => !exempt.has(id) && !registryIds.has(id));
+    expect(orphans).toEqual([]);
+  });
+
+  it("offers a slot for every current Kiro Claude model", () => {
+    const ids = kiro.defaultModels.map((m) => m.id);
+    expect(ids).toEqual(expect.arrayContaining([
+      "claude-opus-5.5",
+      "claude-opus-5",
+      "claude-opus-4.8",
+      "claude-opus-4.7",
+      "claude-opus-4.6",
+      "claude-opus-4.5",
+      "claude-sonnet-5",
+      "claude-sonnet-4.6",
+      "claude-sonnet-4.5",
+      "glm-5",
+      "MiniMax-M2.5",
+    ]));
   });
 });
 
@@ -71,14 +100,14 @@ describe("Kiro static provider models", () => {
     ]));
 
     for (const [id, rateMultiplier] of [
-      ["gpt-5.6-sol", 2.4],
-      ["gpt-5.6-sol-thinking", 2.4],
-      ["gpt-5.6-sol-agentic", 2.4],
-      ["gpt-5.6-sol-thinking-agentic", 2.4],
-      ["gpt-5.6-terra", 1.2],
-      ["gpt-5.6-terra-thinking", 1.2],
-      ["gpt-5.6-terra-agentic", 1.2],
-      ["gpt-5.6-terra-thinking-agentic", 1.2],
+      ["gpt-5.6-sol", 4.4],
+      ["gpt-5.6-sol-thinking", 4.4],
+      ["gpt-5.6-sol-agentic", 4.4],
+      ["gpt-5.6-sol-thinking-agentic", 4.4],
+      ["gpt-5.6-terra", 2.2],
+      ["gpt-5.6-terra-thinking", 2.2],
+      ["gpt-5.6-terra-agentic", 2.2],
+      ["gpt-5.6-terra-thinking-agentic", 2.2],
       ["gpt-5.6-luna", 0.6],
       ["gpt-5.6-luna-thinking", 0.6],
       ["gpt-5.6-luna-agentic", 0.6],
@@ -87,11 +116,11 @@ describe("Kiro static provider models", () => {
       const model = models.get(id);
       const upstreamModelId = id.replace(/-(thinking-agentic|thinking|agentic)$/, "");
       expect(model).toMatchObject({
-        contextLength: 272000,
+        contextLength: 1000000,
         rateMultiplier,
         upstreamModelId,
       });
-      expect(model.description).toContain("272k context window");
+      expect(model.description).toContain("1M context window");
     }
   });
 });
