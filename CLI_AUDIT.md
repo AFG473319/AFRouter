@@ -82,33 +82,56 @@ noninteractive workflows in small tested batches, then run opt-in end-to-end che
 against an explicitly selected disposable gateway. Existing README parity claims
 are ahead of the implementation. The pre-existing README edits are left untouched.
 
-## Model specs and reasoning efforts — 2026-10-08 (PR #33)
+## CLI tool config writers — current state (2026-10-11, PRs #39 + #41)
 
-Single resolver: `resolveReasoningLevels()` in `open-sse/providers/capabilities.js`
-(exact Codex entry → PATTERN_THINKING override → discovered models.dev ladder →
-format default → drop `none` when `thinkingCanDisable === false` → Kiro null case).
-`resolveModelSpec()` (`open-sse/providers/modelSpecs.js`) projects the full spec.
-Combos keep the union (dispatcher re-encodes via coerceLevels). Per-tool wiring:
+Every tool that accepts per-model metadata now writes specs resolved from
+`resolveModelSpec()` (`open-sse/providers/modelSpecs.js`, itself built on
+`resolveReasoningLevels()` in `open-sse/providers/capabilities.js`), through the
+shared IO in `src/lib/cliConfigIO.js`: a parse failure aborts with **409** instead
+of overwriting the user's file, every write is **backup + atomic** (0600 when the
+file holds a key), and effort levels are never invented. Paths and env overrides
+are per tool. Verification column names the doc/source the writer was checked
+against.
 
-| Tool | Config file | Spec fields written | Effort field + vocabulary | Doc link |
+| Tool | Config path(s) per OS + env overrides | What's written | Effort field + vocabulary | Doc / source verified against |
 | --- | --- | --- | --- | --- |
-| Codex | `~/.codex/config.toml` + `afrouter-models.json` | context window, `model_reasoning_effort`, `reasoningEfforts` catalog | `reasoningEfforts` list, OpenAI vocabulary | Codex CLI docs |
-| ZCode | `~/.zcode/v2/config.json` + Personal `provider_config.json` | limit, modalities, `reasoning.variants` / `reasoningLevel.values` | ZCode values (`disabled`/`enabled`/levels, strongest last) | zai-org/ZCode `provider-config-file-codec` |
-| DeepSeek Harness Web/Desktop | `$DSH_HOME/profiles/<web\|desktop>/cordis.patch.yml` | contextWindow, maxTokens, input, `reasoningEfforts`, compat | display→wire map, `none`→`off: null` | dsh docs |
-| Kilo | `~/.local/share/kilo/auth.json` (auth only) | none (auth.json holds no model metadata) | none — Kilo's precise display→wire map lives in the catalog surfaces (`kiloReasoning.js`), not the auth file | https://api.kilo.ai catalog |
-| Pi | `~/.pi/agent/models.json` | contextWindow, maxTokens, input, reasoning | `thinkingLevelMap` (Pi keys, identity values, null hides; `off`→`"none"` or null) | https://pi.dev/docs/latest/models, earendil-works/pi v0.72.0 (#3208) |
-| OMP | `~/.omp/agent/models.yml` | contextWindow, maxTokens, input, reasoning | `thinking: {mode: effort, efforts, defaultLevel}` (lowest-first) | can1357/oh-my-pi docs/models.md |
-| OpenCode | `~/.config/opencode/opencode.json` (v1/v2) | limit, capabilities/modalities, reasoning (v1) | `variants` per level (`reasoningEffort`) | https://opencode.ai/docs/models/ |
-| MimoCode | `~/.config/mimocode/mimocode.jsonc` (V1 shape) | limit, reasoning, tool_call, modalities | none verified in MimoCode docs — reasoning bool only, no invented keys | (OpenCode-fork V1 shape) |
-| Grok Build | `~/.grok/config.toml` `[model.<slot>]` | context_window, max_completion_tokens, vision/reasoning in description | none — schema has no effort field | Grok CLI docs |
-| Crush | `~/.config/crush/crush.json` | context_window (resolved; was hardcoded 128000), multi-model list | none verified — no effort field in schema | https://github.com/charmbracelet/crush/issues/2983, deepseek crush guide |
-| Zed | `settings.json` `language_models.openai_compatible` | provider config (static per zedConfig) | none — Zed drives effort itself | Zed docs |
-| Droid | `~/.factory/settings.json` | model id + maxOutputTokens | none verified | Factory docs |
-| Copilot | VSCode `chatLanguageModels.json` | vision/maxOutputTokens (static) | none — provider-level only | VSCode docs |
-| Hermes | `~/.hermes/config.yaml` (+`.env`) | `providers.afrouter.models.<id>.context_length` + `.supports_vision` (per model, multi-model additive list); slots reference `provider: custom:afrouter` | none — schema has no per-model ladder field. `agent.reasoning_overrides` is one effort per model and our resolver's `defaultLevel` is the *strongest* level, so writing it would silently inflate reasoning-token cost; omitted (`reasoning_effort: medium` is the documented chat_completions default) | https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models, /docs/integrations/providers
-| Claude, Cline, CodeWhale, Forge, JCode, OpenClaw, Smelt, WorkBuddy, DeepSeek TUI, Cowork, Devin | various (id/baseUrl/key only or detect-only) | id/baseUrl/key only | none — no per-model effort field in schema (Cline's effort controls are provider-level UI, not config) | per-tool docs (see research notes in PR) |
+| Codex | `$CODEX_HOME/config.toml` + `afrouter-models.json` (default `~/.codex`) | `model`, `model_provider`, provider table, catalog with `context_window`, `supported_reasoning_levels` | `default_reasoning_level` + `supported_reasoning_levels`; OpenAI vocabulary incl. `max`, `ultra` (open string) | codex-rs `protocol/src/openai_models.rs` |
+| Crush | `$CRUSH_GLOBAL_CONFIG/crush.json`, else `$XDG_CONFIG_HOME/crush/crush.json` | `providers.afrouter` + full catwalk model (`context_window`, `default_max_tokens`, `can_reason`, `supports_attachments`, `cost_per_1m_*`) | `reasoning_levels` + `default_reasoning_effort`; left out for toggle-only/non-reasoning | charmbracelet/catwalk `pkg/catwalk/provider.go` |
+| Zed | `%APPDATA%\Zed\settings.json` (Win), `~/.config/zed` (mac/Linux, XDG/FLATPAK) | `language_models.openai_compatible` model objects | `reasoning_effort`: none\|minimal\|low\|medium\|high\|xhigh\|max | crates/settings_content `language_model.rs` |
+| Copilot | VSCode `…/Code/User/chatLanguageModels.json` | `vendor: customendpoint`, `apiType`, per-model `maxInputTokens`, `maxOutputTokens`, `vision`, `thinking` | `supportsReasoningEffort` (array) | microsoft/vscode-docs language-models |
+| Droid | `~/.factory/settings.json` (`%USERPROFILE%\.factory`) | `customModels[]` with `provider: generic-chat-completion-api`, `maxOutputTokens`, `noImageSupport`, top-level `model` | none (top-level `reasoningEffort` is provider-level) | docs.factory.ai/model-independence/byok |
+| OpenClaw | `$OPENCLAW_HOME/$OPENCLAW_CONFIG_PATH` else `~/.openclaw/openclaw.json` (JSON5) | `models.providers.afrouter` models + `agents.entries` overrides + per-agent `models.json` | `thinkingLevelMap`; `agents.defaults.thinkingDefault` | openclaw `src/config/zod-schema.core.ts` |
+| WorkBuddy | `~/.workbuddy-ai/models.json` preferred, else `~/.workbuddy/models.json` | `models[]` with `maxInputTokens`, `maxOutputTokens`, `supportsImages`, `supportsReasoning` | `reasoning.supportedEfforts` (+`defaultEffort`) | codebuddy.ai/docs/cli/models |
+| OMP | agent dir `$PI_CODING_AGENT_DIR`/`~/.omp/agent`: `models.yml`\|`models.yaml`, `config.yml`\|`config.yaml` | provider `models[]` id/name/input/contextWindow/maxTokens/reasoning | `thinking: {mode: effort, efforts, defaultLevel, requiresEffort}`; lowest-first | can1357/oh-my-pi docs/models.md |
+| DeepSeek Harness | `$DSH_HOME/profiles/<web\|desktop>/cordis.patch.yml` | contextWindow, input, `reasoningEfforts` (no guessed maxTokens) | display→wire map, `none`→`off: null`; dsh levels off..max (`ultra`→max) | dsh `packages/llm/llm-pi-ai/src/catalog.ts` |
+| DeepSeek TUI / CodeWhale | `$CODEWHALE_CONFIG_PATH` else `~/.codewhale/config.toml` (legacy `~/.deepseek`) | `[providers.afrouter]` kind/base_url/api_key/model/context_window, `provider`, `default_text_model` | none documented | codewhale-hq/Codewhale docs/CONFIGURATION.md |
+| MiMoCode | `$MIMOCODE_HOME/config/mimocode.jsonc`, else `$XDG_CONFIG_HOME/mimocode/mimocode.jsonc` | V1 provider: `limit`, `reasoning`, `tool_call`, `modalities` | `variants` map (`reasoningEffort`) | mimo.xiaomi.com/mimocode (config-overrides) |
+| OpenCode | `$OPENCODE_CONFIG`, else `$XDG_CONFIG_HOME/opencode/opencode.{json,jsonc}` | V1 or V2 provider + subagent | V1 `variants` map / V2 `variants[]` (`reasoningEffort`) | opencode.ai/docs/models |
+| jcode | `~/.jcode/config.toml`; env file in `dirs::config_dir()/jcode` (`$JCODE_HOME`) | `providers.afrouter` + `[[providers.afrouter.models]]` (context_window, reasoning, reasoning_effort, input) + `[provider]` | `reasoning_effort` | 1jehuang/jcode `jcode-config-types` |
+| Grok Build | `$GROK_HOME/config.toml` (default `~/.grok`) | one `[model.<id>]` per model + `[models] default` | `supports_reasoning_effort` + `reasoning_effort`; `[models].default_reasoning_effort` (low\|medium\|high) | docs.x.ai/build/settings/reference |
+| Kilo | `$KILO_CONFIG`/`$KILO_CONFIG_DIR` else `$XDG_CONFIG_HOME/kilo/kilo.jsonc` | OpenCode V1 `provider.afrouter` + `model` | V1 `variants` map | kilo.ai/docs/getting-started/settings |
+| Cline | `$CLINE_DATA_DIR`/`$CLINE_DIR` else `~/.cline/data/settings/providers.json` | `providers.openai-compatible` settings (baseUrl kept with `/v1`) | none documented | docs.cline.bot/getting-started/config |
+| Smelt | `$XDG_CONFIG_HOME/smelt/init.lua` | managed `provider.register("afrouter", ...)` Lua block | none (effort not in provider register) | leonardcser.github.io/smelt |
+| Forge | `$FORGE_CONFIG` → `~/forge` → `~/.forge` `.forge.toml` | `[[providers]]` afrouter + `[session]` | none | tailcallhq/forgecode `forge_config/src/reader.rs` |
+| Hermes | `$HERMES_HOME` else `~/.hermes` (POSIX) / `%LOCALAPPDATA%\hermes` (Win) | `providers.afrouter.models.<id>.context_length` + `.supports_vision`, slots `provider: custom:afrouter` | none — no per-model ladder; `agent.reasoning_overrides` omitted to avoid inflating cost | hermes-agent.nousresearch.com docs |
+| ZCode | `$ZCODE_DATA_BASE_DIR/.zcode/v2/{config.json,provider_config.json}` | limit/modalities + Personal `providerModelRules` | ZCode values (`disabled`/`enabled`/levels) | zai-org/ZCode provider-config codec |
+| Pi | `$PI_CODING_AGENT_DIR` (`~` expanded) else `~/.pi/agent/models.json` | contextWindow, maxTokens, input, reasoning | `thinkingLevelMap` (identity; `off` hides when no-disable) | pi.dev/docs/latest/models |
+| Cowork | Claude-3p `configLibrary/<id>.json` (`~/.config/Claude-3p`, `%LOCALAPPDATA%\Claude-3p`) | `inferenceProvider`, `inferenceGateway*`, `inferenceModels`, `managedMcpServers` | per-model `maxEffort` (low\|medium\|high\|xhigh\|max) + `supports1m` | claude.com/docs/third-party/claude-desktop |
 
-Re-Apply semantics: Pi/OMP/OpenCode/MimoCode/Crush/DSH refresh specs for models
+Tools that carry only an id/base URL/key (no per-model effort field in their
+schema) are not listed individually: Claude (env vars), Devin (local ACP binary),
+continue/roo/amp/qwen/cursor/opendesign (guide-only), Antigravity/Kiro (MITM
+model-mapping lists).
+
+### Kiro MITM mapping list
+
+Kiro has no fallback: a MITM slot whose id is not in the Kiro provider registry
+never maps, so the request bypasses AFRouter. `MITM_TOOLS.kiro.defaultModels`
+must therefore be a subset of `open-sse/providers/registry/kiro.js` (pseudo-ids
+`auto` and `simple-task` excepted). GPT-5.6 multipliers/context match
+kiro.dev/docs/models (Sol 4.4x, Terra 2.2x, Luna 0.6x, 1M context).
+
+Re-Apply semantics: Pi/OMP/OpenCode/MiMoCode/Crush/DSH refresh specs for models
 already written (additive merge overwrites owned entries — idempotent). ZCode
 config.json preserves reasoning variants on existing entries by design (FR-005,
 user-tuned); the Personal layer rebuilds rules from the resolver (manual-rule
