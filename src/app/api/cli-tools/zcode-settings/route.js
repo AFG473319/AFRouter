@@ -26,7 +26,10 @@ const PROVIDER_NAME = "AFRouter";
 // the static registry (FR-006) — written with specs flagged "unverified".
 const FALLBACK_SPECS = { context: 200000, output: 32000, input: ["text"] };
 
-const getConfigPath = () => path.join(os.homedir(), ".zcode", "v2", "config.json");
+const getConfigPath = () => {
+  const baseDir = process.env.ZCODE_DATA_BASE_DIR?.trim() || os.homedir();
+  return path.join(baseDir, ".zcode", "v2", "config.json");
+};
 
 // Safe config read: ENOENT -> { installed: false }; unparseable -> { corrupt: true }.
 // Never throws to the handler — the UI must never see a 500 for a bad user file (SC-004).
@@ -308,23 +311,27 @@ export async function POST(request) {
     }
 
     const result = await readConfig();
-    if (result.corrupt || result.notInstalled) {
-      return NextResponse.json({ success: false, error: "ZCode config is missing or unreadable — fix or restore it before applying" }, { status: 409 });
+    if (result.corrupt) {
+      return NextResponse.json({ success: false, error: "ZCode config.json is unreadable — fix or restore it before applying" }, { status: 409 });
     }
-    // The Personal layer file is what ZCode 3.14+ actually reads. A
-    // corrupt one makes ZCode run an empty layer, so refuse before
-    // touching either file (mirrors the config.json 409 above).
+    // ZCode 3.14+ installs may carry only provider_config.json (the Personal layer
+    // it actually reads), with no legacy config.json yet. That is a valid state:
+    // start from an empty document rather than refusing with a 409.
     const personalResult = await readPersonalConfig();
     if (personalResult.corrupt) {
       return NextResponse.json({ success: false, error: "ZCode personal provider config (provider_config.json) is missing or unreadable — fix or restore it before applying" }, { status: 409 });
     }
+    if (result.notInstalled && !personalResult.present) {
+      return NextResponse.json({ success: false, error: "ZCode config is missing — install ZCode or restore its config first" }, { status: 409 });
+    }
 
-    const config = result.data;
+    const config = result.notInstalled ? {} : result.data;
     if (!config || typeof config !== "object" || !config.provider || typeof config.provider !== "object") {
       config.provider = {};
     }
 
-    const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
+    const trimmedBaseUrl = String(baseUrl).trim().replace(/\/+$/, "");
+    const normalizedBaseUrl = trimmedBaseUrl.endsWith("/v1") ? trimmedBaseUrl : `${trimmedBaseUrl}/v1`;
     const catalog = await resolveLiveCatalog(resolveSelfOrigin(request));
     const { specs, unverified } = await resolveModelSpecs(modelsArray, catalog);
 

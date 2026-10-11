@@ -599,7 +599,7 @@ amp config model-providers check-access --provider-model {{model}}
     notes: [
       {
         type: "info",
-        text: "AFRouter writes an AFRouter provider entry into ~/.zcode/v2/config.json so ZCode's model picker offers AFRouter models.",
+        text: "AFRouter writes an AFRouter provider entry into ~/.zcode/v2/config.json AND the Personal layer ~/.zcode/v2/provider_config.json. On ZCode 3.14+ the Personal provider_config.json is the file that actually drives the model picker, and it hot-reloads.",
       },
       {
         type: "info",
@@ -607,11 +607,11 @@ amp config model-providers check-access --provider-model {{model}}
       },
       {
         type: "warning",
-        text: "Config path: Linux/macOS ~/.zcode/v2/config.json • Windows %USERPROFILE%\\.zcode\\v2\\config.json",
+        text: "Paths honour ZCODE_DATA_BASE_DIR: <base>/.zcode/v2/{config.json,provider_config.json} (default base is your home). Linux/macOS ~/.zcode/v2 · Windows %USERPROFILE%\\.zcode\\v2\\.",
       },
       {
         type: "warning",
-        text: "ZCode loads its config at session start — restart ZCode after Apply if it is running.",
+        text: "config.json is read when ZCode starts; provider_config.json hot-reloads. Restart ZCode after Apply if it is running.",
       },
     ],
   },

@@ -8,6 +8,7 @@ import path from "path";
 import os from "os";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
+import { parseConfigText, readConfig as readConfigFile } from "@/lib/cliConfigIO.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 import { readOwnership, writeOwnership } from "@/lib/piModelOwnership.js";
 import {
@@ -27,28 +28,30 @@ import {
 const execAsync = promisify(exec);
 
 // Pi resolves the agent dir from $PI_CODING_AGENT_DIR and otherwise uses
-// ~/.pi/agent. Resolved per call so the test suite can redirect it.
+// ~/.pi/agent. Resolved per call so the test suite can redirect it. A leading
+// `~` in the env var is expanded, since Pi's own docs use `~/...` paths.
+const expandHome = (value) => {
+  const raw = String(value || "");
+  if (raw === "~") return os.homedir();
+  if (raw.startsWith("~/") || raw.startsWith("~\\")) return path.join(os.homedir(), raw.slice(2));
+  return raw;
+};
+
 const getAgentDir = () =>
-  process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+  expandHome(process.env.PI_CODING_AGENT_DIR) || path.join(os.homedir(), ".pi", "agent");
 
 const getModelsPath = () => path.join(getAgentDir(), PI_MODELS_FILE);
 const getSettingsPath = () => path.join(getAgentDir(), PI_SETTINGS_FILE);
 
-// Safe JSON read: missing -> { missing: true }; unparseable -> { corrupt: true }.
-// Never throws to the handler — the UI must never see a 500 for a bad user file.
-// A file that parses but is not a JSON object (an array, a bare string) is
-// corrupt too: treating it as `{}` would silently overwrite whatever the user
-// actually had there.
+// Safe read through the shared JSON parser: it strips a BOM and tolerates
+// comments/trailing commas, and reports a parse failure as corrupt so the file is
+// never overwritten. A document that parses but is not a JSON object (an array, a
+// bare string) is corrupt too: treating it as {} would overwrite the user's file.
 const readJson = async (filePath) => {
-  let raw;
+  const { exists, raw } = await readConfigFile(filePath, "json");
+  if (!exists) return { missing: true };
   try {
-    raw = await fs.readFile(filePath, "utf-8");
-  } catch (error) {
-    if (error.code === "ENOENT") return { missing: true };
-    return { corrupt: true };
-  }
-  try {
-    const data = JSON.parse(raw);
+    const data = parseConfigText(raw, "json", path.basename(filePath));
     if (!data || typeof data !== "object" || Array.isArray(data)) return { corrupt: true };
     return { data };
   } catch {
