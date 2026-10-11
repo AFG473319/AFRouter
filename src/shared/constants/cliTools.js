@@ -10,7 +10,7 @@ export const MITM_TOOLS = {
     description: "Google Antigravity IDE with MITM",
     configType: "mitm",
     mitmDomain: "daily-cloudcode-pa.googleapis.com",
-    modelAliases: ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low", "gemini-3.7-flash-high", "gemini-3.7-flash-medium", "gemini-3.7-flash-low", "gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low", "gemini-3.5-flash-low", "gemini-3-flash-agent", "gemini-3.5-flash-extra-low", "gemini-3.1-pro-low", "gemini-pro-agent", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium", "gemini-3-flash"],
+    modelAliases: ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low", "gemini-3.7-flash-high", "gemini-3.7-flash-medium", "gemini-3.7-flash-low", "gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low", "gemini-3.1-pro-low", "gemini-pro-agent", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium", "gemini-3-flash"],
     defaultModels: [
       { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", alias: "gemini-3.8-flash-high" },
       { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", alias: "gemini-3.8-flash-medium" },
@@ -21,14 +21,12 @@ export const MITM_TOOLS = {
       { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)", alias: "gemini-3.6-flash-high" },
       { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)", alias: "gemini-3.6-flash-medium" },
       { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)", alias: "gemini-3.6-flash-low" },
-      { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Medium) / Default", alias: "gemini-3.5-flash-low", mandatory: true },
-      { id: "gemini-3-flash-agent", name: "Gemini 3.5 Flash (High)", alias: "gemini-3-flash-agent" },
-      { id: "gemini-3.5-flash-extra-low", name: "Gemini 3.5 Flash (Low)", alias: "gemini-3.5-flash-extra-low" },
       { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", alias: "gemini-3.1-pro-low" },
       { id: "gemini-pro-agent", name: "Gemini 3.1 Pro (High)", alias: "gemini-pro-agent" },
-      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", alias: "claude-sonnet-4-6" },
-      { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", alias: "claude-opus-4-6-thinking" },
-      { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", alias: "gpt-oss-120b-medium" },
+      // Retiring on Antigravity 2026-11-02.
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking) — retires 2026-11-02", alias: "claude-sonnet-4-6" },
+      { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking) — retires 2026-11-02", alias: "claude-opus-4-6-thinking" },
+      { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium) — retires 2026-11-02", alias: "gpt-oss-120b-medium" },
       { id: "gemini-3-flash", name: "Gemini 3 Flash (Command)", alias: "gemini-3-flash" },
     ],
   },
@@ -577,15 +575,15 @@ amp config model-providers check-access --provider-model {{model}}
     notes: [
       {
         type: "info",
-        text: "Grok Build uses ~/.grok/config.toml. AFRouter writes a [model.afrouter] custom model and sets it as the default.",
+        text: "Grok Build reads $GROK_HOME/config.toml (default ~/.grok). AFRouter writes one [model.<id>] table per selected model (not a single [model.afrouter]) plus [models] default, with context_window, max_completion_tokens, supports_reasoning_effort and reasoning_effort resolved from the model's real specs.",
       },
       {
         type: "info",
-        text: "After Apply, run grok (or /model afrouter) to use the routed model. Switch back anytime with /model grok-build.",
+        text: "After Apply, run grok (or /model <slot>) to use the routed model. Switch back anytime with /model grok-build.",
       },
       {
         type: "warning",
-        text: "Config path: Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml",
+        text: "Config path: $GROK_HOME/config.toml (default Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml).",
       },
     ],
   },
@@ -677,7 +675,9 @@ amp config model-providers check-access --provider-model {{model}}
     configType: "guide",
     installUrl: "https://cli.devin.ai",
     notes: [
-      { type: "info", text: "This is a local dependency, not a routed CLI. The Devin CLI provider spawns `devin acp --agent-type summarizer` and relays its output." },
+      { type: "info", text: "This is a local dependency, not a routed CLI. The Devin CLI provider spawns `devin acp` and relays its output." },
+      { type: "warning", text: "It runs the FULL agent in bypass mode by default (DEVIN_PERMISSION_MODE=bypass), so it auto-approves shell commands and file edits. Run it locally only, or set CLI_DEVIN_AGENT_TYPE=summarizer for a tool-less, text-only mode." },
+      { type: "info", text: "AFRouter does not inject WINDSURF_API_KEY — that would override the credentials stored by `devin auth login` and make devin reject the request." },
       { type: "warning", text: "Install the Devin CLI and run `devin auth login` — without it, the provider returns a spawn error on first request." },
     ],
     guideSteps: [
