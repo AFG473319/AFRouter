@@ -7,9 +7,13 @@
 // default. Accepts either the dsh spec shape (`maxTokens`) or raw capability
 // tables (`maxOutput`).
 
+// dsh's accepted thinking vocabulary (packages/llm/llm-pi-ai/src/catalog.ts
+// THINKING_LEVELS): off | minimal | low | medium | high | xhigh | max. `ultra`
+// is not a dsh level, so it maps down to `max` rather than being sent verbatim.
+const DSH_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 export const FALLBACK_SPEC = Object.freeze({
   contextWindow: 200000,
-  maxTokens: 32000,
   vision: false,
   reasoning: false,
 });
@@ -21,8 +25,12 @@ export const buildModelEntry = (id, spec = {}, compat = null) => {
     id,
     name: spec.name || id,
     contextWindow: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : FALLBACK_SPEC.contextWindow,
-    maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : FALLBACK_SPEC.maxTokens,
   };
+  // maxTokens is OPTIONAL in dsh and, when written, becomes a HARD per-request
+  // output cap (docs: "Configuring one also makes it this model's per-request
+  // default"). A guessed value would therefore cap real responses, so it is
+  // written only when a verified spec supplies one.
+  if (Number.isFinite(maxTokens) && maxTokens > 0) entry.maxTokens = maxTokens;
   if (spec.vision) entry.input = ["text", "image"];
   if (spec.reasoning) {
     entry.reasoningEfforts = buildReasoningEfforts(spec.reasoningLevels ?? spec.reasoningEfforts);
@@ -41,16 +49,22 @@ export const buildModelEntry = (id, spec = {}, compat = null) => {
 // historical conservative default. When the set IS known — discovered from
 // models.dev or declared by the registry — declaring anything else would send a
 // level the model may reject, so the map is built from the real vocabulary:
-// `none` becomes the `off: null` disable, and every other level maps to itself.
+// `none` becomes the `off: null` disable, every other level maps to itself, and
+// a level dsh does not know (`ultra`) maps onto its nearest known level (`max`).
 export const buildReasoningEfforts = (levels) => {
   if (!Array.isArray(levels) || levels.length === 0) {
-    return { off: null, low: "low", medium: "medium", high: "high", max: "max" };
+    return { off: null, minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
   }
   const efforts = {};
   if (levels.includes("none")) efforts.off = null;
   for (const level of levels) {
     if (level === "none") continue;
-    efforts[level] = level;
+    if (level === "ultra") {
+      // sentinel: ultra is expressed as max on the dsh wire
+      efforts.ultra = "max";
+      continue;
+    }
+    if (DSH_LEVELS.includes(level)) efforts[level] = level;
   }
   return efforts;
 };

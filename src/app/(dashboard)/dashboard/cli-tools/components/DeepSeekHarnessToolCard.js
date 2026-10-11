@@ -85,6 +85,19 @@ export default function DeepSeekHarnessToolCard({
   const [reasoningEffort, setReasoningEffort] = useState("");
   const selectedModelsRef = useRef([]);
 
+  // Only the levels the pinned model actually declares are offered: dsh rejects
+  // an effort the model does not support, so a fixed off..max list would let the
+  // card save something the model cannot run.
+  const availableEfforts = (() => {
+    if (!defaultModel) return [];
+    const caps = resolveCaps(defaultModel);
+    const entry = buildModelEntry(defaultModel, caps);
+    const map = entry.reasoningEfforts;
+    if (!map || typeof map !== "object") return [];
+    // `off` is the disable sentinel and is only offered when the model can disable.
+    return Object.keys(map).filter((level) => level !== "off" || map.off === null);
+  })();
+
   useEffect(() => {
     selectedModelsRef.current = selectedModels;
   }, [selectedModels]);
@@ -533,15 +546,12 @@ refs:
                           onChange={(e) => setReasoningEffort(e.target.value)}
                           className="px-2 py-1 rounded border border-border bg-surface text-xs text-text-main"
                         >
-                          {/* pi-ai's thinking levels (THINKING_LEVELS in dsh-llm-pi-ai). */}
+                          {/* Only the levels the selected model actually declares
+                              (dsh rejects an effort the model does not support). */}
                           <option value="">Default effort</option>
-                          <option value="off">off</option>
-                          <option value="minimal">minimal</option>
-                          <option value="low">low</option>
-                          <option value="medium">medium</option>
-                          <option value="high">high</option>
-                          <option value="xhigh">xhigh</option>
-                          <option value="max">max</option>
+                          {availableEfforts.map((level) => (
+                            <option key={level} value={level}>{level}</option>
+                          ))}
                         </select>
                       </div>
                     )}
