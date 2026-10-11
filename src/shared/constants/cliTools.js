@@ -489,8 +489,8 @@ amp config model-providers check-access --provider-model {{model}}
       { id: "deepseek-chat", name: "DeepSeek V3 Chat", alias: "deepseek-chat" },
     ],
     notes: [
-      { type: "info", text: "DeepSeek TUI uses ~/.deepseek/config.toml for configuration. AFRouter will update the provider to 'openai' mode with your base_url, api_key, and model." },
-      { type: "warning", text: "Config path: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml" },
+      { type: "info", text: "DeepSeek TUI was renamed to CodeWhale. CodeWhale reads ~/.codewhale/config.toml and migrates ~/.deepseek once on first launch, so AFRouter writes the CodeWhale file: [providers.afrouter] (kind openai-compatible, base_url, api_key, model, context_window) plus root provider/default_text_model." },
+      { type: "warning", text: "Config path: $CODEWHALE_CONFIG_PATH, else ~/.codewhale/config.toml (legacy ~/.deepseek/config.toml is still read when the new file is absent). Reset removes only the afrouter entry." },
     ],
   },
   "deepseek-harness": {
