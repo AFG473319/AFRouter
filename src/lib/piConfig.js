@@ -244,10 +244,11 @@ export const removePiProvider = (models, modelId = null) => {
   if (!isObject(providers) || !isObject(providers[PI_PROVIDER_ID])) {
     return { models: next, removed: 0, entryRemoved: false };
   }
-  const dropEntry = () => {
-    delete providers[PI_PROVIDER_ID];
-    if (Object.keys(providers).length === 0) delete next.providers;
-  };
+  // Pi's schema requires the top-level `providers` object to exist, so reset keeps
+// an empty one rather than deleting the key.
+const dropEntry = () => {
+  delete providers[PI_PROVIDER_ID];
+};
 
   if (!modelId) {
     const before = Array.isArray(providers[PI_PROVIDER_ID].models)

@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { DEFAULT_PLUGINS, LOCAL_STDIO_PLUGINS, buildManagedMcpServers } from "@/shared/constants/coworkPlugins";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { specForCli } from "@/lib/cliModelSpec.js";
 
 const APP_PORT = UPDATER_CONFIG.appPort;
 const CLI_TOKEN_HEADER = "x-afr-cli-token";
@@ -32,6 +33,24 @@ const injectAuthHeaders = async (entries) => {
 };
 
 const PROVIDER = "gateway";
+
+// One inferenceModels entry (claude.com/docs/third-party/claude-desktop/models):
+// `name` is the model id and `maxEffort` caps the Effort control for that model
+// (low|medium|high|xhigh|max — Desktop caps at `low` for an unrecognised value).
+// `supports1m` adds the 1M-context variant, so it is set only for a model whose
+// resolved context window is at least 1M.
+const COWORK_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+const buildInferenceModel = (name) => {
+  const spec = specForCli(name);
+  const entry = { name };
+  const levels = Array.isArray(spec.levels) ? spec.levels : [];
+  const cap = levels.filter((level) => COWORK_EFFORTS.includes(level)).at(-1);
+  if (cap) entry.maxEffort = cap;
+  const contextWindow = Math.floor(Number(spec.contextWindow));
+  if (Number.isFinite(contextWindow) && contextWindow >= 1000000) entry.supports1m = true;
+  return entry;
+};
 
 // Hardcoded relax-security profile applied on every Apply.
 const SECURITY_RELAX = {
@@ -138,6 +157,37 @@ const bootstrapDeploymentMode = async () => {
   cfg.deploymentMode = "3p";
   await write1pConfig(cfg);
   return true;
+};
+
+// On Reset, put deploymentMode back to what it was before we forced "3p", so a
+// reset does not leave the desktop app pinned in third-party mode. The prior
+// value is recorded beside the applied config.
+const DE_DEPLOYMENT_MODE = "afrouter-previous-deploymentMode";
+// Read the deploymentMode BEFORE we force it to "3p", so Reset can restore it.
+const readDeploymentMode = async () => {
+  const cfg = await read1pConfig();
+  return Object.prototype.hasOwnProperty.call(cfg, "deploymentMode") ? cfg.deploymentMode : null;
+};
+const rememberDeploymentMode = async (configPath, previous) => {
+  const sidecar = `${configPath}.afrouter.json`;
+  await fs.mkdir(path.dirname(sidecar), { recursive: true });
+  await fs.writeFile(sidecar, JSON.stringify({ [DE_DEPLOYMENT_MODE]: previous }, null, 2));
+};
+const restoreDeploymentMode = async (configPath) => {
+  const sidecar = `${configPath}.afrouter.json`;
+  let previous;
+  try {
+    const parsed = JSON.parse(await fs.readFile(sidecar, "utf-8"));
+    if (!Object.prototype.hasOwnProperty.call(parsed, DE_DEPLOYMENT_MODE)) return;
+    previous = parsed[DE_DEPLOYMENT_MODE];
+  } catch {
+    return;
+  }
+  const cfg = await read1pConfig();
+  if (previous === null || previous === undefined) delete cfg.deploymentMode;
+  else cfg.deploymentMode = previous;
+  await write1pConfig(cfg);
+  try { await fs.rm(sidecar, { force: true }); } catch { /* ignore */ }
 };
 
 // Remove any legacy stdio entries previously written into 1p claude_desktop_config.json.
@@ -330,16 +380,18 @@ export async function POST(request) {
     const customEntries = await injectAuthHeaders(buildCustomEntries(customPluginsArray));
     const managedMcpServers = [...buildManagedMcpServers(pluginsArray), ...bridgeEntries, ...customEntries];
 
+    const previousDeploymentMode = await readDeploymentMode();
     const bootstrapped = await bootstrapDeploymentMode();
     const meta = await ensureMeta();
     const configPath = path.join(getWriteConfigDir(), `${meta.appliedId}.json`);
+    if (bootstrapped) await rememberDeploymentMode(configPath, previousDeploymentMode);
 
     const newConfig = {
       ...SECURITY_RELAX,
       inferenceProvider: PROVIDER,
       inferenceGatewayBaseUrl: baseUrl,
       inferenceGatewayApiKey: apiKey,
-      inferenceModels: modelsArray.map((name) => ({ name })),
+      inferenceModels: modelsArray.map(buildInferenceModel),
     };
     if (managedMcpServers.length > 0) newConfig.managedMcpServers = managedMcpServers;
 
@@ -378,6 +430,7 @@ export async function DELETE() {
     try { await fs.writeFile(configPath, JSON.stringify({}, null, 2)); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
     try { await writeSkipApprovals([]); } catch { /* ignore */ }
+    try { await restoreDeploymentMode(configPath); } catch { /* ignore */ }
     try { await cleanup1pLegacy(); } catch { /* ignore */ }
     return NextResponse.json({ success: true, message: "Cowork config reset" });
   } catch (error) {

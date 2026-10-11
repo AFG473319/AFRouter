@@ -13,10 +13,18 @@ export function buildCodexCatalog(models, specs = {}) {
     models: models.map((id, index) => {
       const spec = specs[id] || {};
       const contextWindow = Number.isSafeInteger(spec.contextWindow) && spec.contextWindow > 0 ? spec.contextWindow : 128000;
-      const efforts = [...new Set((Array.isArray(spec.reasoningEfforts) ? spec.reasoningEfforts : []).filter((effort) => ["none", "minimal", "low", "medium", "high", "xhigh"].includes(effort)))];
-      if (efforts.length === 0) efforts.push(spec.reasoning === true ? "medium" : "none");
-      const defaultEffort = efforts.includes("medium") ? "medium" : efforts[0];
-      return {
+      const isReasoning = spec.reasoning === true;
+      // Codex ReasoningEffort is an open string (codex-rs/protocol/src/openai_models.rs):
+      // none|minimal|low|medium|high|xhigh|max|ultra|persistent are named variants and
+      // anything else falls through to Custom(String). Pass the resolved ladder through
+      // verbatim rather than re-whitelisting it.
+      const efforts = [...new Set((Array.isArray(spec.reasoningEfforts) ? spec.reasoningEfforts : []).filter((effort) => typeof effort === "string" && effort.length > 0))];
+      // No invented "medium" for a reasoning model with no ladder, and no effort at all
+      // for a non-reasoning model: the catalog key is the ONLY source of the wire
+      // reasoning.effort, and omitting it makes Codex drop the whole `reasoning` object.
+      const specDefault = isReasoning ? (spec.defaultReasoningEffort || spec.defaultLevel) : undefined;
+      const defaultEffort = specDefault || (isReasoning && efforts.includes("medium") ? "medium" : undefined);
+      const entry = {
         slug: id,
         display_name: `AFRouter / ${spec.name || id}`,
         description: `Routed through AFRouter: ${id}`,
@@ -28,10 +36,10 @@ export function buildCodexCatalog(models, specs = {}) {
         auto_compact_token_limit: Math.floor(contextWindow * 0.9),
         effective_context_window_percent: 95,
         input_modalities: spec.vision === true ? ["text", "image"] : ["text"],
-        default_reasoning_level: defaultEffort,
-        supported_reasoning_levels: efforts.map((effort) => ({ effort, description: effort })),
-        supports_reasoning_summaries: false,
-        supports_parallel_tool_calls: false,
+        // Real ModelInfo gates. `supports_reasoning_summaries` is read by no Codex
+        // release and `supports_parallel_tool_calls` is a request-level field, not a
+        // catalog one; the actual summary parameter defaults to true.
+        supports_reasoning_summary_parameter: isReasoning && spec.reasoningSummary !== false,
         support_verbosity: false,
         supports_search_tool: false,
         shell_type: "shell_command",
@@ -42,6 +50,11 @@ export function buildCodexCatalog(models, specs = {}) {
         truncation_policy: { mode: "tokens", limit: Math.min(10000, Math.floor(contextWindow / 10)) },
         base_instructions: "You are a coding assistant. Follow the user's instructions and repository guidance. Use available tools to inspect, edit, and verify code. Report results accurately.",
       };
+      if (defaultEffort) entry.default_reasoning_level = defaultEffort;
+      if (isReasoning && efforts.length > 0) {
+        entry.supported_reasoning_levels = efforts.map((effort) => ({ effort, description: effort }));
+      }
+      return entry;
     }),
   };
 }

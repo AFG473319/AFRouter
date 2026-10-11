@@ -35,6 +35,26 @@ const getAgentDir = () =>
 const getModelsPath = () => path.join(getAgentDir(), OMP_MODELS_FILE);
 const getConfigPath = () => path.join(getAgentDir(), OMP_CONFIG_FILE);
 
+// OMP loads models.yml, then models.yaml, and migrates models.json only when
+// BOTH YAMLs are missing (can1357/oh-my-pi docs/models.md "Config file location
+// and legacy behavior"). Creating models.yml while a user's models.yaml exists
+// would hide that file, so an existing YAML of either spelling is edited in
+// place. Same rule for config.yml / config.yaml.
+const pickExisting = async (dir, names) => {
+  for (const name of names) {
+    try {
+      await fs.access(path.join(dir, name));
+      return path.join(dir, name);
+    } catch {
+      /* try next */
+    }
+  }
+  return path.join(dir, names[0]);
+};
+
+const resolveModelsPath = () => pickExisting(getAgentDir(), ["models.yml", "models.yaml"]);
+const resolveConfigPath = () => pickExisting(getAgentDir(), ["config.yml", "config.yaml"]);
+
 /**
  * Safe YAML read: missing -> { missing: true }; unparseable -> { corrupt: true }.
  * Never throws to the handler — the UI must never see a 500 for a bad user file.
@@ -111,7 +131,8 @@ const npmPathEnv = () => {
  * not configured", not "not installed".
  */
 const checkInstalled = async () => {
-  for (const candidate of [getAgentDir(), getModelsPath(), getConfigPath()]) {
+  const dir = getAgentDir();
+  for (const candidate of [dir, path.join(dir, OMP_MODELS_FILE), path.join(dir, OMP_CONFIG_FILE)]) {
     try {
       await fs.access(candidate);
       return true;
@@ -242,7 +263,7 @@ const resolveModelSpecs = async (ids, catalog) => {
  */
 const classifyOwnership = async (models) => {
   const ids = readOmpModelIds(models);
-  const { known, models: recorded } = await readOwnership(getModelsPath());
+  const { known, models: recorded } = await readOwnership(await resolveModelsPath());
   if (known) {
     const ownedSet = new Set(recorded);
     const owned = ids.filter((id) => ownedSet.has(id));
@@ -256,8 +277,8 @@ const classifyOwnership = async (models) => {
 export async function GET(request) {
   try {
     const installed = await checkInstalled();
-    const configPath = getModelsPath();
-    const settingsPath = getConfigPath();
+    const configPath = await resolveModelsPath();
+    const settingsPath = await resolveConfigPath();
     if (!installed) {
       return NextResponse.json({
         installed: false,
@@ -344,7 +365,7 @@ export async function POST(request) {
       return NextResponse.json({ error: "baseUrl and at least one model are required" }, { status: 400 });
     }
 
-    const modelsPath = getModelsPath();
+    const modelsPath = await resolveModelsPath();
     const modelsResult = await readYamlDocument(modelsPath);
     if (modelsResult.corrupt) {
       return NextResponse.json(
@@ -353,7 +374,7 @@ export async function POST(request) {
       );
     }
 
-    const configPath = getConfigPath();
+    const configPath = await resolveConfigPath();
     const configResult = await readYamlDocument(configPath);
     if (configResult.corrupt) {
       return NextResponse.json(
@@ -454,7 +475,7 @@ export async function DELETE(request) {
     const { searchParams } = new URL(request.url);
     const modelToRemove = searchParams.get("model");
 
-    const modelsPath = getModelsPath();
+    const modelsPath = await resolveModelsPath();
     const modelsResult = await readYamlDocument(modelsPath);
     if (modelsResult.missing || modelsResult.corrupt) {
       return NextResponse.json({
@@ -513,7 +534,7 @@ export async function DELETE(request) {
     // Settings are only touched when a model was actually removed, so a no-op
     // DELETE is inert.
     let defaultCleared = false;
-    const configPath = getConfigPath();
+    const configPath = await resolveConfigPath();
     const configResult = await readYamlDocument(configPath);
     if (!configResult.missing && !configResult.corrupt) {
       const defaults = readOmpDefaults(configResult.data);

@@ -291,6 +291,39 @@ describe("POST", () => {
     expect(provider().models[0].reasoning).toBeUndefined();
   });
 
+  it("writes requiresEffort:false only when the model can disable thinking", async () => {
+    // codex/gpt-5.6-sol cannot disable (thinkingCanDisable: false), so the clamp
+    // must stay and the flag must be absent.
+    await post({ baseUrl: "http://x", apiKey: "k", models: ["codex/gpt-5.6-sol"] });
+    expect(provider().models[0].thinking.requiresEffort).toBeUndefined();
+    // openai/gpt-5 can disable, so OMP is told an explicit off request is safe.
+    await post({ baseUrl: "http://x", apiKey: "k", models: ["openai/gpt-5"] });
+    const gpt5 = provider().models.find((m) => m.id === "openai/gpt-5");
+    expect(gpt5.thinking.requiresEffort).toBe(false);
+  });
+
+  it("edits an existing models.yaml instead of shadowing it with models.yml", async () => {
+    fs.mkdirSync(state.agentDir, { recursive: true });
+    fs.writeFileSync(path.join(state.agentDir, "models.yaml"), YAML.stringify({ providers: {} }));
+    const res = await post({ baseUrl: "http://x", apiKey: "k", models: ["openai/gpt-4o"] });
+    expect(res.body.success).toBe(true);
+    expect(fs.existsSync(path.join(state.agentDir, "models.yaml"))).toBe(true);
+    expect(fs.existsSync(modelsPath())).toBe(false);
+    const written = parseYAML(fs.readFileSync(path.join(state.agentDir, "models.yaml"), "utf-8"));
+    expect(written.providers.afrouter.models[0].id).toBe("openai/gpt-4o");
+  });
+
+  it("edits an existing config.yaml instead of shadowing it with config.yml", async () => {
+    writeModels({ providers: {} });
+    fs.writeFileSync(path.join(state.agentDir, "config.yaml"), YAML.stringify({ modelRoles: {} }));
+    const res = await post({ baseUrl: "http://x", apiKey: "k", models: ["openai/gpt-4o"], setDefault: true });
+    expect(res.body.success).toBe(true);
+    expect(fs.existsSync(path.join(state.agentDir, "config.yaml"))).toBe(true);
+    expect(fs.existsSync(configPath())).toBe(false);
+    const written = parseYAML(fs.readFileSync(path.join(state.agentDir, "config.yaml"), "utf-8"));
+    expect(written.modelRoles.default).toContain("afrouter/openai/gpt-4o");
+  });
+
   // Regression shape: a foreign modality makes OMP's schema validation fail for
   // the ENTIRE models.yml, so it drops every custom model — not just the bad one.
   it("never writes video/pdf/audio modalities even when the catalog claims them", async () => {

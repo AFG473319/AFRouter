@@ -39,10 +39,16 @@
  * Pure module (no Node builtins) so the client-side card can import it too.
  */
 
+import { specForCli } from "@/lib/cliModelSpec.js";
+
 export const ZED_PROVIDER_ID = "afrouter";
 
 // Zed resolves the settings path per-platform.
 export const ZED_SETTINGS_FILE = "settings.json";
+
+// crates/language_model_core ReasoningEffort, serde rename_all = "lowercase".
+// Zed has no "ultra", so `ultra` is dropped instead of being renamed.
+export const ZED_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -54,35 +60,64 @@ export const normalizeBaseUrl = (baseUrl) => {
 };
 
 /**
- * One Zed model entry. Zed models are objects with metadata, not plain strings.
- * We write a conservative spec — name, display_name, max_tokens, max_output_tokens,
- * and capabilities. Zed fills in defaults for anything we omit.
+ * One Zed model entry. Zed requires `max_tokens` (the context window) on
+ * `OpenAiCompatibleAvailableModel` and reads `max_output_tokens`, `reasoning_effort`
+ * and `capabilities.*` (crates/settings_content/src/language_model.rs,
+ * crates/language_models/src/provider/open_ai_compatible.rs). ReasoningEffort is
+ * none|minimal|low|medium|high|xhigh|max.
+ *
+ * Every number comes from the shared resolver: a hardcoded 200000/64000 once made
+ * every model look like a 200k/64k text model.
  */
-export const buildModelEntry = (modelId) => ({
-  name: modelId,
-  display_name: modelId,
-  max_tokens: 200000,
-  max_output_tokens: 64000,
-  capabilities: {
-    tools: true,
-    images: false,
-    parallel_tool_calls: false,
-    prompt_cache_key: false,
-    chat_completions: true,
-    interleaved_reasoning: false,
-    max_tokens_parameter: false,
-  },
-});
+export const buildModelEntry = (modelId, spec) => {
+  const caps = spec || specForCli(modelId);
+  const contextWindow = Math.floor(Number(caps.contextWindow));
+  const maxOutput = Math.floor(Number(caps.maxOutput));
+  const levels = Array.isArray(caps.levels) ? caps.levels : [];
+  // Zed has no "ultra" variant, so a level it cannot express is dropped rather
+  // than renamed into a neighbouring one.
+  const effort = levels
+    .filter((level) => ZED_REASONING_EFFORTS.includes(level))
+    .at(-1);
+  const entry = {
+    name: modelId,
+    display_name: modelId,
+    max_tokens: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : 128000,
+    max_output_tokens: Number.isFinite(maxOutput) && maxOutput > 0 ? maxOutput : 16384,
+    capabilities: {
+      tools: caps.tools !== false,
+      images: caps.vision === true,
+      parallel_tool_calls: false,
+      prompt_cache_key: false,
+      chat_completions: true,
+      interleaved_reasoning: false,
+      max_tokens_parameter: false,
+    },
+  };
+  // Only for reasoning models: writing an effort for a non-reasoning model would
+  // make Zed request reasoning it does not support.
+  if (caps.reasoning === true) {
+    const defaultEffort = caps.defaultLevel && ZED_REASONING_EFFORTS.includes(caps.defaultLevel)
+      ? caps.defaultLevel
+      : effort;
+    if (defaultEffort) entry.reasoning_effort = defaultEffort;
+    if (typeof caps.interleavedReasoning === "boolean") {
+      entry.capabilities.interleaved_reasoning = caps.interleavedReasoning;
+    }
+  }
+  return entry;
+};
 
 /**
  * One Zed provider entry under language_models.openai_compatible.
- * `models` is an array of model ID strings.
+ * `specs` is an optional id -> resolved-spec map; without it each model is
+ * resolved from the shared resolver.
  */
-export const buildProviderEntry = ({ baseUrl, models = [] } = {}) => ({
+export const buildProviderEntry = ({ baseUrl, models = [], specs = {} } = {}) => ({
   api_url: normalizeBaseUrl(baseUrl),
   available_models: [...models]
     .filter((m) => typeof m === "string" && m)
-    .map((m) => buildModelEntry(m)),
+    .map((m) => buildModelEntry(m, isObject(specs[m]) ? specs[m] : undefined)),
 });
 
 /** The language_models section, or null when absent. */
@@ -119,12 +154,12 @@ export const readZedModelIds = (settings) => {
  * merging models additively by name. Every other provider and field is
  * preserved. A pre-existing entry keeps any field we do not own.
  */
-export const upsertZedProvider = (settings, { baseUrl, models = [] } = {}) => {
+export const upsertZedProvider = (settings, { baseUrl, models = [], specs = {} } = {}) => {
   const next = isObject(settings) ? settings : {};
   const lm = isObject(next.language_models) ? next.language_models : {};
   const oac = isObject(lm.openai_compatible) ? lm.openai_compatible : {};
   const previous = oac[ZED_PROVIDER_ID] || null;
-  const built = buildProviderEntry({ baseUrl, models });
+  const built = buildProviderEntry({ baseUrl, models, specs });
 
   const existingModels = new Map();
   if (previous && Array.isArray(previous.available_models)) {

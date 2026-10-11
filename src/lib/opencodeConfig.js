@@ -71,6 +71,16 @@ export const toV2Variants = (variants) =>
     ? Object.entries(variants).map(([id, { reasoningEffort }]) => ({ id, settings: { reasoningEffort } }))
     : undefined;
 
+/** Inverse of toV2Variants: the V2 array back to the V1 named-object map. */
+export const fromV2Variants = (variants) =>
+  Array.isArray(variants)
+    ? Object.fromEntries(
+        variants
+          .filter((v) => isObject(v) && typeof v.id === "string")
+          .map((v) => [v.id, isObject(v.settings) ? { ...v.settings } : {}]),
+      )
+    : undefined;
+
 export const buildModelEntry = (id, caps, format = DEFAULT_FORMAT) => {
   const limit = {
     context: Math.floor(caps.contextWindow),
@@ -132,11 +142,18 @@ export const reshapeModelEntry = (entry, format) => {
   if (!isObject(entry)) return entry;
   if (format === "v2") {
     // V2 dropped attachment/reasoning on models, so they are not carried over.
-    const { tool_call, modalities, attachment, reasoning, id, options, ...rest } = entry;
+    const { tool_call, modalities, attachment, reasoning, id, options, variants, ...rest } = entry;
     return {
       ...rest,
       ...(typeof id === "string" && rest.modelID === undefined ? { modelID: id } : null),
       ...(isObject(options) && rest.settings === undefined ? { settings: options } : null),
+      // V2 catalogs variants as an array of { id, settings }; a V1 map must be
+      // converted on the way in, or OpenCode warns and drops the ladder.
+      ...(Array.isArray(variants)
+        ? { variants }
+        : isObject(variants)
+          ? { variants: toV2Variants(variants) }
+          : null),
       capabilities: isObject(entry.capabilities)
         ? entry.capabilities
         : {
@@ -147,7 +164,7 @@ export const reshapeModelEntry = (entry, format) => {
     };
   }
 
-  const { capabilities: rawCapabilities, modelID, settings, ...rest } = entry;
+  const { capabilities: rawCapabilities, modelID, settings, variants, ...rest } = entry;
   const capabilities = isObject(rawCapabilities) ? rawCapabilities : null;
   const input = Array.isArray(capabilities?.input) ? capabilities.input : ["text"];
   const output = Array.isArray(capabilities?.output) ? capabilities.output : ["text"];
@@ -155,6 +172,12 @@ export const reshapeModelEntry = (entry, format) => {
     ...rest,
     ...(typeof modelID === "string" && rest.id === undefined ? { id: modelID } : null),
     ...(isObject(settings) && rest.options === undefined ? { options: settings } : null),
+    // V1 wants the named-object map; a V2 array must be converted back.
+    ...(Array.isArray(variants)
+      ? { variants: fromV2Variants(variants) }
+      : isObject(variants)
+        ? { variants }
+        : null),
     tool_call: capabilities ? capabilities.tools !== false : entry.tool_call !== false,
     attachment: input.some((modality) => modality !== "text"),
     modalities: { input, output },

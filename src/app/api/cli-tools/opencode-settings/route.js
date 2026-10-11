@@ -10,6 +10,11 @@ import os from "os";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 import {
+  editJsoncText,
+  parseConfigText,
+  readConfig as readConfigFile,
+} from "@/lib/cliConfigIO.js";
+import {
   AFROUTER_PROVIDER_ID,
   FALLBACK_SPEC,
   SUBAGENT_NAME,
@@ -31,8 +36,33 @@ import {
 
 const execAsync = promisify(exec);
 
-const getConfigDir = () => path.join(os.homedir(), ".config", "opencode");
-const getConfigPath = () => path.join(getConfigDir(), "opencode.json");
+// OpenCode reads $OPENCODE_CONFIG (a file), else $XDG_CONFIG_HOME/opencode, else
+// ~/.config/opencode. It also accepts opencode.jsonc (comments) as well as
+// opencode.json, so an existing .jsonc is edited in place rather than ignored.
+const resolveConfigDir = () => {
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(xdg, "opencode");
+};
+
+const getConfigPath = async () => {
+  if (process.env.OPENCODE_CONFIG) return path.resolve(process.env.OPENCODE_CONFIG);
+  const dir = resolveConfigDir();
+  for (const name of ["opencode.jsonc", "opencode.json"]) {
+    try {
+      await fs.access(path.join(dir, name));
+      return path.join(dir, name);
+    } catch {
+      /* try next */
+    }
+  }
+  return path.join(dir, "opencode.json");
+};
+
+// Synchronous best-effort used only for mkdir before the async resolver runs.
+const getConfigPathSync = () =>
+  process.env.OPENCODE_CONFIG
+    ? path.resolve(process.env.OPENCODE_CONFIG)
+    : path.join(resolveConfigDir(), "opencode.json");
 
 const isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -120,7 +150,7 @@ const checkOpenCodeInstalled = async () => {
     return true;
   } catch {
     try {
-      await fs.access(getConfigPath());
+      await fs.access(await getConfigPath());
       return true;
     } catch {
       return false;
@@ -143,19 +173,15 @@ const readOpenCodeVersion = async () => {
 //   { missing: true }              -> no file yet (fresh install)
 //   { corrupt: true }              -> exists but unparseable (never overwrite)
 //   { data }                       -> parsed config
-// opencode config files may use JSONC (comments/trailing commas); strip trailing
-// commas before parsing so valid JSONC does not read as corrupt.
+// The file may be JSONC (comments, trailing commas, a BOM), so it goes through the
+// shared parser. `raw` is kept so the write can edit it in place and keep comments.
 const readConfigResult = async () => {
-  let content;
+  const { exists, raw } = await readConfigFile(await getConfigPath(), "json");
+  if (!exists) return { missing: true };
   try {
-    content = await fs.readFile(getConfigPath(), "utf-8");
-  } catch (error) {
-    if (error.code === "ENOENT") return { missing: true };
-    return { corrupt: true };
-  }
-  try {
-    const stripped = content.replace(/,(\s*[}\]])/g, "$1");
-    return { data: JSON.parse(stripped) };
+    const data = parseConfigText(raw, "json", "opencode.json");
+    if (!data || typeof data !== "object" || Array.isArray(data)) return { corrupt: true };
+    return { data, raw };
   } catch {
     return { corrupt: true };
   }
@@ -170,10 +196,20 @@ const hasAFRouterConfig = (config) => Boolean(readAFRouterProvider(config).entry
 
 // Write the config via a temp file + atomic rename. OpenCode rewrites this file
 // on config changes, so a torn write would drop the user's whole provider tree.
-const writeConfigAtomic = async (config) => {
-  const configPath = getConfigPath();
+// A `baseText` (the file as read) is edited through the JSONC writer so the user's
+// comments and formatting survive; otherwise the whole document is serialized.
+const writeConfigAtomic = async (config, baseText = null) => {
+  const configPath = await getConfigPath();
   const tmpPath = `${configPath}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(config, null, 2));
+  const text = baseText
+    ? editJsoncText(baseText, Object.keys(config).map((key) => ({ path: [key], value: config[key] })))
+    : `${JSON.stringify(config, null, 2)}\n`;
+  await writeConfigFileAtomic(tmpPath, configPath, text);
+  return { text };
+};
+
+const writeConfigFileAtomic = async (tmpPath, configPath, text) => {
+  await fs.writeFile(tmpPath, text);
   for (let attempt = 0; ; attempt++) {
     try {
       await fs.rename(tmpPath, configPath);
@@ -249,7 +285,7 @@ export async function GET() {
       installed: true,
       config,
       hasAFRouter: hasAFRouterConfig(config),
-      configPath: getConfigPath(),
+      configPath: await getConfigPath(),
       opencode: {
         models: Object.keys(modelMap),
         activeModel: config?.model?.startsWith("afrouter/") ? config.model.replace(/^afrouter\//, "") : null,
@@ -279,8 +315,8 @@ export async function POST(request) {
       return NextResponse.json({ error: "baseUrl and at least one model are required" }, { status: 400 });
     }
 
-    const configDir = getConfigDir();
-    const configPath = getConfigPath();
+    const configPath = await getConfigPath();
+    const configDir = path.dirname(configPath);
 
     await fs.mkdir(configDir, { recursive: true });
 
@@ -367,7 +403,7 @@ export async function POST(request) {
     // Add, carry over, or clear the subagent override.
     applySubagent(config, format, subagentModel);
 
-    await writeConfigAtomic(config);
+    await writeConfigAtomic(config, existing.raw);
 
     return NextResponse.json({
       success: true,
@@ -408,7 +444,7 @@ export async function PATCH(request) {
       }
     }
 
-    await writeConfigAtomic(config);
+    await writeConfigAtomic(config, existing.raw);
 
     return NextResponse.json({
       success: true,
@@ -473,7 +509,7 @@ export async function DELETE(request) {
     // Remove subagent configuration from either shape
     for (const mapKey of [agentMapKey("v2"), agentMapKey("v1")]) removeOwnedSubagent(config, mapKey);
 
-    await writeConfigAtomic(config);
+    await writeConfigAtomic(config, existing.raw);
 
     return NextResponse.json({
       success: true,

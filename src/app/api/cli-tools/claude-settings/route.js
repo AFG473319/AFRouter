@@ -17,11 +17,10 @@ const buildExaMcpEntry = () => ({
   url: EXA_PLUGIN.url,
 });
 
-// Get claude settings path based on OS
-const getClaudeSettingsPath = () => {
-  const homeDir = os.homedir();
-  return path.join(homeDir, ".claude", "settings.json");
-};
+// Get claude settings path based on OS. CLAUDE_CONFIG_DIR relocates the whole
+// config dir (code.claude.com/docs/en/env-vars), so it is honoured here.
+const getClaudeDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+const getClaudeSettingsPath = () => path.join(getClaudeDir(), "settings.json");
 
 // Claude Code CLI reads mcpServers from ~/.claude.json (NOT settings.json).
 const getClaudeJsonPath = () => path.join(os.homedir(), ".claude.json");
@@ -35,7 +34,7 @@ const readClaudeJson = async () => {
   }
 };
 
-const writeClaudeJsonMcp = async (mcpServers) => {
+const writeClaudeJson = async ({ mcpServers, markOnboarded } = {}) => {
   const filePath = getClaudeJsonPath();
   let data = {};
   try {
@@ -43,6 +42,9 @@ const writeClaudeJsonMcp = async (mcpServers) => {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
+  // hasCompletedOnboarding lives here, not in settings.json (code.claude.com
+  // settings reference). Setting it stops the first-run wizard on a fresh install.
+  if (markOnboarded) data.hasCompletedOnboarding = true;
   if (mcpServers && Object.keys(mcpServers).length > 0) {
     data.mcpServers = { ...(data.mcpServers || {}), ...mcpServers };
   } else if (data.mcpServers) {
@@ -156,20 +158,25 @@ export async function POST(request) {
         : `${env.ANTHROPIC_BASE_URL}/v1`;
     }
 
-    // Keep an existing token (real key or earlier config); only add when absent — Reset clears it.
-    if (currentSettings.env?.ANTHROPIC_AUTH_TOKEN) {
+    // A token supplied by the caller always wins — picking a new key must replace
+    // whatever is stored. Only when the caller sent none (the card cannot read the
+    // stored one back) do we keep the existing token, so a keyless Apply does not
+    // wipe authentication.
+    const incomingToken = typeof env.ANTHROPIC_AUTH_TOKEN === "string" ? env.ANTHROPIC_AUTH_TOKEN.trim() : "";
+    if (!incomingToken && currentSettings.env?.ANTHROPIC_AUTH_TOKEN) {
       delete env.ANTHROPIC_AUTH_TOKEN;
     }
 
     // Merge new env with existing settings
     const newSettings = {
       ...currentSettings,
-      hasCompletedOnboarding: true,
       env: {
         ...(currentSettings.env || {}),
         ...env,
       },
     };
+    // hasCompletedOnboarding is read from ~/.claude.json, not settings.json.
+    delete newSettings.hasCompletedOnboarding;
 
     // CLAUDE_CODE_AUTO_COMPACT_WINDOW — the token threshold that triggers
     // auto-compact. Only set when a concrete value is chosen; "Default" removes
@@ -183,10 +190,11 @@ export async function POST(request) {
     // Write new settings
     await fs.writeFile(settingsPath, JSON.stringify(newSettings, null, 2));
 
-    // Exa MCP toggle — write to ~/.claude.json (CLI reads mcpServers from here).
-    if (EXA_PLUGIN) {
-      await writeClaudeJsonMcp(exaMcpEnabled ? { exa: buildExaMcpEntry() } : null);
-    }
+    // Exa MCP toggle + onboarding marker live in ~/.claude.json.
+    await writeClaudeJson({
+      mcpServers: EXA_PLUGIN ? (exaMcpEnabled ? { exa: buildExaMcpEntry() } : null) : undefined,
+      markOnboarded: true,
+    });
 
     return NextResponse.json({
       success: true,
@@ -208,8 +216,10 @@ const RESET_ENV_KEYS = [
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "ANTHROPIC_DEFAULT_SONNET_MODEL",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
   "API_TIMEOUT_MS",
   "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+  "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
 ];
 
 // DELETE - Reset settings (remove env fields)
@@ -245,7 +255,7 @@ export async function DELETE() {
     }
 
     // Remove injected MCP servers (Exa) from ~/.claude.json
-    await writeClaudeJsonMcp(null);
+    await writeClaudeJson({ mcpServers: null });
 
     // Write updated settings
     await fs.writeFile(settingsPath, JSON.stringify(currentSettings, null, 2));

@@ -1,3 +1,5 @@
+import { parse as parseTomlStrict } from "smol-toml";
+
 export const GROK_SUBAGENT_TYPES = ["general-purpose", "explore", "plan"];
 
 // Sections we write are tagged with this description so re-apply/reset can find
@@ -21,8 +23,48 @@ const sectionRegExp = (section) =>
 // Enumerates every `[model.<slot>]` section. Slots are always written as bare keys.
 const MODEL_SECTION_GLOBAL = /^\[model\.([A-Za-z0-9_-]+)\][ \t]*\r?\n((?:(?!\[)[^\r\n]*\r?\n?)*)/gm;
 
-const previousDefaultRegExp = /^# afrouter-prev-default = "([^"]*)"[ \t]*\r?\n?/m;
-const previousSubagentRegExp = (type) =>
+// `default_reasoning_effort` is a root-level key, so it must stay above the first
+// `[table]` header (TOML assigns every key after a header to that table). Parsing
+// the document roots this reliably instead of the old `[models]` regex, which
+// could append a second `[models]` table when the first one was absent.
+function getModelsDefaultEffort(toml) {
+  let parsed = null;
+  try {
+    parsed = parseTomlStrict(toml);
+  } catch {
+    // A document the strict parser rejects still has to be editable: fall back to
+    // a plain scan of the `[models]` block instead of aborting the Apply.
+    const match = toml.match(sectionRegExp(MODELS_SECTION));
+    const body = match?.[1] || "";
+    const field = body.match(
+      new RegExp(`^[ \\t]*default_reasoning_effort[ \\t]*=[ \\t]*"([^"]*)"`, "m"),
+    );
+    return field?.[1] || null;
+  }
+  const value = parsed?.models?.default_reasoning_effort;
+  return typeof value === "string" && value ? value : null;
+}
+
+function deleteRootField(toml, key) {
+  const re = new RegExp(`^[ \\t]*${escapeRegExp(key)}[ \\t]*=[^\\r\\n]*\\r?\\n?`, "m");
+  return toml.replace(re, "");
+}
+
+function upsertRootField(toml, section, key, value) {
+  const insideSection = sectionRegExp(section);
+  const match = toml.match(insideSection);
+  const line = `${key} = ${tomlString(value)}`;
+  if (!match) {
+    const prefix = toml.length > 0 && !toml.endsWith("\n") ? `${toml}\n` : toml;
+    return `${prefix}\n[${section}]\n${line}\n`;
+  }
+  const body = match[1] || "";
+  const fieldRegExp = new RegExp(`^[ \\t]*${escapeRegExp(key)}[ \\t]*=[ \\t]*"[^"]*"`, "m");
+  const nextBody = fieldRegExp.test(body) ? body.replace(fieldRegExp, line) : `${line}\n${body}`;
+  return toml.replace(match[0], `[${section}]\n${nextBody}`);
+}
+
+const previousDefaultRegExp = /^# afrouter-prev-default = "([^"]*)"[ \t]*\r?\n?/m;const previousSubagentRegExp = (type) =>
   new RegExp(
     `^# afrouter-prev-subagent-${escapeRegExp(type)} = "([^"]*)"[ \\t]*\\r?\\n?`,
     "m",
@@ -122,7 +164,7 @@ function buildDescription({ contextWindow, maxOutput, vision, reasoning }) {
   return parts.length > 0 ? `${GROK_OWNED_MARKER} · ${parts.join(" · ")}` : GROK_OWNED_MARKER;
 }
 
-function buildModelSection({ slot, model, baseUrl, apiKey, contextWindow, maxOutput, vision, reasoning }) {
+function buildModelSection({ slot, model, baseUrl, apiKey, contextWindow, maxOutput, vision, reasoning, effort }) {
   const lines = [
     `[model.${slot}]`,
     `model = ${tomlString(model)}`,
@@ -137,6 +179,14 @@ function buildModelSection({ slot, model, baseUrl, apiKey, contextWindow, maxOut
   }
   if (Number.isFinite(maxOutput) && maxOutput > 0) {
     lines.push(`max_completion_tokens = ${Math.floor(maxOutput)}`);
+  }
+  // docs.x.ai/build/settings/reference [model.<id>]: supports_reasoning_effort
+  // (bool) and reasoning_effort (effort level) are real per-model controls when
+  // supported. Both are omitted for non-reasoning models rather than written false,
+  // so a non-reasoning model never advertises a control it cannot honour.
+  if (reasoning === true) {
+    lines.push("supports_reasoning_effort = true");
+    if (effort) lines.push(`reasoning_effort = ${tomlString(effort)}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -308,6 +358,21 @@ export function applyGrokBuildConfig(
     next = upsertModelSection(next, { ...entry, baseUrl, apiKey });
   }
   next = setSectionField(next, MODELS_SECTION, "default", entries[0].slot);
+
+  // [models].default_reasoning_effort — Grok Build's global default for the
+  // picker's active model. Only written when the default model actually reasons,
+  // and always reset when it does not, so a stale value is never inherited.
+  const primaryEntry = entries[0];
+  if (primaryEntry.reasoning === true && primaryEntry.effort) {
+    // Read the current value through the parser rather than `deleteSectionField`
+    // + append, which could leave two `[models]` tables behind.
+    if (getModelsDefaultEffort(next) !== primaryEntry.effort) {
+      next = deleteSectionField(next, MODELS_SECTION, "default_reasoning_effort");
+      next = upsertRootField(next, MODELS_SECTION, "default_reasoning_effort", primaryEntry.effort);
+    }
+  } else if (getModelsDefaultEffort(next) !== null) {
+    next = deleteSectionField(next, MODELS_SECTION, "default_reasoning_effort");
+  }
 
   for (const sub of subagentEntries) {
     const slot = sub.slot || entries.find((e) => e.model === sub.model)?.slot;

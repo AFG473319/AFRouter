@@ -92,7 +92,11 @@ const resolveLiveCatalog = async () => {
 const capsToSpec = (caps, id) => ({
   name: id,
   contextWindow: Math.floor(Number(caps.contextWindow)),
-  maxTokens: Math.floor(Number(caps.maxOutput)) || FALLBACK_SPEC.maxTokens,
+  // Only a verified maxOutput is carried: dsh turns maxTokens into a hard
+  // per-request output cap, so a guessed floor would truncate real responses.
+  maxTokens: Number.isFinite(Number(caps.maxOutput)) && Number(caps.maxOutput) > 0
+    ? Math.floor(Number(caps.maxOutput))
+    : undefined,
   vision: caps.vision === true,
   reasoning: caps.reasoning === true,
   // Real per-model level set from the single Part 1 resolver

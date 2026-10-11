@@ -2,164 +2,185 @@
 
 import { NextResponse } from "next/server";
 import { resolveCliApiKey } from "../resolveApiKey.js";
+import { specForCli } from "@/lib/cliModelSpec.js";
+import {
+  CliConfigParseError,
+  parseConfigText,
+  readConfig,
+  writeWithBackup,
+} from "@/lib/cliConfigIO.js";
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { stringifyTOML } from "confbox";
 
 const execAsync = promisify(exec);
 
 const PROVIDER_NAME = "afrouter";
 
-const getDeepSeekDir = () => path.join(os.homedir(), ".deepseek");
-const getDeepSeekConfigPath = () => path.join(getDeepSeekDir(), "config.toml");
-
-// Simple TOML parser for key = "value" and [section] patterns
-const parseToml = (content) => {
-    const result = {};
-    let currentSection = result;
-
-    const lines = content.split(/\r?\n/);
-    for (const line of lines) {
-        const trimmed = line.trim();
-        // Skip empty lines and comments
-        if (!trimmed || trimmed.startsWith("#")) continue;
-
-        // Section header: [section] or [section.subsection]
-        const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/);
-        if (sectionMatch) {
-            const sectionName = sectionMatch[1];
-            if (!result[sectionName]) result[sectionName] = {};
-            currentSection = result[sectionName];
-            continue;
-        }
-
-        // Key = "value" or key = value
-        const keyValueMatch = trimmed.match(/^(\w+)\s*=\s*"([^"]*)"$/);
-        if (keyValueMatch) {
-            currentSection[keyValueMatch[1]] = keyValueMatch[2];
-            continue;
-        }
-
-        // Key = value (unquoted)
-        const unquotedMatch = trimmed.match(/^(\w+)\s*=\s*(.+)$/);
-        if (unquotedMatch) {
-            currentSection[unquotedMatch[1]] = unquotedMatch[2].trim();
-        }
-    }
-
-    return result;
+// DeepSeek TUI was renamed to CodeWhale, which reads ~/.codewhale/config.toml and
+// migrates ~/.deepseek once on first launch (docs/CONFIGURATION.md). Writes to the
+// old ~/.deepseek path after that migration are ignored, so this card targets the
+// CodeWhale file. CODEWHALE_CONFIG_PATH / DEEPSEEK_CONFIG_PATH still override.
+const getCodewhaleDir = () => {
+  const explicit = process.env.CODEWHALE_CONFIG_PATH || process.env.DEEPSEEK_CONFIG_PATH;
+  return explicit ? path.dirname(explicit) : path.join(os.homedir(), ".codewhale");
 };
+const getCodewhaleConfigPath = () =>
+  process.env.CODEWHALE_CONFIG_PATH
+    || process.env.DEEPSEEK_CONFIG_PATH
+    || path.join(getCodewhaleDir(), "config.toml");
+const getLegacyConfigPath = () => path.join(os.homedir(), ".deepseek", "config.toml");
 
-// Build TOML config for AFRouter (openai provider mode)
-const buildAFRouterConfig = (baseUrl, apiKey, model) => {
-    const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    return `provider = "openai"
-
-[providers.openai]
-base_url = "${normalizedBaseUrl}"
-api_key = "${apiKey}"
-model = "${model}"
-`;
-};
-
-// Default DeepSeek config (reset state)
-const DEFAULT_CONFIG = `provider = "deepseek"
-`;
-
-const checkDeepSeekInstalled = async () => {
-    try {
-        const isWindows = os.platform() === "win32";
-        const command = isWindows ? "where deepseek" : "which deepseek";
-        await execAsync(command, { windowsHide: true });
+const checkInstalled = async () => {
+  try {
+    const isWindows = os.platform() === "win32";
+    const command = isWindows ? "where codewhale" : "which codewhale";
+    await execAsync(command, { windowsHide: true });
+    return true;
+  } catch {
+    for (const candidate of [getCodewhaleConfigPath(), getLegacyConfigPath()]) {
+      try {
+        await fs.access(candidate);
         return true;
-    } catch {
-        try {
-            await fs.access(getDeepSeekConfigPath());
-            return true;
-        } catch {
-            return false;
-        }
+      } catch {
+        /* try next */
+      }
     }
+    return false;
+  }
 };
 
-const readConfigToml = async () => {
-    try {
-        return await fs.readFile(getDeepSeekConfigPath(), "utf-8");
-    } catch (error) {
-        if (error.code === "ENOENT") return "";
-        throw error;
-    }
+const normalizeBaseUrl = (baseUrl) => {
+  const trimmed = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
 };
 
-// Detect AFRouter by checking if provider is "openai" and base_url points to localhost/127.0.0.1
-const hasAFRouterConfig = (config) => {
-    if (!config) return false;
-    const provider = config.provider;
-    if (provider !== "openai") return false;
-    const openaiSection = config["providers.openai"];
-    if (!openaiSection?.base_url) return false;
-    return /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(openaiSection.base_url);
+const parseTomlStrict = (raw, file) => {
+  try {
+    return parseConfigText(raw, "toml", file);
+  } catch (error) {
+    if (error instanceof CliConfigParseError) throw error;
+    throw new CliConfigParseError(file, String(error?.message || error).split("\n")[0]);
+  }
 };
+
+const buildProviderEntry = (baseUrl, apiKey, model) => {
+  const spec = specForCli(model);
+  const contextWindow = Math.floor(Number(spec.contextWindow));
+  return {
+    kind: "openai-compatible",
+    base_url: normalizeBaseUrl(baseUrl),
+    api_key: apiKey,
+    model,
+    // context_window drives CodeWhale's auto-compact timing.
+    ...(Number.isFinite(contextWindow) && contextWindow > 0 ? { context_window: contextWindow } : null),
+  };
+};
+
+// CodeWhale reads the file through its own loader only when it parses, so a
+// corrupt file is reported rather than treated as "no config" and overwritten.
+const readPrimary = async () => {
+  const file = getCodewhaleConfigPath();
+  const { exists, raw } = await readConfig(file, "toml");
+  if (!exists) return { exists: false, raw: "", config: {} };
+  return { exists: true, raw, config: parseTomlStrict(raw, path.basename(file)) || {} };
+};
+
+const hasAFRouterConfig = (config) =>
+  config?.provider === PROVIDER_NAME || Boolean(config?.providers?.[PROVIDER_NAME]);
 
 export async function GET() {
-    try {
-        const installed = await checkDeepSeekInstalled();
-        if (!installed) {
-            return NextResponse.json({ installed: false, settings: null, message: "DeepSeek TUI is not installed" });
-        }
-        const toml = await readConfigToml();
-        const config = parseToml(toml);
-        return NextResponse.json({
-            installed: true,
-            settings: config,
-            hasAFRouter: hasAFRouterConfig(config),
-            configPath: getDeepSeekConfigPath(),
-        });
-    } catch (error) {
-        console.log("Error checking deepseek-tui settings:", error);
-        return NextResponse.json({ error: "Failed to check deepseek-tui settings" }, { status: 500 });
+  try {
+    const installed = await checkInstalled();
+    const configPath = getCodewhaleConfigPath();
+    if (!installed) {
+      return NextResponse.json({ installed: false, settings: null, hasAFRouter: false, configPath, message: "DeepSeek TUI / CodeWhale is not installed" });
     }
+    let result;
+    try {
+      result = await readPrimary();
+    } catch (error) {
+      if (error instanceof CliConfigParseError) {
+        return NextResponse.json({ installed: true, corrupt: true, settings: null, hasAFRouter: false, configPath, error: error.message }, { status: 409 });
+      }
+      throw error;
+    }
+    return NextResponse.json({
+      installed: true,
+      settings: result.config,
+      hasAFRouter: result.exists ? hasAFRouterConfig(result.config) : false,
+      configPath,
+    });
+  } catch (error) {
+    console.log("Error checking deepseek-tui settings:", error);
+    return NextResponse.json({ error: "Failed to check deepseek-tui settings" }, { status: 500 });
+  }
 }
 
 export async function POST(request) {
-    try {
-        const { baseUrl, apiKey, model } = await request.json();
-        if (!baseUrl || !model) {
-            return NextResponse.json({ error: "baseUrl and model are required" }, { status: 400 });
-        }
-
-        const dir = getDeepSeekDir();
-        await fs.mkdir(dir, { recursive: true });
-
-        const newConfig = buildAFRouterConfig(baseUrl, await resolveCliApiKey(apiKey), model);
-        await fs.writeFile(getDeepSeekConfigPath(), newConfig);
-
-        return NextResponse.json({
-            success: true,
-            message: "DeepSeek TUI settings applied successfully!",
-            configPath: getDeepSeekConfigPath(),
-        });
-    } catch (error) {
-        console.log("Error updating deepseek-tui settings:", error);
-        return NextResponse.json({ error: "Failed to update deepseek-tui settings" }, { status: 500 });
+  try {
+    const { baseUrl, apiKey, model } = await request.json();
+    if (!baseUrl || !model) {
+      return NextResponse.json({ error: "baseUrl and model are required" }, { status: 400 });
     }
+
+    const configPath = getCodewhaleConfigPath();
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    const { config } = await readPrimary();
+    const doc = config && typeof config === "object" ? config : {};
+
+    doc.providers = doc.providers && typeof doc.providers === "object" ? doc.providers : {};
+    doc.providers[PROVIDER_NAME] = buildProviderEntry(baseUrl, await resolveCliApiKey(apiKey), model);
+    doc.provider = PROVIDER_NAME;
+    doc.default_text_model = model;
+
+    await writeWithBackup(configPath, stringifyTOML(doc), { secret: true });
+
+    return NextResponse.json({
+      success: true,
+      message: "DeepSeek TUI (CodeWhale) settings applied successfully!",
+      configPath,
+    });
+  } catch (error) {
+    if (error instanceof CliConfigParseError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    console.log("Error updating deepseek-tui settings:", error);
+    return NextResponse.json({ error: "Failed to update deepseek-tui settings" }, { status: 500 });
+  }
 }
 
 export async function DELETE() {
-    try {
-        const configPath = getDeepSeekConfigPath();
-        try {
-            await fs.access(configPath);
-        } catch {
-            return NextResponse.json({ success: true, message: "No config file to reset" });
-        }
-
-        await fs.writeFile(configPath, DEFAULT_CONFIG);
-        return NextResponse.json({ success: true, message: `${PROVIDER_NAME} config reset to DeepSeek defaults` });
-    } catch (error) {
-        console.log("Error resetting deepseek-tui settings:", error);
-        return NextResponse.json({ error: "Failed to reset deepseek-tui settings" }, { status: 500 });
+  try {
+    const configPath = getCodewhaleConfigPath();
+    const { exists, config } = await readPrimary();
+    if (!exists) {
+      return NextResponse.json({ success: true, message: "No config file to reset" });
     }
+    // Remove only our entries; never rewrite the whole file to a bare
+    // `provider = "deepseek"` (that used to wipe the user's other settings).
+    if (config.providers) {
+      delete config.providers[PROVIDER_NAME];
+      if (Object.keys(config.providers).length === 0) delete config.providers;
+    }
+    if (config.provider === PROVIDER_NAME) delete config.provider;
+    if (typeof config.default_text_model === "string") delete config.default_text_model;
+
+    if (Object.keys(config).length === 0) {
+      await fs.rm(configPath, { force: true });
+    } else {
+      await writeWithBackup(configPath, stringifyTOML(config), { secret: true });
+    }
+    return NextResponse.json({ success: true, message: `${PROVIDER_NAME} config removed` });
+  } catch (error) {
+    if (error instanceof CliConfigParseError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    console.log("Error resetting deepseek-tui settings:", error);
+    return NextResponse.json({ error: "Failed to reset deepseek-tui settings" }, { status: 500 });
+  }
 }

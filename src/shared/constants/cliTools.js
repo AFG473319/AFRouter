@@ -10,7 +10,7 @@ export const MITM_TOOLS = {
     description: "Google Antigravity IDE with MITM",
     configType: "mitm",
     mitmDomain: "daily-cloudcode-pa.googleapis.com",
-    modelAliases: ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low", "gemini-3.7-flash-high", "gemini-3.7-flash-medium", "gemini-3.7-flash-low", "gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low", "gemini-3.5-flash-low", "gemini-3-flash-agent", "gemini-3.5-flash-extra-low", "gemini-3.1-pro-low", "gemini-pro-agent", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium", "gemini-3-flash"],
+    modelAliases: ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low", "gemini-3.7-flash-high", "gemini-3.7-flash-medium", "gemini-3.7-flash-low", "gemini-3.6-flash-high", "gemini-3.6-flash-medium", "gemini-3.6-flash-low", "gemini-3.1-pro-low", "gemini-pro-agent", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium", "gemini-3-flash"],
     defaultModels: [
       { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", alias: "gemini-3.8-flash-high" },
       { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", alias: "gemini-3.8-flash-medium" },
@@ -21,14 +21,12 @@ export const MITM_TOOLS = {
       { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)", alias: "gemini-3.6-flash-high" },
       { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)", alias: "gemini-3.6-flash-medium" },
       { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)", alias: "gemini-3.6-flash-low" },
-      { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Medium) / Default", alias: "gemini-3.5-flash-low", mandatory: true },
-      { id: "gemini-3-flash-agent", name: "Gemini 3.5 Flash (High)", alias: "gemini-3-flash-agent" },
-      { id: "gemini-3.5-flash-extra-low", name: "Gemini 3.5 Flash (Low)", alias: "gemini-3.5-flash-extra-low" },
       { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", alias: "gemini-3.1-pro-low" },
       { id: "gemini-pro-agent", name: "Gemini 3.1 Pro (High)", alias: "gemini-pro-agent" },
-      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", alias: "claude-sonnet-4-6" },
-      { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", alias: "claude-opus-4-6-thinking" },
-      { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", alias: "gpt-oss-120b-medium" },
+      // Retiring on Antigravity 2026-11-02.
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking) — retires 2026-11-02", alias: "claude-sonnet-4-6" },
+      { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking) — retires 2026-11-02", alias: "claude-opus-4-6-thinking" },
+      { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium) — retires 2026-11-02", alias: "gpt-oss-120b-medium" },
       { id: "gemini-3-flash", name: "Gemini 3 Flash (Command)", alias: "gemini-3-flash" },
     ],
   },
@@ -45,22 +43,29 @@ export const MITM_TOOLS = {
       // for background sub-tasks (verified via MITM request dump of generateAssistantResponse).
       // Both need a mappable slot — otherwise getMappedModel returns null and the chat call
       // is passed through to AWS instead of being routed to the chosen provider.
+      //
+      // Every id here must exist in open-sse/providers/registry/kiro.js, otherwise the
+      // mapping is dead: Kiro has no fallback, so an unmapped id bypasses AFRouter.
       { id: "auto", name: "Auto (Kiro Agent)", alias: "auto" },
       { id: "claude-opus-5.5", name: "Claude Opus 5.5", alias: "claude-opus-5.5" },
       { id: "claude-opus-5", name: "Claude Opus 5", alias: "claude-opus-5" },
       { id: "claude-opus-4.8", name: "Claude Opus 4.8", alias: "claude-opus-4.8" },
       { id: "claude-opus-4.7", name: "Claude Opus 4.7", alias: "claude-opus-4.7" },
+      { id: "claude-opus-4.6", name: "Claude Opus 4.6", alias: "claude-opus-4.6" },
       { id: "claude-opus-4.5", name: "Claude Opus 4.5", alias: "claude-opus-4.5" },
       { id: "claude-sonnet-5", name: "Claude Sonnet 5", alias: "claude-sonnet-5" },
+      { id: "claude-sonnet-4.6", name: "Claude Sonnet 4.6", alias: "claude-sonnet-4.6" },
       { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5", alias: "claude-sonnet-4.5" },
-      { id: "claude-sonnet-4", name: "Claude Sonnet 4", alias: "claude-sonnet-4" },
       { id: "claude-haiku-4.5", name: "Claude Haiku 4.5", alias: "claude-haiku-4.5" },
       { id: "deepseek-3.2", name: "DeepSeek 3.2", alias: "deepseek-3.2" },
-      { id: "minimax-m2.1", name: "MiniMax M2.1", alias: "minimax-m2.1" },
+      // Registry id is MiniMax-M2.5 (capital M, no dot); the old "minimax-m2.1"
+      // here matched nothing, so the slot was dead.
+      { id: "MiniMax-M2.5", name: "MiniMax M2.5", alias: "MiniMax-M2.5" },
       { id: "glm-5", name: "GLM 5", alias: "glm-5" },
-      { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", alias: "gpt-5.6-sol", contextLength: 272000, rateMultiplier: 2.4 },
-      { id: "gpt-5.6-terra", name: "GPT 5.6 Terra", alias: "gpt-5.6-terra", contextLength: 272000, rateMultiplier: 1.2 },
-      { id: "gpt-5.6-luna", name: "GPT 5.6 Luna", alias: "gpt-5.6-luna", contextLength: 272000, rateMultiplier: 0.6 },
+      { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", alias: "gpt-5.6-sol", contextLength: 1000000, rateMultiplier: 4.4 },
+      { id: "gpt-5.6-terra", name: "GPT 5.6 Terra", alias: "gpt-5.6-terra", contextLength: 1000000, rateMultiplier: 2.2 },
+      { id: "gpt-5.6-luna", name: "GPT 5.6 Luna", alias: "gpt-5.6-luna", contextLength: 1000000, rateMultiplier: 0.6 },
+      // Background sub-task id Kiro sends; routes to the registry's qwen3-coder-next.
       { id: "simple-task", name: "Qwen3 Coder Next", alias: "simple-task" },
     ],
   },
@@ -236,15 +241,15 @@ export const CLI_TOOLS = {
     notes: [
       {
         type: "info",
-        text: "MiMo Desktop uses MiMo Code as its core engine and both share the same config file (~/.config/mimocode/mimocode.jsonc, or %LOCALAPPDATA%\\mimocode\\mimocode.jsonc on Windows).",
+        text: "MiMo Desktop uses MiMo Code as its core engine and both share one config file. It resolves through $MIMOCODE_HOME/config/mimocode.jsonc when that is set, else $XDG_CONFIG_HOME/mimocode/mimocode.jsonc (~/.config/mimocode/mimocode.jsonc).",
       },
       {
         type: "info",
-        text: "AFRouter writes an `afrouter` provider entry so MiMo's model picker offers AFRouter models. MiMoCode splits provider/model on the first '/' only, so ids like afrouter/9router/... or afrouter/cc/... work.",
+        text: "AFRouter writes an `afrouter` provider entry so MiMo's model picker offers AFRouter models. MiMoCode splits provider/model on the first '/' only, so ids like afrouter/cc/claude-sonnet-4-5 work.",
       },
       {
         type: "warning",
-        text: "Config path: Linux/macOS ~/.config/mimocode/mimocode.jsonc • Windows %LOCALAPPDATA%\\mimocode\\mimocode.jsonc (or $MIMOCODE_HOME when set).",
+        text: "Config path: $MIMOCODE_HOME/config/mimocode.jsonc when MIMOCODE_HOME is set, otherwise Linux/macOS ~/.config/mimocode/mimocode.jsonc. On native Windows the bundled xdg-basedir has no Windows branch, so the runtime path is %USERPROFILE%\\.config\\mimocode\\mimocode.jsonc; %LOCALAPPDATA%\\mimocode is also read if present.",
       },
       {
         type: "warning",
@@ -349,11 +354,14 @@ export const CLI_TOOLS = {
     description: "Roo AI Assistant",
     configType: "guide",
     guideSteps: [
-      { step: 1, title: "Open Settings", desc: "Go to Roo Settings panel" },
-      { step: 2, title: "Select Provider", desc: "Choose API Provider → Ollama" },
+      { step: 1, title: "Open Settings", desc: "Go to the Roo Settings panel (gear icon)" },
+      { step: 2, title: "Select Provider", desc: "Choose API Provider → OpenAI Compatible" },
       { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
       { step: 4, title: "API Key", type: "apiKeySelector" },
       { step: 5, title: "Select Model", type: "modelSelector" },
+    ],
+    notes: [
+      { type: "info", text: "Roo's OpenAI Compatible provider (not Ollama) is the one that accepts an arbitrary base URL and key." },
     ],
   },
   continue: {
@@ -364,20 +372,23 @@ export const CLI_TOOLS = {
     description: "Continue AI Assistant",
     configType: "guide",
     guideSteps: [
-      { step: 1, title: "Open Config", desc: "Open Continue configuration file" },
+      { step: 1, title: "Open Config", desc: "Open ~/.continue/config.yaml (the current format; config.json is the deprecated one)" },
       { step: 2, title: "API Key", type: "apiKeySelector" },
       { step: 3, title: "Select Model", type: "modelSelector" },
-      { step: 4, title: "Add Model Config", desc: "Add the following configuration to your models array:" },
+      { step: 4, title: "Add Model Config", desc: "Add an entry under models: in config.yaml:" },
     ],
     codeBlock: {
-      language: "json",
-      code: `{
-  "apiBase": "{{baseUrl}}",
-  "title": "{{model}}",
-  "model": "{{model}}",
-  "provider": "openai",
-  "apiKey": "{{apiKey}}"
-}`,
+      language: "yaml",
+      code: `name: My Config
+version: 0.0.1
+schema: v1
+
+models:
+  - name: {{model}}
+    provider: openai
+    model: {{model}}
+    apiBase: {{baseUrl}}
+    apiKey: {{apiKey}}`,
     },
   },
   amp: {
@@ -391,24 +402,26 @@ export const CLI_TOOLS = {
     defaultCommand: "amp",
     modelAliases: ["g25p", "g25f", "cs45", "g54"],
     notes: [
-      { type: "info", text: "Use AFRouter model aliases to keep Amp shorthand mappings stable across provider updates." },
-      { type: "warning", text: "Suggested shorthand examples: g25p → gemini/gemini-2.5-pro, g25f → gemini/gemini-2.5-flash, cs45 → cc/claude-sonnet-4-5-20250929." },
+      { type: "info", text: "Add a Model Routing connection: Personal settings → Model Routing → Add → Custom URL (OpenAI-compatible). From the CLI: `amp config model-providers` lists, adds, tests and reorders connections." },
+      { type: "warning", text: "A localhost URL is not reachable from Amp's cloud runners — expose the gateway with a tunnel or a public address before adding the Custom URL connection." },
+      { type: "info", text: "Use AFRouter model aliases to keep Amp model mappings stable across provider updates." },
+      { type: "warning", text: "Suggested aliases: g25p → gemini/gemini-2.5-pro, g25f → gemini/gemini-2.5-flash, cs45 → cc/claude-sonnet-4-5-20250929." },
     ],
     guideSteps: [
       { step: 1, title: "Install Amp", desc: "Install the Amp CLI using the package manager supported by your environment." },
-      { step: 2, title: "API Key", type: "apiKeySelector" },
+      { step: 2, title: "Open Model Routing", desc: "In Personal Settings → Model Routing, choose Add → Custom URL (or run `amp config model-providers`)." },
       { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "Select Model", type: "modelSelector" },
-      { step: 5, title: "Add Shorthands", desc: "Map Amp shorthand names such as g25p or cs45 to AFRouter aliases in your local config." },
+      { step: 4, title: "API Key", type: "apiKeySelector" },
+      { step: 5, title: "Map Models", desc: "Set the connection's model mapping so the models you want route through AFRouter; verify with `amp config model-providers check-access`." },
     ],
     codeBlock: {
       language: "bash",
-      code: `export OPENAI_API_KEY="{{apiKey}}"
-export OPENAI_BASE_URL="{{baseUrl}}"
-amp --model "{{model}}"
-# Example shorthand aliases you can map locally:
-# g25p -> gemini/gemini-2.5-pro
-# cs45 -> cc/claude-sonnet-4-5-20250929`,
+      code: `# Model Routing is a settings-managed connection in Amp, not an env var.
+# Add a Custom URL (OpenAI-compatible) connection, then map models to it:
+amp config model-providers list
+amp config model-providers check-access --provider-model {{model}}
+# A localhost base URL is not reachable from Amp's cloud runners — use a tunnel:
+# {{baseUrl}}`,
     },
   },
   qwen: {
@@ -421,10 +434,11 @@ amp --model "{{model}}"
     configType: "guide",
     defaultCommand: "qwen",
     notes: [
-      { type: "info", text: "Qwen Code supports multiple provider types (openai, anthropic, gemini) via modelProviders in settings.json. AFRouter works as an OpenAI-compatible endpoint." },
+      { type: "info", text: "Qwen Code declares models under modelProviders in settings.json; each entry is a bare ModelConfig[] array (the older {protocol, models} wrapper is reverted and silently skipped). AFRouter works as an openai route." },
+      { type: "info", text: "Credentials are never persisted in settings: the runtime reads them from process.env[envKey], so set the env var named by envKey before launching." },
       { type: "info", text: "Any model available in AFRouter can be used — not just Qwen models. Select from Qwen, Claude, Gemini, GPT, and more." },
       { type: "warning", text: "Config path: Linux/macOS ~/.qwen/settings.json • Windows %USERPROFILE%\\.qwen\\settings.json" },
-      { type: "error", text: "Qwen OAuth free tier was discontinued on 2026-04-15. Use AFRouter with alicode/openrouter/anthropic/gemini providers instead." },
+      { type: "error", text: "Qwen OAuth free tier was discontinued on 2026-04-15, and security.auth.* is deprecated. Use modelProviders with an envKey instead." },
     ],
     modelAliases: ["coder-model", "qwen3-coder-plus", "qwen3-coder-flash", "vision-model", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gemini-3-flash", "gemini-3.1-pro-high"],
     defaultModels: [
@@ -439,23 +453,22 @@ amp --model "{{model}}"
     ],
     guideSteps: [
       { step: 1, title: "Install Qwen Code", desc: "npm install -g @qwen-code/qwen-code" },
-      { step: 2, title: "API Key", type: "apiKeySelector" },
-      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "Select Model", type: "modelSelector" },
-      { step: 5, title: "Save Config", desc: "Copy the JSON below to your ~/.qwen/settings.json file." },
+      { step: 2, title: "Set the env var", desc: "Qwen reads the key from the env var named by envKey (never from settings.json)." },
+      { step: 3, title: "Add to modelProviders", desc: "Add an openai route to modelProviders in ~/.qwen/settings.json." },
+      { step: 4, title: "Select Model", desc: "Run /model and pick the AFRouter entry (it hot-reloads ~300ms after save)." },
     ],
     codeBlock: {
       language: "json",
       code: `{
-  "security": {
-    "auth": {
-      "selectedType": "openai",
-      "apiKey": "{{apiKey}}",
-      "baseUrl": "{{baseUrl}}"
-    }
-  },
-  "model": {
-    "name": "{{model}}"
+  "modelProviders": {
+    "openai": [
+      {
+        "id": "{{model}}",
+        "name": "AFRouter - {{model}}",
+        "baseUrl": "{{baseUrl}}",
+        "envKey": "AFROUTER_API_KEY"
+      }
+    ]
   }
 }`,
     },
@@ -476,8 +489,8 @@ amp --model "{{model}}"
       { id: "deepseek-chat", name: "DeepSeek V3 Chat", alias: "deepseek-chat" },
     ],
     notes: [
-      { type: "info", text: "DeepSeek TUI uses ~/.deepseek/config.toml for configuration. AFRouter will update the provider to 'openai' mode with your base_url, api_key, and model." },
-      { type: "warning", text: "Config path: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml" },
+      { type: "info", text: "DeepSeek TUI was renamed to CodeWhale. CodeWhale reads ~/.codewhale/config.toml and migrates ~/.deepseek once on first launch, so AFRouter writes the CodeWhale file: [providers.afrouter] (kind openai-compatible, base_url, api_key, model, context_window) plus root provider/default_text_model." },
+      { type: "warning", text: "Config path: $CODEWHALE_CONFIG_PATH, else ~/.codewhale/config.toml (legacy ~/.deepseek/config.toml is still read when the new file is absent). Reset removes only the afrouter entry." },
     ],
   },
   "deepseek-harness": {
@@ -562,15 +575,15 @@ amp --model "{{model}}"
     notes: [
       {
         type: "info",
-        text: "Grok Build uses ~/.grok/config.toml. AFRouter writes a [model.afrouter] custom model and sets it as the default.",
+        text: "Grok Build reads $GROK_HOME/config.toml (default ~/.grok). AFRouter writes one [model.<id>] table per selected model (not a single [model.afrouter]) plus [models] default, with context_window, max_completion_tokens, supports_reasoning_effort and reasoning_effort resolved from the model's real specs.",
       },
       {
         type: "info",
-        text: "After Apply, run grok (or /model afrouter) to use the routed model. Switch back anytime with /model grok-build.",
+        text: "After Apply, run grok (or /model <slot>) to use the routed model. Switch back anytime with /model grok-build.",
       },
       {
         type: "warning",
-        text: "Config path: Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml",
+        text: "Config path: $GROK_HOME/config.toml (default Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml).",
       },
     ],
   },
@@ -584,7 +597,7 @@ amp --model "{{model}}"
     notes: [
       {
         type: "info",
-        text: "AFRouter writes an AFRouter provider entry into ~/.zcode/v2/config.json so ZCode's model picker offers AFRouter models.",
+        text: "AFRouter writes an AFRouter provider entry into ~/.zcode/v2/config.json AND the Personal layer ~/.zcode/v2/provider_config.json. On ZCode 3.14+ the Personal provider_config.json is the file that actually drives the model picker, and it hot-reloads.",
       },
       {
         type: "info",
@@ -592,11 +605,11 @@ amp --model "{{model}}"
       },
       {
         type: "warning",
-        text: "Config path: Linux/macOS ~/.zcode/v2/config.json • Windows %USERPROFILE%\\.zcode\\v2\\config.json",
+        text: "Paths honour ZCODE_DATA_BASE_DIR: <base>/.zcode/v2/{config.json,provider_config.json} (default base is your home). Linux/macOS ~/.zcode/v2 · Windows %USERPROFILE%\\.zcode\\v2\\.",
       },
       {
         type: "warning",
-        text: "ZCode loads its config at session start — restart ZCode after Apply if it is running.",
+        text: "config.json is read when ZCode starts; provider_config.json hot-reloads. Restart ZCode after Apply if it is running.",
       },
     ],
   },
@@ -662,7 +675,9 @@ amp --model "{{model}}"
     configType: "guide",
     installUrl: "https://cli.devin.ai",
     notes: [
-      { type: "info", text: "This is a local dependency, not a routed CLI. The Devin CLI provider spawns `devin acp --agent-type summarizer` and relays its output." },
+      { type: "info", text: "This is a local dependency, not a routed CLI. The Devin CLI provider spawns `devin acp` and relays its output." },
+      { type: "warning", text: "It runs the FULL agent in bypass mode by default (DEVIN_PERMISSION_MODE=bypass), so it auto-approves shell commands and file edits. Run it locally only, or set CLI_DEVIN_AGENT_TYPE=summarizer for a tool-less, text-only mode." },
+      { type: "info", text: "AFRouter does not inject WINDSURF_API_KEY — that would override the credentials stored by `devin auth login` and make devin reject the request." },
       { type: "warning", text: "Install the Devin CLI and run `devin auth login` — without it, the provider returns a spawn error on first request." },
     ],
     guideSteps: [
@@ -717,36 +732,6 @@ gemini extensions install https://github.com/manalkaff/opendesign
 # OpenCode
 # Fetch and follow .opencode/INSTALL.md from the repo`,
     },
-  },
-  pi: {
-    id: "pi",
-    name: "Pi (pi-coding-agent)",
-    image: "/providers/pi.svg",
-    color: "#6366F1",
-    description: "Pi coding agent — minimal, extensible agent harness (pi.dev)",
-    configType: "custom",
-    docsUrl: "https://pi.dev",
-    notes: [
-      {
-        type: "info",
-        text: "Pi uses ~/.pi/agent/models.json. 9Router is configured under providers.9router as an OpenAI-compatible endpoint.",
-      },
-    ],
-  },
-  omp: {
-    id: "omp",
-    name: "Oh My Pi",
-    image: "/providers/omp.png",
-    color: "#EC4899",
-    description: "Oh My Pi terminal AI agent with auto-discovery support",
-    configType: "custom",
-    docsUrl: "https://github.com/can1357/oh-my-pi",
-    notes: [
-      {
-        type: "info",
-        text: "Oh My Pi uses ~/.omp/agent/models.yml and agent.db. 9Router is configured with proxy discovery so all models appear automatically under /model.",
-      },
-    ],
   },
   crush: {
     id: "crush",

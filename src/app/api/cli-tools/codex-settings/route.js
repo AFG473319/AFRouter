@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { GET as getModels } from "../../models/route.js";
 import { applyCodexSettings, getCodexPaths, readCodexFiles, resetCodexSettings, withCodexLock } from "@/lib/codexConfig.js";
 import { normalizeCodexBaseUrl } from "@/shared/codexCatalog.js";
+import { specForCli } from "@/lib/cliModelSpec.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 
@@ -36,7 +37,17 @@ async function resolveSpecs(ids) {
       const reasoningEfforts = caps.reasoning
         ? getThinkingLevels(provider, model) || caps.reasoningLevels || caps.reasoningEfforts || []
         : [];
-      specs[id] = { ...caps, reasoningEfforts, name: match.name || id, source: "afrouter-catalog" };
+      // The default effort comes from the same shared resolver every other tool uses
+      // (high > medium > highest below xhigh, never "none"), so a Codex session starts
+      // on a level the model actually declares.
+      const resolved = specForCli(fullId);
+      specs[id] = {
+        ...caps,
+        reasoningEfforts,
+        defaultLevel: resolved.defaultLevel || null,
+        name: match.name || id,
+        source: "afrouter-catalog",
+      };
     }
   }
   return { specs, unverified };

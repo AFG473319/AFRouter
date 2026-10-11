@@ -8,6 +8,7 @@ import path from "path";
 import os from "os";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
+import { parseConfigText, writeWithBackup } from "@/lib/cliConfigIO.js";
 import {
   AFROUTER_PROVIDER_ID,
   FALLBACK_SPEC,
@@ -20,9 +21,15 @@ const execAsync = promisify(exec);
 
 const CONFIG_NAMES = ["mimocode.jsonc", "mimocode.json", "config.json"];
 
+// MiMoCode's docs (mimo.xiaomi.com/mimocode/config-overrides) describe
+// MIMOCODE_HOME as a profile root holding config/, data/, state/ and cache/ —
+// and loadGlobal() reads $MIMOCODE_HOME/config/mimocode.jsonc. Writing to
+// $MIMOCODE_HOME/mimocode.jsonc produced a file MiMo never loads.
+// Without MIMOCODE_HOME the global config resolves through XDG_CONFIG_HOME.
 const getConfigDir = () => {
-  if (process.env.MIMOCODE_HOME) return process.env.MIMOCODE_HOME;
-  return path.join(os.homedir(), ".config", "mimocode");
+  if (process.env.MIMOCODE_HOME) return path.join(process.env.MIMOCODE_HOME, "config");
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(xdg, "mimocode");
 };
 
 const getCandidateDirs = () => {
@@ -47,53 +54,24 @@ const resolveExistingConfigPath = async () => {
   return null;
 };
 
-const getConfigPath = () => {
-  const dir = getConfigDir();
-  return path.join(dir, CONFIG_NAMES[0]);
-};
-
-// MiMo Code is an OpenCode fork: the config is JSONC (comments + trailing
-// commas) but can also be plain JSON. Strip BOM, string-aware comments and
-// trailing commas before parsing so URLs inside strings survive.
-const parseJsonc = (content) => {
-  let inString = false;
-  let out = "";
-  for (let i = 0; i < content.length; i++) {
-    const c = content[i];
-    const next = content[i + 1];
-    if (inString) {
-      out += c;
-      if (c === "\\") { out += next || ""; i++; }
-      else if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') { inString = true; out += c; continue; }
-    if (c === "/" && next === "/") {
-      while (i < content.length && content[i] !== "\n") i++;
-      out += "\n";
-      continue;
-    }
-    if (c === "/" && next === "*") {
-      i += 2;
-      while (i < content.length && !(content[i] === "*" && content[i + 1] === "/")) i++;
-      i++;
-      out += "\n";
-      continue;
-    }
-    out += c;
-  }
-  return JSON.parse(out.replace(/,(\s*[}\]])/g, "$1"));
+const getConfigPath = async () => {
+  return (await resolveExistingConfigPath()) || path.join(getConfigDir(), CONFIG_NAMES[0]);
 };
 
 const readConfig = async () => {
+  const configPath = await resolveExistingConfigPath();
+  if (!configPath) return { content: null, configPath: await getConfigPath() };
+  let content;
   try {
-    const configPath = await resolveExistingConfigPath();
-    if (!configPath) return { content: null, configPath };
-    const content = await fs.readFile(configPath, "utf-8");
-    return { content, configPath, data: parseJsonc(content.replace(/^\uFEFF/, "")) };
+    content = await fs.readFile(configPath, "utf-8");
   } catch (error) {
-    if (error.code === "ENOENT") return { content: null, configPath: null };
-    return { content: null, configPath: null, corrupt: true };
+    if (error.code === "ENOENT") return { content: null, configPath };
+    return { content: null, configPath, corrupt: true };
+  }
+  try {
+    return { content, configPath, data: parseConfigText(content, "json", "mimocode.jsonc") };
+  } catch (error) {
+    return { content, configPath, corrupt: true, error: error?.message };
   }
 };
 
@@ -275,7 +253,7 @@ export async function POST(request) {
     }
 
     const config = existing.data && typeof existing.data === "object" ? existing.data : {};
-    const configPath = existing.configPath || getConfigPath();
+    const configPath = existing.configPath || (await getConfigPath());
     const configDir = path.dirname(configPath);
 
     await fs.mkdir(configDir, { recursive: true });
@@ -307,7 +285,7 @@ export async function POST(request) {
       }
     }
 
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+    await writeWithBackup(configPath, `${JSON.stringify(config, null, 2)}\n`, { secret: true });
 
     return NextResponse.json({
       success: true,
@@ -344,7 +322,7 @@ export async function PATCH(request) {
       }
     }
 
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+    await writeWithBackup(configPath, `${JSON.stringify(config, null, 2)}\n`, { secret: true });
 
     return NextResponse.json({
       success: true,
@@ -364,7 +342,12 @@ export async function DELETE(request) {
 
     const existing = await readConfig();
     if (existing.corrupt) {
-      return NextResponse.json({ success: true, message: "MiMo config unreadable — nothing reset", removed: 0 });
+      // Never report success on a file we could not read: the user would believe
+      // their settings were reset when nothing was touched.
+      return NextResponse.json(
+        { success: false, error: existing.error || "MiMo config is unreadable — nothing was reset", removed: 0 },
+        { status: 409 },
+      );
     }
 
     const config = existing.data && typeof existing.data === "object" ? existing.data : {};
@@ -388,7 +371,7 @@ export async function DELETE(request) {
       if (config.model?.startsWith(`${AFROUTER_PROVIDER_ID}/`)) delete config.model;
     }
 
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+    await writeWithBackup(configPath, `${JSON.stringify(config, null, 2)}\n`, { secret: true });
 
     return NextResponse.json({
       success: true,

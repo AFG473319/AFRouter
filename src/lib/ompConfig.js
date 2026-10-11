@@ -71,9 +71,9 @@
  *     models that cannot disable. `thinking: { mode: "effort", efforts,
  *     defaultLevel }` declares exactly the model's ladder, lowest-first, with
  *     `mode: "effort"` because AFRouter is an OpenAI `reasoning_effort` wire.
- *     `requiresEffort` stays unset (auto): on the default openai shape,
- *     `--thinking off` sends the first listed effort, which is the correct
- *     clamp for no-disable models. `effortMap` stays unset (identity): our
+ *     `requiresEffort` is set to `false` for models the resolver says can
+ *     disable thinking, and left unset for those that cannot (OMP clamps `:off`
+ *     to the lowest effort there). `effortMap` stays unset (identity): our
  *     vocabulary is already OMP's. Refs: can1357/oh-my-pi docs/models.md
  *     ("Reasoning / thinking", "Merge and override order").
  *   - `enabledModels` / `disabledProviders`: global filters the user may have
@@ -99,8 +99,11 @@ export const OMP_DEFAULT_API_KEY = "sk_afrouter";
 export const OMP_DEFAULT_ROLE = "default";
 
 // Thinking suffixes OMP's `splitThinkingSuffix` understands. Kept as a set so
-// a role value we wrote can be told apart from one the user typed.
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+// a role value we wrote can be told apart from one the user typed. `auto` and
+// `inherit` are real selector suffixes (can1357/oh-my-pi docs/models.md and
+// docs/settings.md) — without them parseModelSelector would treat a trailing
+// `:auto` as part of the model id.
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto", "inherit"]);
 
 // Conservative fallback for ids resolvable from neither the live catalog nor
 // the static registry — flagged "unverified", never invented. 128k/16k text-only
@@ -175,14 +178,21 @@ export const OMP_EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "
  * `{ mode: "effort", efforts, defaultLevel }`: efforts are the model's ladder
  * filtered to OMP's vocabulary, lowest-first (OMP sends the first listed
  * effort when reasoning_effort is requested, so order matters);
- * defaultLevel is the strongest listed effort. `requiresEffort` and
- * `effortMap` stay unset (auto-clamp and identity are correct for an OpenAI
- * `reasoning_effort` wire). Returns undefined for non-reasoning models and
- * for toggle-only/binary ladders with no mappable effort, so the field stays
- * out and OMP keeps its defaults.
+ * defaultLevel is the resolved default from the shared spec (high > medium >
+ * highest below xhigh), never the strongest level. `effortMap` stays unset
+ * (identity is correct for an OpenAI `reasoning_effort` wire).
  *
- * @param {{ reasoning?: boolean, reasoningLevels?: string[], defaultLevel?: string } | null} spec
- * @returns {{ mode: string, efforts: string[], defaultLevel: string } | undefined}
+ * `requiresEffort` is written as `false` only when the model can actually
+ * disable thinking (thinkingCanDisable !== false): OMP's docs say `:off` is
+ * clamped to the lowest effort otherwise, and that flag is what tells OMP the
+ * backend accepts an explicit reasoning-off request. When the model cannot
+ * disable, the flag is left out so OMP keeps the clamp.
+ *
+ * Returns undefined for non-reasoning models and for toggle-only/binary ladders
+ * with no mappable effort, so the field stays out and OMP keeps its defaults.
+ *
+ * @param {{ reasoning?: boolean, reasoningLevels?: string[], defaultLevel?: string, canDisable?: boolean, thinkingCanDisable?: boolean } | null} spec
+ * @returns {{ mode: string, efforts: string[], defaultLevel: string, requiresEffort?: boolean } | undefined}
  */
 export function ompThinking(spec) {
   if (!spec || spec.reasoning !== true) return undefined;
@@ -190,7 +200,13 @@ export function ompThinking(spec) {
   const efforts = OMP_EFFORT_LEVELS.filter((l) => levels.includes(l));
   if (!efforts.length) return undefined;
   const defaultLevel = efforts.includes(spec.defaultLevel) ? spec.defaultLevel : (efforts.includes("high") ? "high" : efforts.includes("medium") ? "medium" : efforts.filter((l) => l !== "xhigh" && l !== "max" && l !== "ultra").at(-1) ?? efforts[0]);
-  return { mode: "effort", efforts, defaultLevel };
+  const thinking = { mode: "effort", efforts, defaultLevel };
+  // OMP's docs: `requiresEffort` defaults to auto-detection; set it to false only
+  // when the backend is verified to accept an explicit reasoning-off request.
+  // That is exactly the `canDisable` signal from the resolver.
+  const canDisable = spec.thinkingCanDisable !== false && spec.canDisable !== false;
+  if (canDisable) thinking.requiresEffort = false;
+  return thinking;
 }
 
 /** The AFRouter provider entry OMP loads as one OpenAI-compatible provider. */

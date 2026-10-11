@@ -1,6 +1,14 @@
 "use server";
 
 import { NextResponse } from "next/server";
+import { resolveCliApiKey } from "../resolveApiKey.js";
+import { specForCli } from "@/lib/cliModelSpec.js";
+import {
+  CliConfigParseError,
+  parseConfigText,
+  readConfig,
+  writeWithBackup,
+} from "@/lib/cliConfigIO.js";
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
@@ -99,12 +107,21 @@ export async function POST(request) {
     // Ensure directory exists
     await fs.mkdir(droidDir, { recursive: true });
 
-    // Read existing settings or create new
+    // Read existing settings through the shared parser: an unparseable
+    // settings.json aborts with 409 instead of being silently overwritten.
     let settings = {};
     try {
-      const existingSettings = await fs.readFile(settingsPath, "utf-8");
-      settings = JSON.parse(existingSettings);
-    } catch { /* No existing settings */ }
+      const { exists, raw } = await readConfig(settingsPath, "json");
+      if (exists) {
+        const parsed = parseConfigText(raw, "json", "settings.json");
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) settings = parsed;
+      }
+    } catch (error) {
+      if (error instanceof CliConfigParseError) {
+        return NextResponse.json({ error: error.message }, { status: 409 });
+      }
+      throw error;
+    }
 
     // Ensure customModels array exists
     if (!settings.customModels) {
@@ -114,9 +131,8 @@ export async function POST(request) {
     // Remove all existing AFRouter configs
     settings.customModels = settings.customModels.filter(m => !m.id?.startsWith("custom:AFRouter"));
 
-    // Normalize baseUrl to ensure /v1 suffix
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    const keyToUse = apiKey || "your_api_key";
+    const keyToUse = (await resolveCliApiKey(apiKey)) || "";
 
     // Determine active model: prefer explicit activeModel, else first of modelsArray
     // If activeModel is explicitly empty string, no model will be set as default
@@ -135,30 +151,53 @@ export async function POST(request) {
     for (let i = 0; i < modelsArray.length; i++) {
       const m = modelsArray[i];
       if (!m || typeof m !== "string") continue;
+      const spec = specForCli(m);
+      const maxOutput = Math.floor(Number(spec.maxOutput));
+      const normalizedKey = keyToUse.trim();
       settings.customModels.push({
         model: m,
         id: `custom:AFRouter-${i}`,
         index: i,
         baseUrl: normalizedBaseUrl,
-        apiKey: keyToUse,
+        // Never write the placeholder: Droid sends it as a bearer token and the
+        // upstream answers 401. An empty omits the field entirely.
+        ...(normalizedKey ? { apiKey: normalizedKey } : null),
         displayName: m,
-        maxOutputTokens: 131072,
-        noImageSupport: false,
-        provider: "openai",
+        maxOutputTokens: Number.isFinite(maxOutput) && maxOutput > 0 ? maxOutput : 131072,
+        noImageSupport: spec.vision !== true,
+        // docs.factory.ai/model-independence/byok: "generic-chat-completion-api"
+        // speaks OpenAI Chat Completions; "openai" means the Responses API on
+        // OpenAI's own endpoint. AFRouter serves /v1/chat/completions.
+        provider: "generic-chat-completion-api",
       });
     }
 
     // Set default model if applicable
-    if (defaultIndex >= 0 && settings.customModels[defaultIndex]) {
-      // Reorder so the default comes first
-      const [defaultEntry] = settings.customModels.splice(defaultIndex, 1);
-      settings.customModels.unshift({ ...defaultEntry, index: 0 });
-      // Re-index the rest
-      settings.customModels.forEach((m, i) => { m.index = i; });
+    if (defaultIndex >= 0 && modelsArray[defaultIndex]) {
+      const defaultId = `custom:AFRouter-${defaultIndex}`;
+      const defaultIndexInList = settings.customModels.findIndex((m) => m?.id === defaultId);
+      const defaultEntry = settings.customModels[defaultIndexInList]
+        || settings.customModels.find((m) => m?.model === modelsArray[defaultIndex] && String(m?.id || "").startsWith("custom:AFRouter"));
+      if (defaultEntry && defaultIndexInList >= 0) {
+        // Move only OUR entry to the front; the user's own models keep their
+        // position and are never given an `index` they did not ask for.
+        settings.customModels.splice(defaultIndexInList, 1);
+        const all = [{ ...defaultEntry, index: 0 }, ...settings.customModels];
+        let next = 1;
+        for (const m of all) {
+          if (String(m?.id || "").startsWith("custom:AFRouter") && m !== defaultEntry) m.index = next++;
+        }
+        settings.customModels = all;
+        // The top-level `model` key is what actually starts Droid on this model;
+        // array order alone does not select it (docs.factory.com/droid-cli/settings).
+        settings.model = defaultEntry.model;
+      }
+    } else if (defaultIndex === -1) {
+      delete settings.model;
     }
 
-    // Write settings
-    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+    // Write settings (backup + atomic, 0600 — settings.json holds the API key)
+    await writeWithBackup(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { secret: true });
 
     return NextResponse.json({
       success: true,
@@ -178,31 +217,51 @@ export async function DELETE() {
 
     // Read existing settings
     let settings = {};
+    let existed = false;
+    // Model ids we are about to drop, so the active-model check can tell ours
+    // from the user's own.
+    let modelIdsWeOwn = new Set();
     try {
-      const existingSettings = await fs.readFile(settingsPath, "utf-8");
-      settings = JSON.parse(existingSettings);
+      const { exists, raw } = await readConfig(settingsPath, "json");
+      existed = exists;
+      if (exists) {
+        const parsed = parseConfigText(raw, "json", "settings.json");
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) settings = parsed;
+      }
     } catch (error) {
-      if (error.code === "ENOENT") {
-        return NextResponse.json({
-          success: true,
-          message: "No settings file to reset",
-        });
+      if (error instanceof CliConfigParseError) {
+        return NextResponse.json({ error: error.message }, { status: 409 });
       }
       throw error;
+    }
+
+    if (!existed) {
+      return NextResponse.json({ success: true, message: "No settings file to reset" });
+    }
+
+    if (Array.isArray(settings.customModels)) {
+      modelIdsWeOwn = new Set(
+        settings.customModels.filter((m) => m?.id?.startsWith("custom:AFRouter")).map((m) => m?.model),
+      );
     }
 
     // Remove AFRouter customModels
     if (settings.customModels) {
       settings.customModels = settings.customModels.filter(m => !m.id?.startsWith("custom:AFRouter"));
-      
+
       // Remove customModels array if empty
       if (settings.customModels.length === 0) {
         delete settings.customModels;
       }
     }
 
+    // Only drop the active model when it still points at one of ours.
+    if (typeof settings.model === "string" && modelIdsWeOwn.has(settings.model)) {
+      delete settings.model;
+    }
+
     // Write updated settings
-    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+    await writeWithBackup(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { secret: true });
 
     return NextResponse.json({
       success: true,
