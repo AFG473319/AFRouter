@@ -1,0 +1,32 @@
+{
+  "providers": {
+    "afrouter": {
+      "baseUrl": "http://localhost:20128/v1",
+      "apiKey": "test-only-key",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "openai/gpt-4o",
+          "name": "gpt-4o",
+          "contextWindow": 128000,
+          "maxTokens": 16384,
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "codex/gpt-5.6-sol",
+          "name": "gpt-5.6-sol",
+          "contextWindow": 372000,
+          "maxTokens": 128000,
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ]
+        }
+      ]
+    }
+  }
+}
