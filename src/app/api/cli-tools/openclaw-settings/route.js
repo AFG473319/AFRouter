@@ -18,7 +18,7 @@ import os from "os";
 
 const execAsync = promisify(exec);
 
-export const PROVIDER_ID = "afrouter";
+const PROVIDER_ID = "afrouter";
 
 // docs.openclaw.ai/help/environment: OPENCLAW_HOME replaces the home dir for all
 // internal path defaults; OPENCLAW_CONFIG_PATH names the config file directly.
