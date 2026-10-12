@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CATALOG_FILE, CATALOG_RAW_FILE, CATALOG_VERSION, invalidateCatalog, installCatalogSource } from "open-sse/providers/catalogOverride.js";
+import { openRouterEffortValues } from "./efforts.js";
 
 const CATALOG_URL = "https://models.dev/api.json";
 const FETCH_TIMEOUT_MS = 60000;
@@ -284,6 +285,96 @@ async function collectEntries() {
   return { entries, registry };
 }
 
+// --- Nous Portal's own catalog ---------------------------------------------
+// models.dev has NO `nous-portal` provider, so the models.dev half of this sync
+// contributes nothing for Nous: every Nous model resolved to the 200K/64K floor
+// with a name-guess for vision, even though Nous publishes exact numbers. Nous
+// serves its own OpenRouter-shaped /v1/models carrying precisely what we need —
+// per-model `context_length`, `architecture.input_modalities` /
+// `output_modalities`, `top_provider.max_completion_tokens`, and a reasoning
+// `supported_efforts` ladder already spelled in our wire vocabulary. It is
+// public (no auth), so it is fetched here and folded into the same file the
+// models.dev rows live in, keyed the same way.
+const NOUS_PROVIDER_ID = "nous-portal";
+const NOUS_CATALOG_URL = "https://inference-api.nousresearch.com/v1/models";
+// "file" is Kilo/Nous's spelling for document input (see normalizeCatalogSpecs).
+const NOUS_INPUT_TO_KEY = { image: "vision", audio: "audioInput", video: "videoInput", pdf: "pdf", file: "pdf" };
+
+// Catalog prices are per-token USD strings; our pricing objects are $/1M (see
+// calculateCostFromTokens, which divides by 1e6). Returns NaN for anything
+// absent, empty or non-numeric so a missing price can never read as free —
+// Number("") and Number(null) are both 0, which would silently call a paid
+// model free.
+const toPerMillion = (v) => {
+  if (typeof v !== "string" && typeof v !== "number") return NaN;
+  if (typeof v === "string" && v.trim() === "") return NaN;
+  const n = Number(v);
+  return Number.isFinite(n) ? n * 1e6 : NaN;
+};
+
+// Fold the live Nous catalog into an already-built { models, providers }. Mutates
+// in place and is fail-open: a Nous outage degrades to the previous behaviour
+// (floor + name heuristic) rather than costing the models.dev half of the sync.
+export async function mergeNousCatalog(models, providers) {
+  let data;
+  try {
+    const response = await fetch(NOUS_CATALOG_URL, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    data = (await response.json())?.data;
+  } catch (error) {
+    console.log(`[modelCatalog] Nous catalog skipped: ${error?.message || error}`);
+    return { skipped: true };
+  }
+  if (!Array.isArray(data)) return { skipped: true };
+
+  const limitRows = providers[NOUS_PROVIDER_ID] || (providers[NOUS_PROVIDER_ID] = {});
+  let filed = 0;
+  for (const model of data) {
+    if (typeof model?.id !== "string" || !model.id) continue;
+    // Keyed by baseId like every other row. Verified collision-free across
+    // vendors in the live catalog, and the reader falls back to baseId.
+    const base = baseId(model.id);
+
+    const declared = {};
+    for (const input of model?.architecture?.input_modalities || []) {
+      const key = NOUS_INPUT_TO_KEY[input];
+      if (key) declared[key] = true;
+    }
+    if (Object.keys(declared).length) models[`${NOUS_PROVIDER_ID}:${base}`] = declared;
+
+    const row = {};
+    const context = model?.context_length;
+    if (Number.isSafeInteger(context) && context > 0) row.contextWindow = context;
+    const output = model?.top_provider?.max_completion_tokens;
+    if (Number.isSafeInteger(output) && output > 0) row.maxOutput = output;
+    // Effort ladder, already in our vocabulary; `none` survives only when the
+    // model can actually turn thinking off (mandatory models drop it).
+    const levels = openRouterEffortValues(model);
+    if (levels?.length) row.reasoning = { levels, canDisable: levels.includes("none") };
+    else {
+      const params = model?.supported_parameters;
+      if (Array.isArray(params) && (params.includes("reasoning") || params.includes("reasoning_effort"))) row.reasons = true;
+    }
+    // Published price, $/1M. Nous is a reseller, so this is the authority for
+    // what the router is actually billed — and $0 here is how its free tier is
+    // identified, since 2 of the 11 free ids carry no ":free" suffix. Both sides
+    // must parse: a half-present price is a bad price, not a free one.
+    const priceIn = toPerMillion(model?.pricing?.prompt);
+    const priceOut = toPerMillion(model?.pricing?.completion);
+    if (Number.isFinite(priceIn) && Number.isFinite(priceOut)) {
+      const pricing = { input: priceIn, output: priceOut };
+      const priceCached = toPerMillion(model?.pricing?.input_cache_read);
+      if (Number.isFinite(priceCached)) pricing.cached = priceCached;
+      row.pricing = pricing;
+    }
+    if (Object.keys(row).length) { limitRows[base] = row; filed++; }
+  }
+  return { filed };
+}
+
 // Run one sync. Returns a summary, or null when it could not complete.
 export async function syncModelCatalog() {
   if (state.running) return null;
@@ -307,6 +398,9 @@ export async function syncModelCatalog() {
       const etag = response.headers.get("etag") || null;
       const { entries, registry } = await collectEntries();
       const { models, providers } = build(catalog, entries, registry);
+      // models.dev knows nothing about Nous, so Nous's own catalog is folded in
+      // on top of it (context windows, modalities, reasoning ladders).
+      const nous = await mergeNousCatalog(models, providers);
       const serialized = JSON.stringify({ v: CATALOG_VERSION, etag, syncedAt: Date.now(), models, providers });
 
       writeAtomic(CATALOG_FILE, serialized);
@@ -321,8 +415,9 @@ export async function syncModelCatalog() {
         bytes: Buffer.byteLength(serialized),
         models: Object.keys(models).length,
         providers: Object.keys(providers).length,
+        nousModels: nous?.filed ?? 0,
       };
-      console.log(`[modelCatalog] ${result.models} models, ${result.providers} providers, ${(result.bytes / 1024).toFixed(1)}KB`);
+      console.log(`[modelCatalog] ${result.models} models, ${result.providers} providers, ${(result.bytes / 1024).toFixed(1)}KB (Nous: ${result.nousModels})`);
     }
 
     state.lastSync = Date.now();

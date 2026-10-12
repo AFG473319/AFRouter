@@ -105,6 +105,20 @@ export function getCatalogReasons(provider, model) {
   return !!(byProvider[model]?.reasons || byProvider[baseId(model)]?.reasons);
 }
 
+// The gateway's own published price for this model, in $ per 1M tokens, written
+// by the sync when the provider's catalog carries pricing — today only Nous
+// Portal. Nous is a reseller and bills its own rate, not the vendor's list rate
+// (claude-haiku-5.5 is $0.10/$0.50 there against $1/$5 canonical), and its free
+// models are $0 by price rather than by an id suffix, so this row is what stops
+// the canonical tables both overcharging paid models and mis-pricing the free
+// tier. `null` when the catalog carries no price, so the static tables keep
+// answering for every other provider and every unsynced model.
+export function getCatalogPricing(provider, model) {
+  const byProvider = provider && load().providers[localProvider(provider)];
+  if (!byProvider) return null;
+  return byProvider[model]?.pricing || byProvider[baseId(model)]?.pricing || null;
+}
+
 // Force a re-read on the next lookup (called right after a sync writes the file).
 export function invalidateCatalog() {
   cachedMtime = -1;
