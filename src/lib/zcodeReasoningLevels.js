@@ -4,11 +4,12 @@
 // (~/.zcode/v2/provider_config.json). A model's selectable thinking
 // efforts are declared as `optionSpecs.reasoningLevel.values`:
 // non-empty, unique, ordered lowest→highest. ZCode uses the LAST value
-// as the default (highest) tier and the FIRST for auxiliary calls, and
-// sends the chosen value upstream as `reasoning_effort` — converting
-// "disabled" → "none" and "enabled" → "high" on the wire
-// (packages/provider/src/model-selection-config.ts picks values.at(-1);
-// the openai-chat-completions executor applies the level).
+// as the default (highest) tier and the FIRST for auxiliary calls
+// (packages/provider/src/model-selection-config.ts picks values.at(-1)).
+// "disabled"/"enabled" below are AFRouter-internal vocabulary for the
+// disable switch and the on/off "on" state — not ZCode doc tokens
+// (docs list low/high/max etc.; the wire mapping is asserted from our
+// request path, not from ZCode docs).
 //
 // AFRouter's own ladders (open-sse/providers/thinkingLevels.js) use
 // "none" as the disable switch and "thinking" as the on/off "on" state
@@ -16,11 +17,10 @@
 // vocabularies WITHOUT reordering: AFRouter's order is already
 // lowest→highest, and the strongest level must stay last.
 //
-// Wire compatibility (verified against our request path):
-// ZCode can only ever send the declared values, with the two conversions
-// above. Every resulting token — none, minimal, low, medium, high,
-// xhigh, max, ultra — is accepted by extractThinking (any string becomes
-// a level intent) and mapped per-format by thinkingUnified.applyFormat
+// Wire compatibility (AFRouter-internal guarantee, not a ZCode doc claim):
+// ZCode can only ever send the declared values. Every resulting token —
+// none, minimal, low, medium, high, xhigh, max, ultra — is accepted by
+// extractThinking (any string becomes a level intent) and mapped per-format by thinkingUnified.applyFormat
 // (openai passes through via normalizeOpenAILevel; zai maps to
 // enable_thinking/low|high|max; claude-budget/kimi/gemini map through
 // LEVEL_TO_BUDGET with safe fallbacks). No request-path change is

@@ -18,10 +18,11 @@ import {
 
 const execAsync = promisify(exec);
 
-// docs.x.ai/build/settings/reference: effort is low | medium | high, and the
-// per-model `reasoning_effort` / global `[models].default_reasoning_effort` use
+// docs.x.ai/build/settings/reference: effort is low | medium | high | xhigh
+// (xhigh on grok-4.6+; 4.5 treats xhigh as high), and the per-model
+// `reasoning_effort` / global `[models].default_reasoning_effort` use
 // the same vocabulary.
-const GROK_EFFORT_LEVELS = ["low", "medium", "high"];
+const GROK_EFFORT_LEVELS = ["low", "medium", "high", "xhigh"];
 
 // $GROK_HOME (default ~/.grok) is the single home for config/auth/sessions.
 const getGrokDir = () => path.resolve(process.env.GROK_HOME || path.join(os.homedir(), ".grok"));
@@ -71,9 +72,10 @@ const resolveModelSpec = (id, explicit = {}) => {
   const pick = (value, fallback) =>
     value === undefined || value === null || value === "" ? fallback : value;
   const levels = Array.isArray(caps.levels) ? caps.levels : [];
-  // Grok's documented vocabulary: low | medium | high. A level it cannot express
-  // is dropped rather than renamed into a neighbouring one; a ladder with no
-  // Grok-expressible level yields no effort at all.
+  // Grok's documented vocabulary: low | medium | high | xhigh (xhigh on
+  // grok-4.6+). A level it cannot express is dropped rather than renamed
+  // into a neighbouring one; a ladder with no Grok-expressible level
+  // yields no effort at all.
   const effort = caps.defaultLevel && GROK_EFFORT_LEVELS.includes(caps.defaultLevel)
     ? caps.defaultLevel
     : levels.filter((level) => GROK_EFFORT_LEVELS.includes(level)).at(-1);

@@ -22,7 +22,10 @@ const PROVIDER_ID = "afrouter";
 
 // docs.openclaw.ai/help/environment: OPENCLAW_HOME replaces the home dir for all
 // internal path defaults; OPENCLAW_CONFIG_PATH names the config file directly.
-const getOpenClawDir = () => path.resolve(process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"));
+// OPENCLAW_STATE_DIR overrides the state dir (default ~/.openclaw) which shares
+// the same default location, so honor it as a dir fallback.
+const getOpenClawDir = () =>
+  path.resolve(process.env.OPENCLAW_HOME || process.env.OPENCLAW_STATE_DIR || path.join(os.homedir(), ".openclaw"));
 const getOpenClawSettingsPath = () =>
   process.env.OPENCLAW_CONFIG_PATH
     ? path.resolve(process.env.OPENCLAW_CONFIG_PATH)
@@ -233,13 +236,27 @@ export async function POST(request) {
     if (!settings || typeof settings !== "object" || Array.isArray(settings)) settings = {};
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    const fullModelId = `${PROVIDER_ID}/${model}`;
+    // Model refs split on the first "/" (docs.openclaw.ai/cli/models), so a
+    // value round-tripped from GET ("afrouter/<model>") must be stripped
+    // before re-prefixing to avoid "afrouter/afrouter/…".
+    const stripProviderPrefix = (m) => String(m || "").replace(/^afrouter\//, "");
+    const bareModel = stripProviderPrefix(model);
+    const fullModelId = `${PROVIDER_ID}/${bareModel}`;
     const keyToUse = (await resolveCliApiKey(apiKey)) || "";
 
     if (!settings.agents) settings.agents = {};
     if (!settings.agents.defaults) settings.agents.defaults = {};
+    // docs.openclaw.ai/gateway/config-agents/models: defaults.model accepts a
+    // string or { primary }. A foreign string pin is preserved below; only an
+    // unset or ours-prefixed value is repointed.
+    const existingDefaultsModel = settings.agents.defaults.model;
+    const existingPrimary = typeof existingDefaultsModel === "string"
+      ? existingDefaultsModel
+      : existingDefaultsModel?.primary;
     if (!settings.agents.defaults.model || typeof settings.agents.defaults.model === "string") {
-      settings.agents.defaults.model = {};
+      settings.agents.defaults.model = typeof existingDefaultsModel === "object" && existingDefaultsModel !== null
+        ? existingDefaultsModel
+        : {};
     }
     if (!settings.agents.defaults.models) settings.agents.defaults.models = {};
     if (!settings.models) settings.models = {};
@@ -251,14 +268,18 @@ export async function POST(request) {
       .forEach((k) => { delete settings.agents.defaults.models[k]; });
 
     // Only repoint the primary when it is ours or unset: the user's own pin on
-    // another provider is not ours to change.
-    const primaryModel = settings.agents.defaults.model?.primary;
+    // another provider is not ours to change (including a foreign string pin
+    // preserved above).
+    const primaryModel = settings.agents.defaults.model?.primary ?? existingPrimary;
     if (!primaryModel || String(primaryModel).startsWith(`${PROVIDER_ID}/`)) {
       settings.agents.defaults.model.primary = fullModelId;
+    } else if (typeof existingDefaultsModel === "string") {
+      // Preserve the foreign string pin verbatim instead of converting it.
+      settings.agents.defaults.model = existingDefaultsModel;
     }
 
-    const allModelIds = new Set([model]);
-    Object.values(agentModels).forEach((m) => { if (m) allModelIds.add(m); });
+    const allModelIds = new Set([bareModel]);
+    Object.values(agentModels).forEach((m) => { if (m) allModelIds.add(stripProviderPrefix(m)); });
 
     allModelIds.forEach((m) => {
       settings.agents.defaults.models[`${PROVIDER_ID}/${m}`] = {};
@@ -280,20 +301,17 @@ export async function POST(request) {
     const entries = readAgentEntries(settings);
     if (entries) {
       for (const [id, entry] of Object.entries(entries)) {
-        const agentModel = agentModels[id];
-        if (!agentModel) continue;
-        const previousModel = agentModelId(entry);
+        const agentModelRaw = agentModels[id];
+        if (!agentModelRaw) continue;
+        const agentModel = stripProviderPrefix(agentModelRaw);
         entries[id] = { ...entry };
         if (typeof entry?.model === "string") entries[id].model = `${PROVIDER_ID}/${agentModel}`;
         else entries[id].model = { ...(entry?.model || {}), primary: `${PROVIDER_ID}/${agentModel}` };
-        if (previousModel.startsWith(`${PROVIDER_ID}/`) && previousModel !== `${PROVIDER_ID}/${agentModel}`) {
-          // keep the rest of the entry as the user set it
-        }
         if (typeof entry?.agentDir === "string" && entry.agentDir) {
           const agentDir = path.isAbsolute(entry.agentDir)
             ? entry.agentDir
             : path.resolve(getOpenClawDir(), entry.agentDir);
-          await writeAgentModels(agentDir, [agentModel, model], normalizedBaseUrl, keyToUse);
+          await writeAgentModels(agentDir, [agentModel, bareModel], normalizedBaseUrl, keyToUse);
         }
       }
     }
@@ -348,8 +366,9 @@ export async function DELETE() {
       if (Object.keys(settings.agents.defaults.models).length === 0) delete settings.agents.defaults.models;
     }
 
-    if (String(settings.agents?.defaults?.model?.primary || "").startsWith(`${PROVIDER_ID}/`)) {
-      delete settings.agents.defaults.model.primary;
+    if (String(settings.agents?.defaults?.model?.primary || settings.agents?.defaults?.model || "").startsWith(`${PROVIDER_ID}/`)) {
+      if (typeof settings.agents.defaults.model === "string") delete settings.agents.defaults.model;
+      else delete settings.agents.defaults.model.primary;
     }
 
     // Per-agent overrides and their per-agent models.json references.
@@ -374,6 +393,15 @@ export async function DELETE() {
         }
       }
       if (Object.keys(entries).length === 0) delete settings.agents.entries;
+    }
+    // AgentsSchema rejects an empty `agents` object (must contain at least one
+    // configured agent when present), so drop emptied containers to leave a
+    // schema-valid file after removing a sole bare entry.
+    if (settings.agents?.defaults && Object.keys(settings.agents.defaults).length === 0) {
+      delete settings.agents.defaults;
+    }
+    if (settings.agents && Object.keys(settings.agents).length === 0) {
+      delete settings.agents;
     }
 
     // JSON5 edit so the user's comments and formatting survive the write.

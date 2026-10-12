@@ -8,6 +8,7 @@ export const GROK_CLI_USER_AGENT = `grok-shell/${GROK_CLI_VERSION} (linux; x86_6
 export const GROK_CLI_PAGER_USER_AGENT = `grok-pager/${GROK_CLI_VERSION} grok-shell/${GROK_CLI_VERSION} (linux; x86_64)`;
 
 export function supportsGrokCliReasoningEffort(model) {
+  // docs.x.ai effort is supported on grok-4.5 / 4.6 / 4.7 (xhigh on 4.6+).
   // ponytail: unknown models omit effort until live metadata reaches dispatch.
-  return /^grok-4\.5(?:$|-)/.test(String(model || ""));
+  return /^grok-4\.[567](?:$|-)/.test(String(model || ""));
 }

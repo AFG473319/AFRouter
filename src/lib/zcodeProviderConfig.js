@@ -39,12 +39,14 @@
 //       "manualProviderModelRules": [] } }
 // }
 //
-// Rules we rely on (all verified against ZCode master):
+// Rules we rely on (verified against ZCode master except where noted):
 // - reasoningLevel.values: non-empty, unique, ordered lowest→highest; the
-//   LAST value is ZCode's default tier, the FIRST is for auxiliary calls.
-//   There is no defaultVariant field. `map` is inherited from ZCode's
-//   builtin modelApiRules for the API type (the builtin catch-all declares
-//   the empty merge-patch "{}"), so it is never written here.
+//   LAST value is ZCode's default tier (model-selection-config.ts
+//   picks values.at(-1)), the FIRST is for auxiliary calls.
+//   There is no defaultVariant field. `map` is not written here: a
+//   values-only sparse shape is schema-legal (enumOptionSpecDataSchema
+//   sparse shape), and ZCode compiles the full map itself; the builtin
+//   catch-all inheritance is observed behavior, not a cited doc line.
 // - providerModelRules are the sparse "smart" rules; manualProviderModelRules
 //   are the user's hand-set rules. The same providerId+modelId in both
 //   lists is a schema error — a manual rule always wins and is left alone.

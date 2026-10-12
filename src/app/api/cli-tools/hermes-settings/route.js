@@ -220,12 +220,21 @@ const resolveModelSpecs = async (ids, catalog) => {
  * Read one slot block back to the fields the card displays. `key` is the field
  * the slot spells its model id in — `default:` for the main block, `model:`
  * everywhere else — so the response mirrors the file's own key names.
+ * The main block also accepts the `model:` spelling (docs: both work
+ * identically), so `readMainSlot` checks `default ?? model`.
  */
 const readSlot = (block, key = "model") => {
   if (!isObject(block)) return null;
   const value = block[key];
   if (value === null || value === undefined || value === "") return null;
   return { [key]: String(value), provider: block.provider ?? null };
+};
+
+const readMainSlot = (block) => {
+  if (!isObject(block)) return null;
+  const value = block.default ?? block.model;
+  if (value === null || value === undefined || value === "") return null;
+  return { default: String(value), provider: block.provider ?? null };
 };
 
 const slotIsOurs = (block, baseUrl) => isOurSlot(block, baseUrl);
@@ -338,14 +347,14 @@ export async function GET(request) {
       configPath,
       envPath: getHermesEnvPath(),
       settings: {
-        model: readSlot(doc.model, "default"),
+        model: readMainSlot(doc.model),
         delegation: readSlot(doc.delegation),
         auxiliary,
       },
       provider: provider
         ? {
             name: provider.name ?? HERMES_PROVIDER_ID,
-            api: provider.api ?? provider.base_url ?? null,
+            api: provider.api ?? provider.base_url ?? provider.url ?? null,
             transport: provider.transport ?? provider.api_mode ?? null,
             discoverModels: provider.discover_models !== false,
             hasApiKey: typeof provider.api_key === "string" && provider.api_key.length > 0,
@@ -508,7 +517,9 @@ export async function DELETE(request) {
       });
     }
 
-    const baseUrl = normalizeHermesBaseUrl(readHermesProvider(doc)?.api || "");
+    const baseUrl = normalizeHermesBaseUrl(
+      readHermesProvider(doc)?.api ?? readHermesProvider(doc)?.base_url ?? readHermesProvider(doc)?.url ?? "",
+    );
     let removed = 0;
     if (modelToRemove) {
       const result = removeHermesProvider(doc, modelToRemove);
