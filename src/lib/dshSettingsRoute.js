@@ -39,7 +39,11 @@ const execAsync = promisify(exec);
 
 // Conservative fallback for model ids resolvable from neither the live catalog
 // nor the static registry — flagged "unverified", never invented (FR-006).
-const FALLBACK_SPEC = { contextWindow: 200000, maxTokens: 32000, vision: false, reasoning: false };
+// maxTokens is deliberately absent: an entry-level maxTokens becomes a
+// per-request output default, so a guessed value would cap real responses;
+// omitting it leaves the route's defaultMaxTokens capability in force, exactly
+// like the dashboard card preview.
+const FALLBACK_SPEC = { contextWindow: 200000, vision: false, reasoning: false };
 
 const cwd = () => `http://127.0.0.1:${process.env.PORT || 20128}`;
 
@@ -353,6 +357,7 @@ export const createDshSettingsHandlers = ({ profile, settingsUrl }) => {
         });
       }
 
+      const beforeCount = modelToRemove ? readRouteModels(getAfrouterRoute(patch.data)).length : 0;
       const result = modelToRemove
         ? removeModelFromRoute(patch.data, modelToRemove)
         : (() => {
@@ -360,14 +365,42 @@ export const createDshSettingsHandlers = ({ profile, settingsUrl }) => {
             const { patchList, entryRemoved } = removeAfrouterRoute(patch.data);
             return { patchList, removed: modelCount, entryRemoved };
           })();
+      if (result.removed === undefined) {
+        // removeModelFromRoute drops the count when the last model takes the
+        // whole route with it; derive it so the response never says undefined.
+        const afterCount = result.entryRemoved
+          ? 0
+          : readRouteModels(getAfrouterRoute(result.patchList)).length;
+        result.removed = beforeCount - afterCount;
+      }
 
-      // A full reset also releases a default pin that still points at AFRouter;
-      // a single-model removal leaves the pin alone.
+      // A full reset also releases a default pin that still points at AFRouter.
       let defaultCleared = false;
+      let defaultRepointed = null;
       if (!modelToRemove) {
         const cleared = removeDefaultModel(result.patchList);
         result.patchList = cleared.patchList;
         defaultCleared = cleared.removed;
+      } else {
+        // A single-model removal repoints a startup pin that named the removed
+        // model at the first surviving route model (keeping its effort), or
+        // clears it when the route emptied — never leaves it dangling at an
+        // unregistered id.
+        const pinned = getDefaultModel(result.patchList);
+        if (pinned && pinned.provider === ROUTE_KEY && pinned.model === modelToRemove) {
+          const remaining = readRouteModels(getAfrouterRoute(result.patchList));
+          if (remaining.length > 0) {
+            result.patchList = upsertDefaultModel(result.patchList, {
+              model: remaining[0],
+              reasoningEffort: pinned.reasoningEffort,
+            });
+            defaultRepointed = remaining[0];
+          } else {
+            const cleared = removeDefaultModel(result.patchList);
+            result.patchList = cleared.patchList;
+            defaultCleared = cleared.removed;
+          }
+        }
       }
 
       await writeAtomic(getPatchPath(profile), stringifyYamlDocument(result.patchList));
@@ -393,6 +426,7 @@ export const createDshSettingsHandlers = ({ profile, settingsUrl }) => {
         entryRemoved: result.entryRemoved,
         credentialRemoved,
         defaultCleared,
+        defaultRepointed,
         settingsUrl,
       });
     } catch (error) {
