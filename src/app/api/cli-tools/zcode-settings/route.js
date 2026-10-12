@@ -89,12 +89,12 @@ const writeConfigAtomic = async (config) => {
 
 const listModelKeys = (entry) => Object.keys((entry && entry.models) || {});
 
-// The in-config marker is written for interop, but it is NOT durable: ZCode
-// rebuilds every model entry from its own key list on exit and drops unknown
-// keys, so `zcode.afrouter` disappears the first time ZCode closes. Observed on
-// a real config (7 marked models -> 7 unmarked, none removed), which is why
-// ownership is tracked in the ~/.afrouter ledger instead and the marker is only
-// a bootstrap hint.
+// The in-config marker is written for interop, but it is NOT durable:
+// observed on a real config (7 marked models -> 7 unmarked, none removed),
+// ZCode appears to rebuild every model entry from its own key list on exit
+// and drop unknown keys. No official normalizer source confirms this, so it
+// is treated as observed behavior: ownership is tracked in the ~/.afrouter
+// ledger instead and the marker is only a bootstrap hint.
 const hasMarker = (modelEntry) => !!(modelEntry && modelEntry.zcode && modelEntry.zcode.afrouter === true);
 
 // Alias -> provider id, using the same resolver the request path uses, so a
@@ -234,9 +234,12 @@ const resolveModelSpecs = async (ids, catalog) => {
   return { specs, unverified };
 };
 
-// T007: exact ZCode model-entry shape per data-model.md. Brand-new entries get
-// the model's real selectable efforts (models.dev ladder via the live catalog,
-// else the static tables); the hardcoded set is only the last-resort fallback
+// T007: AFRouter-side model-entry shape for legacy config.json. The legacy
+// output shape (limit/modalities/reasoning.variants/defaultVariant,
+// zcode.* keys) is our convention — the official importer only documents the
+// input side (provider name/apiKey/baseURL/kind, model ids, contextWindow).
+// Brand-new entries get the model's real selectable efforts (models.dev
+// ladder via the live catalog, else the static tables); the hardcoded set is
 // for models with no declared levels. User-tuned fields on existing entries
 // are preserved by mergeModelEntries (FR-005).
 const buildModelEntry = (spec) => {

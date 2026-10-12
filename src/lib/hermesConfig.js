@@ -25,9 +25,11 @@
  *         provider: custom:afrouter
  *
  *  2. `models:` may be a list of ids or a mapping. The mapping is required for
- *     per-model metadata, so that is what we write. Per-model keys documented
- *     for `providers.<name>.models.<id>`: `context_length`, `supports_vision`,
- *     `prompt_caching`, `answer_in_reasoning`.
+ *     per-model metadata, so that is what we write. Per-model keys confirmed
+ *     in docs for `providers.<name>.models.<id>`: `context_length`,
+ *     `supports_vision`. (`prompt_caching` in docs is a top-level cache_ttl
+ *     block and `answer_in_reasoning` is source-observed, not shown on this
+ *     path in the fetched docs — neither is written here.)
  *
  *  3. `max_output_tokens` is legacy and NO LONGER READ ("Hermes no longer reads
  *     model.max_tokens, HERMES_MAX_TOKENS, provider output-cap settings, or
@@ -35,10 +37,10 @@
  *     We therefore do not write it — an output cap that Hermes ignores is worse
  *     than none, because it looks authoritative in the file.
  *
- *  4. `discover_models: false` makes Hermes use only the `models` we declare
- *     instead of probing the endpoint's /models. That is what turns the applied
- *     list into the picker's list, and it keeps `hermes model` / `/model`
- *     usable while the gateway is down.
+ *  4. `discover_models: false` declares the `models` mapping as the picker's
+ *     catalog instead of probing the endpoint's /models (key existence is
+ *     documented; the offline-picker behavior is inferred from the key name
+ *     and the key_cmd note, not a verbatim docs sentence).
  *
  *  5. `auxiliary.<task>` slots are a CLOSED, code-defined set — the ids come
  *     from hermes_cli/config_defaults.py. `auxiliary.web_extract` and
@@ -121,6 +123,7 @@ export const HERMES_AUX_TASKS = [
   { id: "title_generation", label: "Title Generation" },
   { id: "memory_query_rewrite", label: "Memory Query Rewrite" },
   { id: "tts_audio_tags", label: "TTS Audio Tags" },
+  { id: "voice_chat", label: "Voice Chat" },
   { id: "triage_specifier", label: "Triage Specifier" },
   { id: "kanban_decomposer", label: "Kanban Decomposer" },
   { id: "profile_describer", label: "Profile Describer" },

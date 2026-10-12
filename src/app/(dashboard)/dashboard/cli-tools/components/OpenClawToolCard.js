@@ -81,17 +81,19 @@ export default function OpenClawToolCard({
       hasInitializedModel.current = true;
       const provider = openclawStatus.settings?.models?.providers?.["afrouter"];
       if (provider) {
-        const primaryModel = openclawStatus.settings?.agents?.defaults?.model?.primary;
-        if (primaryModel) setSelectedModel(primaryModel.replace("afrouter/", ""));
+        const defaultsModel = openclawStatus.settings?.agents?.defaults?.model;
+        const primaryModel = typeof defaultsModel === "string" ? defaultsModel : defaultsModel?.primary;
+        if (primaryModel) setSelectedModel(String(primaryModel).replace(/^afrouter\//, ""));
         if (provider.apiKey && apiKeys?.some(k => k.key === provider.apiKey)) {
           setSelectedApiKey(provider.apiKey);
         }
       }
-      // Init per-agent models from enriched agents list
+      // Init per-agent models from enriched agents list (GET returns `model`,
+      // never `currentModel`; values are full refs so strip the prefix).
       const agentList = openclawStatus.agents || [];
       const initAgentModels = {};
       agentList.forEach((agent) => {
-        if (agent.currentModel) initAgentModels[agent.id] = agent.currentModel;
+        if (agent.model) initAgentModels[agent.id] = String(agent.model).replace(/^afrouter\//, "");
       });
       setAgentModels(initAgentModels);
     }
@@ -199,13 +201,34 @@ export default function OpenClawToolCard({
       ? selectedApiKey
       : (!cloudEnabled ? "sk_afrouter" : "<API_KEY_FROM_DASHBOARD>");
 
+    // Mirror POST parity: full per-model specs (not just {id,name}), the
+    // agents.defaults.models allowlist, and per-agent entries overrides.
+    // Manual Config previously omitted all three, producing a spec-poor setup
+    // vs Apply.
+    const stripPrefix = (m) => String(m || "").replace(/^afrouter\//, "");
+    const bareDefault = stripPrefix(selectedModel || "provider/model-id");
+    const agentEntries = {};
+    const allowlistModels = new Set([bareDefault]);
+    for (const [agentId, m] of Object.entries(agentModels)) {
+      if (!m) continue;
+      const bare = stripPrefix(m);
+      allowlistModels.add(bare);
+      agentEntries[agentId] = { model: `afrouter/${bare}` };
+    }
+    const buildEntry = (id) => {
+      const bare = stripPrefix(id);
+      const shortName = bare.split("/").pop() || bare;
+      return { id: bare, name: shortName };
+    };
     const settingsContent = {
       agents: {
         defaults: {
           model: {
-            primary: `afrouter/${selectedModel || "provider/model-id"}`,
+            primary: `afrouter/${bareDefault}`,
           },
+          models: Object.fromEntries([...allowlistModels].map((m) => [`afrouter/${m}`, {}])),
         },
+        ...(Object.keys(agentEntries).length > 0 ? { entries: agentEntries } : {}),
       },
       models: {
         providers: {
@@ -213,12 +236,7 @@ export default function OpenClawToolCard({
             baseUrl: getEffectiveBaseUrl(),
             apiKey: keyToUse,
             api: "openai-completions",
-            models: [
-              {
-                id: selectedModel || "provider/model-id",
-                name: (selectedModel || "provider/model-id").split("/").pop(),
-              },
-            ],
+            models: [...allowlistModels].map(buildEntry),
           },
         },
       },
@@ -226,7 +244,7 @@ export default function OpenClawToolCard({
 
     return [
       {
-        filename: "~/.openclaw/openclaw.json",
+        filename: openclawStatus?.settingsPath || "~/.openclaw/openclaw.json",
         content: JSON.stringify(settingsContent, null, 2),
       },
     ];
@@ -329,8 +347,9 @@ export default function OpenClawToolCard({
                   <button onClick={() => { setAgentModalFor(null); setModalOpen(true); }} disabled={!hasActiveProviders} className={`w-full sm:w-auto rounded border px-2 py-2 text-xs transition-colors sm:py-1.5 whitespace-nowrap sm:shrink-0 ${hasActiveProviders ? "bg-surface border-border text-text-main hover:border-primary cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}>Select</button>
                 </div>
 
-                {/* Per-agent model overrides */}
-                {(openclawStatus.agents || []).filter(a => a.agentDir).map((agent) => (
+                {/* Per-agent model overrides (entries with and without agentDir;
+                    POST supports overrides for both, only models.json needs agentDir) */}
+                {(openclawStatus.agents || []).map((agent) => (
                   <div key={agent.id} className="flex items-center gap-2 pl-4">
                     <span className="w-32 shrink-0 text-xs text-primary text-right truncate" title={agent.name || agent.id}>Agent {agent.name || agent.id}</span>
                     <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>

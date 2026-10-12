@@ -300,9 +300,13 @@ export default function HermesToolCard({
       ? selectedApiKey
       : (!cloudEnabled ? "sk_afrouter" : "<API_KEY_FROM_DASHBOARD>");
 
+    // Prefer the server-resolved paths (correct on Windows where the home is
+    // %LOCALAPPDATA%\hermes) over a hardcoded POSIX label.
+    const configFilename = hermesStatus?.configPath || `~/.hermes/${HERMES_CONFIG_FILE}`;
+    const envFilename = hermesStatus?.envPath || `~/.hermes/${HERMES_ENV_FILE}`;
     return [
-      { filename: `~/.hermes/${HERMES_CONFIG_FILE}`, content: stringifyYAML(doc) },
-      { filename: `~/.hermes/${HERMES_ENV_FILE}`, content: `${HERMES_API_KEY_ENV}=${keyToUse}\n` },
+      { filename: configFilename, content: stringifyYAML(doc) },
+      { filename: envFilename, content: `${HERMES_API_KEY_ENV}=${keyToUse}\n` },
     ];
   };
 
