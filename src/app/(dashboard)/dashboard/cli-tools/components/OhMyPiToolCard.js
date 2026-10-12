@@ -23,9 +23,10 @@ const resolveCaps = (id) => {
   return Number.isFinite(caps?.contextWindow) && Number.isFinite(caps?.maxOutput) ? caps : FALLBACK_SPEC;
 };
 
-// OMP's `splitThinkingSuffix` vocabulary. "auto"/"" = no suffix, which leaves
-// the model at whatever effort the session is already on.
-const THINKING_LEVELS = ["", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
+// OMP's `splitThinkingSuffix` vocabulary (docs/models.md, docs/settings.md).
+// "" writes no suffix, leaving the model at whatever effort the session is
+// already on; auto/inherit are real selector suffixes with their own meaning.
+const THINKING_LEVELS = ["", "off", "minimal", "low", "medium", "high", "xhigh", "max", "auto", "inherit"];
 const THINKING_LABELS = {
   "": "Session default (no suffix)",
   off: "off",
@@ -35,6 +36,8 @@ const THINKING_LABELS = {
   high: "high",
   xhigh: "xhigh",
   max: "max",
+  auto: "auto",
+  inherit: "inherit",
 };
 
 export default function OhMyPiToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
@@ -446,7 +449,7 @@ export default function OhMyPiToolCard({ tool, isExpanded, onToggle, baseUrl, ap
                           className="rounded border border-border bg-surface px-2 py-1.5 text-xs text-text-main"
                         >
                           {THINKING_LEVELS.map((level) => (
-                            <option key={level || "auto"} value={level}>{THINKING_LABELS[level]}</option>
+                            <option key={level === "" ? "none" : level} value={level}>{THINKING_LABELS[level]}</option>
                           ))}
                         </select>
                         <span className="text-xs text-text-muted">

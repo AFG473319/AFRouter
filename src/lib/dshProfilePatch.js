@@ -141,6 +141,14 @@ export const upsertAfrouterRoute = (patchList, { baseUrl, models = [], specs = {
     };
     if (compat && Object.keys(compat).length > 0) {
       route.compat = { ...(isPlainObject(previous.compat) ? previous.compat : {}), ...compat };
+    } else if (isPlainObject(previous.compat)) {
+      // The card only manages thinkingFormat: clear our key and keep anything
+      // the user hand-added at route level, so toggling the switch off cannot
+      // delete compat keys this integration does not own.
+      const rest = { ...previous.compat };
+      delete rest.thinkingFormat;
+      if (Object.keys(rest).length > 0) route.compat = rest;
+      else delete route.compat;
     } else {
       delete route.compat;
     }

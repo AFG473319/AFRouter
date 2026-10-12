@@ -67,7 +67,6 @@ exports[`cli model snapshot: fixed model set > dsh entries map none to off and k
       "max": "max",
       "medium": "medium",
       "minimal": "minimal",
-      "ultra": "ultra",
       "xhigh": "xhigh",
     },
   },
@@ -89,7 +88,6 @@ exports[`cli model snapshot: fixed model set > dsh entries map none to off and k
     "name": "glm/glm-5.3",
     "reasoningEfforts": {
       "off": null,
-      "thinking": "thinking",
     },
   },
   "openai/gpt-4o": {
