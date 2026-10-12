@@ -171,10 +171,10 @@ it("keeps the browser catalog helper independent from Node-only imports", async 
   expect(helper).not.toMatch(/\bimport\s/);
   expect(card).not.toMatch(/from\s+["'](?:confbox|node:)/);
   // A non-array ladder is ignored rather than turned into a fake "none".
-  expect(buildCodexCatalog(["test/model"], { "test/model": { reasoningEfforts: "invalid" } }).models[0].supported_reasoning_levels).toBeUndefined();
+  expect(buildCodexCatalog(["test/model"], { "test/model": { reasoningEfforts: "invalid" } }).models[0].supported_reasoning_levels).toEqual([]);
 });
 
-it("publishes no effort for a reasoning model with no declared ladder", async () => {
+it("publishes an empty ladder and no default for a reasoning model with no declared ladder", async () => {
   const id = "nous/stealth/union-alpha";
   const response = await apply({ models: [id], activeModel: id });
   expect(response.status).toBe(200);
@@ -184,9 +184,11 @@ it("publishes no effort for a reasoning model with no declared ladder", async ()
   const entry = catalog.models[0];
   expect(entry).toMatchObject({ slug: id, context_window: 200000 });
   // An invented "medium" would become the wire reasoning.effort for a model that
-  // declares no ladder, so neither key is written.
+  // declares no ladder, so no default is written. The ladder key itself is REQUIRED:
+  // ModelInfo declares `supported_reasoning_levels` without #[serde(default)], so it is
+  // written as an empty array rather than omitted.
   expect(entry.default_reasoning_level).toBeUndefined();
-  expect(entry.supported_reasoning_levels).toBeUndefined();
+  expect(entry.supported_reasoning_levels).toEqual([]);
 });
 
 it("passes the resolved ladder through, including max and ultra", () => {
@@ -197,22 +199,40 @@ it("passes the resolved ladder through, including max and ultra", () => {
   expect(entry.default_reasoning_level).toBe("high");
 });
 
-it("omits every effort key for a non-reasoning model", () => {
+it("publishes an empty ladder and no default for a non-reasoning model", () => {
   // Even a stale ladder in the spec must not surface on a non-reasoning model:
-  // Codex would forward reasoning.effort upstream.
+  // Codex would forward reasoning.effort upstream. The required key is still
+  // written, as an empty array.
   const entry = buildCodexCatalog(["test/model"], { "test/model": { reasoning: false, reasoningEfforts: ["low"] } }).models[0];
   expect(entry.default_reasoning_level).toBeUndefined();
-  expect(entry.supported_reasoning_levels).toBeUndefined();
+  expect(entry.supported_reasoning_levels).toEqual([]);
   expect(entry.supports_reasoning_summary_parameter).toBe(false);
 });
 
-it("omits the ladder when the model does not reason, whatever the ladder says", () => {
+it("always emits the required ladder key, empty when the model has no levels", () => {
   for (const spec of [{}, { reasoning: true }, { reasoning: false }]) {
     const entry = buildCodexCatalog(["test/model"], { "test/model": spec }).models[0];
+    expect(Array.isArray(entry.supported_reasoning_levels)).toBe(true);
     if (spec.reasoning !== true) {
       expect(entry.default_reasoning_level).toBeUndefined();
-      expect(entry.supported_reasoning_levels).toBeUndefined();
+      expect(entry.supported_reasoning_levels).toEqual([]);
     }
+  }
+});
+
+it("emits every catalog key Codex requires so the file parses", () => {
+  // ModelInfo has no #[serde(default)] on supported_reasoning_levels, shell_type,
+  // visibility, supported_in_api, priority, truncation_policy or support_verbosity;
+  // siblings may not be omitted either (apply_patch_tool_type, description, ...).
+  // This is the regression guard for "failed to parse model_catalog_json as JSON:
+  // missing field `supported_reasoning_levels`".
+  const required = ["slug", "display_name", "description", "supported_reasoning_levels", "shell_type", "visibility",
+    "supported_in_api", "priority", "support_verbosity", "apply_patch_tool_type", "truncation_policy", "base_instructions"];
+  for (const spec of [{}, { reasoning: false }, { reasoning: true, reasoningEfforts: ["low", "high"] }, { reasoning: true }]) {
+    const entry = buildCodexCatalog(["test/model"], { "test/model": spec }).models[0];
+    for (const key of required) expect(entry).toHaveProperty(key);
+    expect(entry.truncation_policy).toHaveProperty("mode");
+    expect(entry.truncation_policy).toHaveProperty("limit");
   }
 });
 

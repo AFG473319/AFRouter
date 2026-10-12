@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **Codex refused to load the AFRouter catalog when any selected model had no reasoning ladder.** `codex-rs` declares `ModelInfo.supported_reasoning_levels` (`Vec<ReasoningEffortPreset>`) with no `#[serde(default)]`, so the key is **required** on every catalog entry — omitting it fails the whole file at parse time (`Error loading configuration: failed to parse model_catalog_json ... missing field 'supported_reasoning_levels'`). The writer only emitted the key when a model resolved a non-empty ladder, so any non-reasoning model, or a reasoning model with no discovered levels (e.g. `openrouter/stealth/union-alpha`, `oc/mimo-v2.5-free`, `qd/qfmodel`), broke Codex entirely. It now always writes `supported_reasoning_levels`, empty when there is no ladder — the same shape Codex's own fallback metadata sends. An empty ladder stays wire-safe: with no selectable levels Codex offers no reasoning-effort picker and falls back to `default_reasoning_level`, so no invented effort is forwarded upstream. A regression test pins every key Codex requires (`tests/unit/codex-settings.test.js`).
+
 # v0.5.97 (2026-10-11)
 
 ## Fixes
