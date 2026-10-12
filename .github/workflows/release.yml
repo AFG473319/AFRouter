@@ -188,6 +188,7 @@ jobs:
           # workflows (GitHub's recursion guard) — workflow_dispatch is the
           # documented exception, so ask for the image build explicitly.
           gh workflow run docker-publish.yml --repo "${{ github.repository }}" --ref "v$VERSION" \
+            -f release_tag="v$VERSION" \
             || echo "::warning::could not dispatch docker-publish.yml for v$VERSION - run it manually from the Actions tab"
 
       - name: Step summary
