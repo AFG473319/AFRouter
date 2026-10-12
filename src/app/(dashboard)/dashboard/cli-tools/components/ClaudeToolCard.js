@@ -8,6 +8,12 @@ import { rememberEndpoint } from "./cliEndpointPresets";
 import ApiKeySelect from "./ApiKeySelect";
 import { matchKnownEndpoint } from "./cliEndpointMatch";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import {
+  CLAUDE_PICKER_MAX_ROWS,
+  buildModelPicker,
+  readPickerRows,
+  sanitizePickerRows,
+} from "@/lib/claudePickerConfig";
 
 const CLOUD_URL = process.env.NEXT_PUBLIC_CLOUD_URL;
 
@@ -50,7 +56,9 @@ export default function ClaudeToolCard({
   const [message, setMessage] = useState(null);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [currentEditingAlias, setCurrentEditingAlias] = useState(null);
+  // What the model picker modal is currently editing: a family alias row, or one
+  // of the custom picker rows by index.
+  const [editing, setEditing] = useState(null);
   const [selectedApiKey, setSelectedApiKey] = useState("");
   const [modelAliases, setModelAliases] = useState({});
   const [showManualConfigModal, setShowManualConfigModal] = useState(false);
@@ -59,7 +67,12 @@ export default function ClaudeToolCard({
   const [exaMcpEnabled, setExaMcpEnabled] = useState(false);
   const [autoCompactWindow, setAutoCompactWindow] = useState("");
   const [oneMContext, setOneMContext] = useState(false);
+  // Extra /model picker rows beyond the four family mappings. Each is
+  // { model, label?, description? } and lands in modelPicker.options, which is
+  // what lifts the one-model-per-family ceiling.
+  const [pickerRows, setPickerRows] = useState([]);
   const hasInitializedModels = useRef(false);
+  const hasInitializedPicker = useRef(false);
 
   // Claude Code only string-matches the marker against the model name, so it
   // applies to any id — the user decides which models are worth declaring as 1M.
@@ -77,6 +90,26 @@ export default function ClaudeToolCard({
       const current = modelMappings[model.alias];
       if (current) onModelMappingChange(model.alias, withContextMarker(current, enabled));
     });
+  };
+
+  // Rows as they will be written: blank models dropped, duplicate ids collapsed,
+  // order preserved. Everything below (Apply, Manual Config, the removed-file
+  // readback) goes through this one shape, so the UI and the file cannot
+  // disagree about what is in the lineup.
+  const pickerRowModels = sanitizePickerRows(pickerRows);
+
+  const addPickerRow = () => {
+    setPickerRows((rows) => (
+      rows.length >= CLAUDE_PICKER_MAX_ROWS ? rows : [...rows, { model: "", label: "", description: "" }]
+    ));
+  };
+
+  const updatePickerRow = (index, patch) => {
+    setPickerRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  const removePickerRow = (index) => {
+    setPickerRows((rows) => rows.filter((_, i) => i !== index));
   };
 
   const currentBaseUrl = claudeStatus?.settings?.env?.ANTHROPIC_BASE_URL || "";
@@ -172,6 +205,21 @@ export default function ClaudeToolCard({
     }
   }, [claudeStatus, apiKeys, tool.defaultModels, onModelMappingChange]);
 
+  // Same once-only sync for the picker rows, read through the shared shape so a
+  // row a user added by hand to settings.json comes back editable rather than
+  // being quietly overwritten on the next Apply.
+  useEffect(() => {
+    if (claudeStatus?.installed && !hasInitializedPicker.current) {
+      hasInitializedPicker.current = true;
+      const rows = readPickerRows(claudeStatus.settings).map((row) => ({
+        model: row.model,
+        label: row.label || "",
+        description: row.description || "",
+      }));
+      if (rows.length > 0) setPickerRows(rows);
+    }
+  }, [claudeStatus]);
+
   const checkClaudeStatus = async () => {
     setCheckingClaude(true);
     try {
@@ -223,14 +271,17 @@ export default function ClaudeToolCard({
       const res = await fetch("/api/cli-tools/claude-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ env, exaMcpEnabled, autoCompactWindow }),
+        body: JSON.stringify({ env, exaMcpEnabled, autoCompactWindow, modelPicker: pickerRowModels }),
       });
       const data = await res.json();
       if (res.ok) {
         // Remember the endpoint so it stays selectable next time
         rememberEndpoint(getEffectiveBaseUrl(), { tunnelPublicUrl, tailscaleUrl });
         setMessage({ type: "success", text: "Settings applied successfully!" });
-        setClaudeStatus(prev => ({ ...prev, hasBackup: true, settings: { ...prev?.settings, env }, exaMcpEnabled }));
+        // Read the lineup back off the shape we actually wrote, so a row the
+        // sanitizer dropped stops showing as saved.
+        const nextPicker = buildModelPicker(pickerRowModels);
+        setClaudeStatus(prev => ({ ...prev, hasBackup: true, settings: { ...prev?.settings, env, ...(nextPicker ? { modelPicker: nextPicker } : {}) }, exaMcpEnabled }));
       } else {
         setMessage({ type: "error", text: data.error || "Failed to apply settings" });
       }
@@ -250,6 +301,7 @@ export default function ClaudeToolCard({
       if (res.ok) {
         setMessage({ type: "success", text: "Settings reset successfully!" });
         tool.defaultModels.forEach((model) => onModelMappingChange(model.alias, model.defaultValue || ""));
+        setPickerRows([]);
         setSelectedApiKey("");
         setExaMcpEnabled(false);
         setAutoCompactWindow("");
@@ -264,13 +316,15 @@ export default function ClaudeToolCard({
     }
   };
 
-  const openModelSelector = (alias) => {
-    setCurrentEditingAlias(alias);
+  const openModelSelector = (alias, pickerIndex = null) => {
+    setEditing(pickerIndex === null ? { alias } : { pickerIndex });
     setModalOpen(true);
   };
 
   const handleModelSelect = (model) => {
-    if (currentEditingAlias) onModelMappingChange(currentEditingAlias, model.value);
+    if (!editing) return;
+    if (editing.pickerIndex == null) onModelMappingChange(editing.alias, model.value);
+    else updatePickerRow(editing.pickerIndex, { model: model.value });
   };
 
   // Generate settings.json content for manual copy
@@ -286,11 +340,16 @@ export default function ClaudeToolCard({
     if (autoCompactWindow) {
       env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = autoCompactWindow;
     }
+    const manualDoc = { hasCompletedOnboarding: true, env };
+    // The picker rows are part of the configuration, so a manual copy carries
+    // them too — otherwise the pasted file loses every model past the four.
+    const picker = buildModelPicker(pickerRowModels);
+    if (picker) manualDoc.modelPicker = picker;
 
     return [
       {
         filename: "~/.claude/settings.json",
-        content: JSON.stringify({ hasCompletedOnboarding: true, env }, null, 2),
+        content: JSON.stringify(manualDoc, null, 2),
       },
     ];
   };
@@ -410,6 +469,46 @@ export default function ClaudeToolCard({
                   </div>
                 ))}
 
+                {/* Extra /model picker rows — modelPicker.options in
+                    ~/.claude/settings.json. The four mappings above each pin
+                    one model per alias and that is all an env var can express,
+                    so this is what lifts that ceiling. */}
+                <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-text-main">Custom picker models</span>
+                    <div className="flex items-center gap-2">
+                      <Tooltip text="Writes modelPicker.options into ~/.claude/settings.json, so Claude Code's /model picker lists these rows after its built-in lineup. Any id the gateway serves works, and the [1m] context marker can be typed straight into the model. Requires Claude Code v2.1.242 or later.">
+                        <span className="material-symbols-outlined text-text-muted text-[14px] cursor-help">info</span>
+                      </Tooltip>
+                      <Button variant="outline" size="sm" onClick={addPickerRow} disabled={pickerRows.length >= CLAUDE_PICKER_MAX_ROWS}>
+                        <span className="material-symbols-outlined text-[14px] mr-1">add</span>Add
+                      </Button>
+                    </div>
+                  </div>
+                  {pickerRows.length === 0 && (
+                    <p className="text-xs text-text-muted">
+                      No custom rows — without them the picker offers the four family mappings above and nothing else.
+                    </p>
+                  )}
+                  {pickerRows.map((row, index) => (
+                    <div key={index} className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
+                      <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Model {index + 1}</span>
+                      <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
+                      <div className="flex w-full min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center">
+                        <input type="text" value={row.model} onChange={(e) => updatePickerRow(index, { model: e.target.value })} placeholder="provider/model-id" className="w-full min-w-0 flex-1 px-2 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:py-1.5" />
+                        <input type="text" value={row.label} onChange={(e) => updatePickerRow(index, { label: e.target.value })} placeholder="Label (optional)" className="w-full min-w-0 px-2 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:w-32 sm:py-1.5" />
+                        <input type="text" value={row.description} onChange={(e) => updatePickerRow(index, { description: e.target.value })} placeholder="Description (optional)" className="w-full min-w-0 px-2 py-2 bg-surface rounded border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 sm:w-40 sm:py-1.5" />
+                      </div>
+                      <div className="flex w-full items-center gap-1 sm:w-auto">
+                        <button onClick={() => openModelSelector(null, index)} disabled={!hasActiveProviders} className={`flex-1 sm:flex-none rounded border px-2 py-2 text-xs transition-colors sm:py-1.5 whitespace-nowrap ${hasActiveProviders ? "bg-surface border-border text-text-main hover:border-primary cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}>Select Model</button>
+                        <button onClick={() => removePickerRow(index)} className="p-1.5 text-text-muted hover:text-red-500 rounded transition-colors" title="Remove">
+                          <span className="material-symbols-outlined text-[14px]">close</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
                 {/* Auto-compact window */}
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[8rem_auto_1fr_auto] sm:items-center sm:gap-2">
                   <span className="text-xs font-semibold text-text-main sm:text-right sm:text-sm">Auto-compact</span>
@@ -485,7 +584,7 @@ export default function ClaudeToolCard({
       )}
 
       {modalOpen && (
-        <ModelSelectModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSelect={handleModelSelect} selectedModel={currentEditingAlias ? modelMappings[currentEditingAlias] : null} activeProviders={activeProviders} modelAliases={modelAliases} title={`Select model for ${currentEditingAlias}`} />
+        <ModelSelectModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSelect={handleModelSelect} selectedModel={editing && editing.pickerIndex == null ? modelMappings[editing.alias] : (editing ? pickerRows[editing.pickerIndex]?.model : null)} activeProviders={activeProviders} modelAliases={modelAliases} title={editing ? (editing.pickerIndex == null ? `Select model for ${editing.alias}` : `Select model for custom picker row ${editing.pickerIndex + 1}`) : "Select model"} />
       )}
 
       <ManualConfigModal

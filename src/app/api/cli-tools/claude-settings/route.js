@@ -6,6 +6,7 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { applyModelPicker, readPickerRows } from "@/lib/claudePickerConfig";
 import { DEFAULT_PLUGINS } from "@/shared/constants/coworkPlugins";
 
 const execAsync = promisify(exec);
@@ -112,6 +113,10 @@ export async function GET() {
       hasAFRouter: hasAFRouter,
       exaMcpEnabled: !!claudeJson?.mcpServers?.exa,
       settingsPath: getClaudeSettingsPath(),
+      // modelPicker.options — the extra /model picker rows beyond the four
+      // family mappings the env vars can pin. Sanitized, so the card only ever
+      // sees rows Claude Code would keep; `settings` stays the raw document.
+      modelPicker: readPickerRows(settings),
     });
   } catch (error) {
     console.log("Error checking claude settings:", error);
@@ -125,11 +130,22 @@ export async function GET() {
 // POST - Backup old fields and write new settings
 export async function POST(request) {
   try {
-    const { env, exaMcpEnabled, autoCompactWindow } = await request.json();
+    const { env, exaMcpEnabled, autoCompactWindow, modelPicker } = await request.json();
     
     if (!env || typeof env !== "object") {
       return NextResponse.json(
         { error: "Invalid env object" },
+        { status: 400 }
+      );
+    }
+
+    // modelPicker is the /model picker lineup. An array replaces our rows
+    // wholesale (that is the edit the card performs); a value that is not an
+    // array is a client bug, not something to guess at. Absent means "leave the
+    // picker rows alone", so a caller sending only env never wipes them.
+    if (modelPicker !== undefined && !Array.isArray(modelPicker)) {
+      return NextResponse.json(
+        { error: "Invalid modelPicker array" },
         { status: 400 }
       );
     }
@@ -185,6 +201,15 @@ export async function POST(request) {
       newSettings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(autoCompactWindow);
     } else {
       delete newSettings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+    }
+
+    // modelPicker.options — the extra picker rows. Applied after `env` so the
+    // document we write already carries today's endpoint. Merges into an
+    // existing modelPicker object, preserving keys we do not own, and removes
+    // our options when the list is empty. Only when the field was actually
+    // sent: an absent modelPicker must leave the rows a previous Apply wrote.
+    if (modelPicker !== undefined) {
+      applyModelPicker(newSettings, modelPicker);
     }
 
     // Write new settings
@@ -253,6 +278,11 @@ export async function DELETE() {
         delete currentSettings.env;
       }
     }
+
+    // Drop our picker rows too — Reset undoes the whole integration, not just
+    // the family env vars. Keys a user put on `modelPicker` themselves (e.g.
+    // `replaceBuiltInOptions`) survive: applyModelPicker only replaces `options`.
+    applyModelPicker(currentSettings, []);
 
     // Remove injected MCP servers (Exa) from ~/.claude.json
     await writeClaudeJson({ mcpServers: null });
