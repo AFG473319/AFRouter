@@ -19,9 +19,13 @@ export function buildCodexCatalog(models, specs = {}) {
       // anything else falls through to Custom(String). Pass the resolved ladder through
       // verbatim rather than re-whitelisting it.
       const efforts = [...new Set((Array.isArray(spec.reasoningEfforts) ? spec.reasoningEfforts : []).filter((effort) => typeof effort === "string" && effort.length > 0))];
+      const ladder = isReasoning ? efforts.map((effort) => ({ effort, description: effort })) : [];
       // No invented "medium" for a reasoning model with no ladder, and no effort at all
       // for a non-reasoning model: the catalog key is the ONLY source of the wire
       // reasoning.effort, and omitting it makes Codex drop the whole `reasoning` object.
+      // The default must stay inside `ladder` — Codex reads the selectable set from
+      // `supported_reasoning_levels`, and an off-ladder default would be replaced by the
+      // ladder's middle entry anyway (core/src/session/turn_context.rs).
       const specDefault = isReasoning ? (spec.defaultReasoningEffort || spec.defaultLevel) : undefined;
       const defaultEffort = specDefault || (isReasoning && efforts.includes("medium") ? "medium" : undefined);
       const entry = {
@@ -36,6 +40,16 @@ export function buildCodexCatalog(models, specs = {}) {
         auto_compact_token_limit: Math.floor(contextWindow * 0.9),
         effective_context_window_percent: 95,
         input_modalities: spec.vision === true ? ["text", "image"] : ["text"],
+        // REQUIRED on every entry: codex-rs protocol ModelInfo declares
+        // `supported_reasoning_levels: Vec<ReasoningEffortPreset>` with no
+        // #[serde(default)], so a missing key fails the whole catalog at parse time
+        // ("missing field `supported_reasoning_levels`"). Always emit the array; it is
+        // empty for a non-reasoning model or a reasoning model with no declared ladder,
+        // which is exactly the shape Codex's own catalog fallback sends. An empty ladder
+        // is also the wire-safe choice: with no levels Codex enables no reasoning effort
+        // picker and falls back to `default_reasoning_level`, so no off-ladder effort is
+        // ever forwarded upstream.
+        supported_reasoning_levels: ladder,
         // Real ModelInfo gates. `supports_reasoning_summaries` is read by no Codex
         // release and `supports_parallel_tool_calls` is a request-level field, not a
         // catalog one; the actual summary parameter defaults to true.
@@ -51,9 +65,6 @@ export function buildCodexCatalog(models, specs = {}) {
         base_instructions: "You are a coding assistant. Follow the user's instructions and repository guidance. Use available tools to inspect, edit, and verify code. Report results accurately.",
       };
       if (defaultEffort) entry.default_reasoning_level = defaultEffort;
-      if (isReasoning && efforts.length > 0) {
-        entry.supported_reasoning_levels = efforts.map((effort) => ({ effort, description: effort }));
-      }
       return entry;
     }),
   };
