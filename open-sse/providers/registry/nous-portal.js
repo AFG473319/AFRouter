@@ -51,10 +51,15 @@ export default {
     scope: "inference:invoke",
     userInfoUrl: "https://portal.nousresearch.com/api/oauth/account",
   },
-  // Portal catalog mirrors OpenRouter (~390 live ids incl. :batch/:US variants
-  // and embeddings). Curation rule: vendor-published ~latest aliases (never go
-  // stale) + pinned ids with no alias coverage; everything else is reachable
-  // via modelsFetcher (type: nous, :free filter) or passthroughModels.
+  // Portal catalog mirrors OpenRouter (~422 live ids incl. :batch/:US variants,
+  // embeddings and image/audio-output entries). Curation rule: vendor-published
+  // ~latest aliases (never go stale) + pinned ids with no alias coverage;
+  // everything else is reachable via modelsFetcher (type: nous) or
+  // passthroughModels. Free detection is by PRICE, not the ":free" suffix: Nous
+  // publishes real per-model pricing and 2 of its 11 $0 ids carry no suffix
+  // (inclusionai/ling-3.1-flash, stealth/missingno). Spec enrichment (context,
+  // modalities, reasoning efforts) comes from this catalog via modelSpecs plus
+  // the daily sync's mergeNousCatalog — models.dev has no nous-portal provider.
   models: [
     { id: "~anthropic/claude-opus-latest", name: "Claude Opus (latest)" },
     { id: "~anthropic/claude-sonnet-latest", name: "Claude Sonnet (latest)" },

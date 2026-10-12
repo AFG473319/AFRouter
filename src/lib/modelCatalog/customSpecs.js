@@ -1,6 +1,7 @@
 import { getProviderConnections } from "@/lib/db/index.js";
 import registry from "open-sse/providers/registry/index.js";
 import { kiloEffortValues } from "@/lib/kiloReasoning.js";
+import { openRouterEffortValues } from "./efforts.js";
 
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -18,10 +19,46 @@ export function normalizeCatalogSpecs(model) {
     // strips the pdf flag from a large slice of the catalog.
     caps.pdf = input.includes("pdf") || input.includes("file");
   }
+  // Output modalities are capabilities too: a model that emits images or audio
+  // must not read as a text-only chat model (Nous lists image-output and
+  // audio-output entries this way). Emitted only when the catalog declares the
+  // field, so a partial listing keeps the existing default instead of a
+  // fabricated false.
+  const output = model.architecture?.output_modalities;
+  if (Array.isArray(output)) {
+    caps.imageOutput = output.includes("image");
+    caps.audioOutput = output.includes("audio");
+  }
   const parameters = model.supported_parameters;
   if (Array.isArray(parameters)) {
     caps.tools = parameters.includes("tools");
     caps.reasoning = parameters.includes("reasoning") || parameters.includes("reasoning_effort");
+  }
+  // The reasoning EFFORT LADDER, when the catalog publishes one.
+  //
+  // Kilo publishes it as `opencode.variants` (a display-label → wire-effort map
+  // and the only reason a Kilo model has selectable levels at all).
+  //
+  // OpenRouter publishes none — and the comment here used to claim Nous didn't
+  // either. That is wrong: Nous's /v1/models carries
+  // `reasoning.supported_efforts` for ~188 of its 422 models, already spelled in
+  // our exact wire vocabulary (none/minimal/low/medium/high/xhigh/max), so those
+  // levels are taken verbatim instead of being left to the hand tables' family
+  // guesses. `reasoning.mandatory` (~113 models) means thinking cannot be turned
+  // off, so `none` is dropped and the model marked not-disableable — a ladder
+  // that offers `none` to a model that 400s on it is worse than no ladder.
+  //
+  // Only WIRE values are kept (Kilo's variant keys are display labels the router
+  // cannot send), and an empty ladder is dropped, so "no reasoning" stays
+  // distinguishable from "reasons, no selectable effort".
+  const efforts = openRouterEffortValues(model);
+  if (efforts?.length) {
+    caps.reasoningEfforts = efforts;
+    caps.reasoning = true;
+    if (model?.reasoning?.mandatory === true) caps.thinkingCanDisable = false;
+  } else {
+    const kilo = kiloEffortValues(model);
+    if (kilo?.length) caps.reasoningEfforts = kilo;
   }
   for (const [key, value] of Object.entries({
     contextWindow: model.context_length,
@@ -29,16 +66,6 @@ export function normalizeCatalogSpecs(model) {
   })) {
     if (Number.isSafeInteger(value) && value > 0) caps[key] = value;
   }
-  // The per-model reasoning vocabulary, when the catalog publishes one. OpenRouter
-  // and Nous publish no level map, so this stays absent there and the hand tables
-  // keep answering; Kilo publishes `opencode.variants` and it is the only reason
-  // a Kilo model has selectable levels at all. Only WIRE values are taken —
-  // Kilo's variant keys are display labels (`instant`/`thinking`) the router
-  // cannot send, so kiloEffortValues drops them. Absent when the model publishes
-  // no variants, and an empty list is dropped too, so "no reasoning" stays
-  // distinguishable from "reasons, no selectable effort".
-  const efforts = kiloEffortValues(model);
-  if (efforts?.length) caps.reasoningEfforts = efforts;
   return { ...(typeof model.name === "string" && model.name ? { name: model.name } : {}), caps };
 }
 

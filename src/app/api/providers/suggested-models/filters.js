@@ -150,11 +150,45 @@ export const FILTERS = {
       .map((m) => ({ id: m.id, name: m.name || m.id, contextLength: m.context_length }))
       .sort((a, b) => String(a.id).localeCompare(String(b.id))),
 
-  // Nous Portal mirrors OpenRouter's catalog shape; the picker section is
-  // "free models", and on Nous only ids suffixed ":free" are free.
-  "nous": (models) =>
-    (Array.isArray(models) ? models : [])
-      .filter((m) => m.id?.endsWith(":free"))
-      .map((m) => ({ id: m.id, name: m.name || m.id, contextLength: m.context_length }))
-      .sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0)),
+  // Nous Portal mirrors OpenRouter's catalog shape but, unlike OpenRouter, its
+  // /v1/models publishes REAL per-model pricing — so price is the free signal,
+  // not the id suffix. 9 of the 11 currently-$0 ids carry ":free", but
+  // `inclusionai/ling-3.1-flash` and `stealth/missingno` are $0 with no suffix,
+  // so a suffix filter silently hid them. Pricing is a decimal STRING that
+  // arrives in two spellings ("0" and "0.0000000000"), so it must be compared
+  // NUMERICALLY — an exact string match on "0" misses half the free tier, and
+  // `Number("")` is 0, so an empty/absent price must be rejected rather than
+  // read as free. Every row carries `isFree: true` so the dashboard can label a
+  // $0 row whose id has no suffix (same contract Kilo's isFree publishes).
+  //
+  // Only text-OUTPUT-only models are chat suggestions: the catalog also lists 34
+  // embeddings models plus image-output ("image","text") and audio-output
+  // ("text","audio") entries that a chat picker must not offer. A missing or
+  // empty output list is not evidence of chat support either, so it is dropped.
+  "nous": (models) => {
+    // NaN === 0 is false, so absent/malformed pricing reads as NOT free. The
+    // type guard matters: Number("") and Number(null) are both 0, so without it
+    // a missing price would be scored as free.
+    const price = (v) => {
+      if (typeof v !== "string" && typeof v !== "number") return NaN;
+      if (typeof v === "string" && v.trim() === "") return NaN;
+      return Number(v);
+    };
+    return (Array.isArray(models) ? models : [])
+      .filter((m) => m?.id)
+      .filter((m) => {
+        const out = m?.architecture?.output_modalities || ["text"];
+        return out.length > 0 && out.every((o) => o === "text");
+      })
+      .filter((m) => price(m?.pricing?.prompt) === 0 && price(m?.pricing?.completion) === 0)
+      .map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        ...(Number.isSafeInteger(m.context_length) && m.context_length > 0
+          ? { contextLength: m.context_length }
+          : {}),
+        isFree: true,
+      }))
+      .sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0));
+  },
 };

@@ -52,6 +52,21 @@ export async function getPricingForModel(provider, model) {
   if (!model) return null;
   const userPricing = await getUserPricing();
   if (provider && userPricing[provider]?.[model]) return userPricing[provider][model];
+  // The gateway's own catalog price comes before the static tables: a reseller
+  // publishes its real rate (Nous bills claude-haiku-5.5 at $0.10/$0.50, an
+  // order under the vendor list price MODEL_PRICING carries) and its free models
+  // are $0 by price, not by an id suffix — so resolving them against the
+  // canonical tables would charge real money for a $0 model. Providers whose
+  // catalog carries no pricing (everything models.dev-sourced) read null here
+  // and fall through unchanged. Fail-open by design: any read error must not
+  // take cost calculation down with it.
+  try {
+    const { getCatalogPricing } = await import("open-sse/providers/catalogOverride.js");
+    const fromCatalog = getCatalogPricing(provider, model);
+    if (fromCatalog && typeof fromCatalog.input === "number" && typeof fromCatalog.output === "number") {
+      return fromCatalog;
+    }
+  } catch { /* catalog unreadable — fall through to the static resolver */ }
   const { getPricingForModel: resolveConst } = await import("open-sse/providers/pricing.js");
   return resolveConst(provider, model);
 }
