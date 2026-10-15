@@ -7,7 +7,13 @@
 >
 > AFRouter is a maintained fork of [decolua/9router](https://github.com/decolua/9router) (MIT).
 
-**AFRouter is a maintained personal fork of [9Router](https://github.com/decolua/9router) with extra providers and fixes not yet upstream: Nous Portal (Hermes CLI OAuth), OrcaRouter, concurrent model testing, and a multi-model Grok Build integration. Runs on port **20128** with its own data directory (`%APPDATA%/afrouter` / `~/.afrouter`), so it coexists with a stock 9Router install. Install: `npm install -g @afg473319/afrouter`.**
+AFRouter is a maintained personal fork of 9Router with extra providers and fixes not yet upstream: Nous Portal (Hermes CLI OAuth), OrcaRouter, concurrent model testing, and a multi-model Grok Build integration. It runs on port 20128 with its own data directory (`%APPDATA%/afrouter` / `~/.afrouter`), so it coexists with a stock 9Router install.
+
+Install:
+
+```
+npm install -g @afg473319/afrouter
+```
 
 **Unify your AI coding tools behind one OpenAI/Anthropic-compatible endpoint, with fallback chains, quota tracking, and RTK token savings.**
   
@@ -71,7 +77,7 @@ Providers are grouped by credential type: API key, OAuth, and local/self-hosted.
        │
        ├─→ [API key]     OpenAI, Anthropic, GLM, MiniMax, ...
        ├─→ [OAuth]       Claude Code, Codex, GitHub Copilot, Cursor, ...
-       └─→ [Local]       whisper.cpp, vLLM, llama.cpp, ...
+       └─→ [Local]       Ollama (ollama, ollama-local); self-hosted endpoints via the Self-hosted providers (whisper.cpp, vLLM, llama.cpp, ...)
 
 Result: one OpenAI/Anthropic-compatible endpoint, configurable fallback, RTK token savings
 ```
@@ -89,9 +95,9 @@ afrouter
 
 🎉 Dashboard opens at `http://localhost:20128`
 
-**2. Connect a FREE provider (no signup needed):**
+**2. Connect a provider:**
 
-Dashboard → Providers → Connect **Kiro AI** (~50 credits/month free: Claude 4.5 + GLM-5 + MiniMax) or **OpenCode Free** (no auth) → Done!
+Dashboard → Providers → Connect **Kiro** (free tier: ~50 credits/month) or **OpenCode Free** (no auth required) → Done!
 
 **3. Use in your CLI tool:**
 
@@ -102,7 +108,7 @@ Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
   Model: kr/claude-sonnet-4.5
 ```
 
-**That's it!** Start coding with FREE AI models.
+**That's it!** Point your CLI at `http://localhost:20128/v1` and start coding.
 
 **Alternative: run from source (this repository):**
 
@@ -282,7 +288,7 @@ These videos cover 9Router, the project AFRouter is based on. Titles are preserv
 
 </div>
 
-> 🎬 **Made a video about 9Router?** Submit a [Pull Request](https://github.com/AFG473319/AFRouter/pulls) adding your video to this section — we'll merge it!
+> 🎬 **Made a video about AFRouter?** Open a [Pull Request](https://github.com/AFG473319/AFRouter/pulls) adding it here. For 9Router videos, see the upstream repo (https://github.com/decolua/9router).
 
 ---
 
@@ -694,7 +700,7 @@ Seamless translation between formats:
 ### 🎨 Custom Combos
 
 - Create unlimited model combinations
-- Mix subscription, cheap, and free tiers
+- Mix API-key, OAuth and local providers in one chain
 - Name your combos for easy access
 - Share combos across devices with Cloud Sync
 
@@ -801,7 +807,7 @@ Reality Check:
 
 - **Subscription providers** (Claude Code, Codex): Pay them directly via their websites
 - **Cheap providers** (GLM, MiniMax): Pay them directly, AFRouter just routes
-- **FREE providers** (iFlow, Kiro, Qwen): Genuinely free forever, no hidden charges
+- **FREE providers** (iFlow, Kiro, Qwen): Free within the provider's terms and limits
 - **AFRouter**: Never charges anything, ever
 
 ---
@@ -858,7 +864,7 @@ Result: 5 layers of fallback = zero downtime
 Monthly cost: $20-200 (subscriptions) + $10-20 (backup)
 ```
 
-### Case 4: "I want FREE AI in OpenClaw"
+### Case 4: "I want a free-tier setup for OpenClaw"
 
 **Problem:** Need AI assistant in messaging apps (WhatsApp, Telegram, Slack...), completely free
 
@@ -910,7 +916,7 @@ AFRouter is a local proxy/router. It doesn't have your credit card, can't send i
 </details>
 
 <details>
-<summary><b>🆓 Are FREE providers really unlimited?</b></summary>
+<summary><b>🆓 Do free-tier providers have limits?</b></summary>
 
 **Mostly!** The current FREE providers (Kiro, OpenCode Free, Vertex) are genuinely free, but free tiers have limits:
 

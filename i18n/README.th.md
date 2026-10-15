@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 นี่คือเอกสารแปลภาษาไทยของไฟล์ Markdown ต้นฉบับ โดยรักษาโครงสร้างและซินแท็กซ์ทางเทคนิคทั้งหมดไว้เหมือนเดิม
 
 <div align="center">
@@ -720,3 +722,4 @@ MIT License - ดู [LICENSE](../LICENSE) สำหรับรายละเ�
 <div align="center">
   <sub>สร้างด้วย ❤️ สำหรับนักพัฒนาที่เขียนโค้ด 24/7</sub>
 </div>
+

@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 <div align="center">
   <img src="../images/afrouter.png?1" alt="Tableau de bord AFRouter" width="800"/>
   
@@ -1430,4 +1432,5 @@ Licence MIT - voir [LICENSE](LICENSE) pour plus de détails.
 <div align="center">
   <sub>Conçu avec ❤️ pour les développeurs qui codent 24h/24 et 7j/7</sub>
 </div>
+
 

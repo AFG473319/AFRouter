@@ -1,6 +1,6 @@
 # Welcome to AFRouter
 
-**Use Claude, Codex, Gemini for FREE • Ultra-cheap alternatives from $0.20/1M tokens**
+**Route Claude, Codex, Gemini and 40+ providers through one OpenAI/Anthropic-compatible endpoint**
 
 AFRouter is an AI model router that maximizes your subscription value and minimizes costs through intelligent routing and automatic fallback.
 
@@ -29,7 +29,7 @@ AFRouter is a smart proxy that sits between your coding tools (Cursor, Cline, Cl
 ### 🔄 Smart 3-Tier Fallback
 
 ```
-Setup once, never stop coding:
+Setup once, route across providers with automatic fallback:
 
 Tier 1 (SUBSCRIPTION): Claude Code → Codex → Gemini
   ↓ quota exhausted

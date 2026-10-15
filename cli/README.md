@@ -40,7 +40,7 @@ npx @afg473319/afrouter
 
 **Runs alongside 9Router?** Yes — AFRouter keeps its data in its own directory, so it does not share state with a stock 9Router install. Only run one of them on port 20128 at a time, or start the second with `--port`.
 
-**2. Connect a FREE provider (no signup needed):**
+**2. Connect a provider:**
 
 Dashboard → Providers → Connect **Kiro** or **OpenCode Free** (no auth) → Done!
 
@@ -53,7 +53,7 @@ Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
   Model:    kr/claude-sonnet-4.5
 ```
 
-That's it! Start coding with FREE AI models.
+That's it! Point your CLI at http://localhost:20128/v1 and start coding.
 
 > **Docker?** AFRouter is npm-only for now — use [upstream 9Router's Docker images](https://hub.docker.com/r/decolua/9router) if you deploy in a container.
 

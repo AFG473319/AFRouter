@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 <div align="center">
   <img src="../images/afrouter.png?1" alt="Panel de control de AFRouter" width="800"/>
   
@@ -1430,4 +1432,5 @@ Licencia MIT - consulta [LICENSE](LICENSE) para más detalles.
 <div align="center">
   <sub>Hecho con ❤️ para desarrolladores que programan 24/7</sub>
 </div>
+
 

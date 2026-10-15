@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 <div align="center">
   <img src="../images/afrouter.png?1" alt="AFRouter Dashboard" width="800"/>
 
@@ -953,3 +955,4 @@ MIT License — lihat [LICENSE](../LICENSE) untuk detailnya.
 [🌐 Website](https://9router.com) • [📦 npm](https://www.npmjs.com/package/afrouter) • [🐛 Laporkan Bug](https://github.com/AFG473319/AFRouter/issues)
 
 </div>
+

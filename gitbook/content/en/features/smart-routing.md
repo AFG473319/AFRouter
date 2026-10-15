@@ -41,7 +41,7 @@ Request → AFRouter → Check Tier 1 (Subscription)
 - Qwen (3 models)
 - Kiro (Claude FREE)
 
-**Goal**: Zero-cost fallback for unlimited coding.
+**Goal**: Keep requests flowing across your configured providers when one is unavailable.
 
 ---
 

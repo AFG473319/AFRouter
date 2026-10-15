@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 <div align="center">
   <img src="../images/afrouter.png?1" alt="Панель управления AFRouter" width="800"/>
   
@@ -1308,3 +1310,4 @@ OPENAI_API_KEY="your-cloud-key" bash tester/security/test-cloud-openai-compatibl
 <div align="center">
   <sub>Создано с ❤️ для разработчиков, которые кодят 24/7</sub>
 </div>
+
