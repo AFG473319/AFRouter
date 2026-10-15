@@ -60,7 +60,7 @@ It intelligently routes requests across multiple AI providers using a 3-tier fal
 - **Qwen** - 3 models unlimited (FREE OAuth)
 - **Kiro** - Claude Sonnet/Haiku (FREE AWS Builder ID)
 
-**You can code for FREE forever using only free tier providers!**
+**You can use free-tier providers at no cost within their provider limits.**
 
 **Optional paid providers:**
 - Subscription services you may already have (Claude Code, Codex, Copilot)

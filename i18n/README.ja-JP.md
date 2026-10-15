@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 <div align="center">
   <img src="../images/afrouter.png?1" alt="AFRouter Dashboard" width="800"/>
 
@@ -1206,3 +1208,4 @@ MITライセンス - 詳細は [LICENSE](../LICENSE) を参照してください
 <div align="center">
   <sub>24時間365日コーディングする開発者のために ❤️ で構築</sub>
 </div>
+

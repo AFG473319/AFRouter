@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 <div align="center">
   <img src="./images/afrouter.png?1" alt="داشبورد AFRouter" width="800"/>
   
@@ -1428,3 +1430,4 @@ Authorization: Bearer your-api-key
 <div align="center">
   <sub>ساخته شده با ❤️ برای توسعه‌دهندگانی که ۲۴/۷ کدنویسی می‌کنند</sub>
 </div>
+

@@ -1,6 +1,6 @@
 # Smart Routing & Auto Fallback
 
-AFRouter automatically routes your requests through the best available provider using a 3-tier fallback system. Never stop coding due to quota limits or rate limiting.
+AFRouter automatically routes your requests through the best available provider using configurable fallback chains, so requests keep flowing when a provider is unavailable.
 
 ---
 
@@ -41,7 +41,7 @@ Request → AFRouter → Check Tier 1 (Subscription)
 - Qwen (3 models)
 - Kiro (Claude FREE)
 
-**Goal**: Zero-cost fallback for unlimited coding.
+**Goal**: Keep requests flowing across your configured providers when one is unavailable.
 
 ---
 

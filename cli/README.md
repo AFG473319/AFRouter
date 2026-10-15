@@ -1,8 +1,6 @@
-# AFRouter — FREE AI Router & Token Saver
+# AFRouter — Self-hosted AI Gateway CLI
 
-**Never stop coding. Save 20-40% tokens with RTK + auto-fallback to FREE & cheap AI models.**
-
-**Connect All AI Code Tools (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, OpenClaw...) to 40+ AI Providers & 100+ Models.**
+**AFRouter: a self-hosted, OpenAI/Anthropic-compatible AI gateway routing coding CLIs across 40+ providers with fallback, quota tracking and per-model capability resolution.** Fork of [decolua/9router](https://github.com/decolua/9router) (MIT).
 
 > **AFRouter** is a maintained personal fork of [9Router](https://github.com/decolua/9router). It ships extra providers and fixes not yet upstream — Nous Portal (Hermes CLI OAuth), OrcaRouter, concurrent model testing on provider cards, and a multi-model Grok Build integration — with its own command (`afrouter`) and separate data directory.
 
@@ -16,21 +14,15 @@
 
 ## 🤔 Why AFRouter?
 
-**Stop wasting money, tokens and hitting limits:**
+**AFRouter provides:**
 
-- ❌ Subscription quota expires unused every month
-- ❌ Rate limits stop you mid-coding
-- ❌ Tool outputs (git diff, grep, ls...) burn tokens fast
-- ❌ Expensive APIs ($20-50/month per provider)
-
-**AFRouter solves this** (all of 9Router's core, plus the fork's extras):
-
-- ✅ **RTK Token Saver** - Auto-compress tool_result, save 20-40% tokens
-- ✅ **Maximize subscriptions** - Track quota, use every bit before reset
-- ✅ **Auto fallback** - Subscription → Cheap → Free, zero downtime
-- ✅ **Multi-account** - Round-robin between accounts per provider
-- ✅ **Universal** - Works with any OpenAI/Claude-compatible CLI
-- ✅ **Fork extras** - Nous Portal, OrcaRouter, multi-model Grok Build, concurrent model tests
+- ✅ **Unified API** – One OpenAI/Anthropic-compatible endpoint across 40+ providers.
+- ✅ **Fallback chains** – Ordered providers (API key, OAuth, local) with automatic failover.
+- ✅ **RTK Token Saver** – Auto-compress tool_result content, saving 20-40% tokens per request.
+- ✅ **Quota & usage tracking** – Live token counts, reset countdowns, and cost estimation.
+- ✅ **Multi-account** – Round-robin or priority routing across accounts per provider.
+- ✅ **CLI config writers** – Atomic, backup-first integration with Claude Code, Codex, Cursor, Cline, OpenCode, etc.
+- ✅ **Fork extras** – Nous Portal, OrcaRouter, multi-model Grok Build, concurrent model tests
 
 ---
 
@@ -48,9 +40,9 @@ npx @afg473319/afrouter
 
 **Runs alongside 9Router?** Yes — AFRouter keeps its data in its own directory, so it does not share state with a stock 9Router install. Only run one of them on port 20128 at a time, or start the second with `--port`.
 
-**2. Connect a FREE provider (no signup needed):**
+**2. Connect a provider:**
 
-Dashboard → Providers → Connect **Kiro AI** (free Claude unlimited) or **OpenCode Free** (no auth) → Done!
+Dashboard → Providers → Connect **Kiro** or **OpenCode Free** (no auth) → Done!
 
 **3. Use in your CLI tool:**
 
@@ -61,7 +53,7 @@ Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
   Model:    kr/claude-sonnet-4.5
 ```
 
-That's it! Start coding with FREE AI models.
+That's it! Point your CLI at http://localhost:20128/v1 and start coding.
 
 > **Docker?** AFRouter is npm-only for now — use [upstream 9Router's Docker images](https://hub.docker.com/r/decolua/9router) if you deploy in a container.
 

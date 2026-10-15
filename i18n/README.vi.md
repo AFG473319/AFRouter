@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 <div align="center">
   <img src="../images/afrouter.png?1" alt="Bảng điều khiển AFRouter" width="800"/>
   
@@ -1305,3 +1307,4 @@ Giấy phép MIT - xem [LICENSE](../LICENSE) để biết chi tiết.
 <div align="center">
   <sub>Được xây dựng với ❤️ cho các nhà phát triển code 24/7</sub>
 </div>
+

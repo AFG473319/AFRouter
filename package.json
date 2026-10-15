@@ -1,8 +1,9 @@
 {
   "name": "afrouter-app",
   "version": "0.5.98",
-  "description": "AFRouter web dashboard",
+  "description": "AFRouter: a self-hosted, OpenAI/Anthropic-compatible AI gateway that routes coding CLIs (Claude Code, Codex, OpenCode, Cline, Zed, etc.) across 40+ providers with fallback, quota tracking and per-model capability resolution.",
   "private": true,
+  "keywords": [ "ai-gateway", "llm-router", "openai-compatible", "anthropic-compatible", "cli-tools", "nextjs" ],
   "scripts": {
     "dev": "next dev --port 20128",
     "dev:webpack": "next dev --webpack --port 20128",

@@ -137,7 +137,7 @@ Model: qw/qwen3-coder-plus
 |------|--------------|--------|-------|
 | FREE | $0 | Claude Sonnet 4.5, Haiku 4.5 | Unlimited |
 
-**Best Value:** FREE Claude! Same quality as paid Claude Code.
+**Note:** Kiro exposes Claude Sonnet 4.5 / Haiku 4.5 through its own free/pro tiers.
 
 ### Setup
 
@@ -247,7 +247,7 @@ Use in CLI: complete-fallback
 - Tier 3: Cheap backup (GLM, MiniMax)
 - Tier 4: FREE fallback (iFlow, Kiro)
 
-**Never stop coding!**
+**Keep working across your configured providers.**
 
 ---
 

@@ -1,3 +1,5 @@
+> **Note:** This translation may be outdated; the English \README.md\ is the maintained version.
+
 <div align="center">
   <img src="../images/afrouter.png?1" alt="AFRouter Dashboard" width="800"/>
   
@@ -1304,3 +1306,4 @@ MIT License - 详情请参阅 [LICENSE](../LICENSE)。
 <div align="center">
   <sub>用 ❤️ 为 24/7 编程的开发者构建</sub>
 </div>
+

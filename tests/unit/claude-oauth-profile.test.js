@@ -7,16 +7,16 @@ import { PROVIDER_OAUTH } from "../../open-sse/providers/index.js";
 // Live shape of GET https://api.anthropic.com/api/oauth/profile
 const PROFILE = {
   account: {
-    uuid: "90158bdc-084b-47fa-970e-47c858a0a54d",
-    full_name: "admin papaya",
-    display_name: "admin papaya",
-    email: "admin@papaya.asia",
+    uuid: "00000000-0000-4000-8000-000000000001",
+    full_name: "Example User",
+    display_name: "Example User",
+    email: "user@example.com",
     has_claude_max: true,
     has_claude_pro: false,
   },
   organization: {
-    uuid: "1990e095-ff60-4841-babc-e46a00092d12",
-    name: "admin@papaya.asia's Organization",
+    uuid: "00000000-0000-4000-8000-000000000002",
+    name: "user@example.com's Organization",
     organization_type: "claude_max",
     rate_limit_tier: "default_claude_max_20x",
   },
@@ -65,14 +65,14 @@ describe("claude OAuth profile (postExchange → mapTokens)", () => {
       refreshToken: "ort-token",
       expiresIn: 3600,
       scope: "user:inference",
-      email: "admin@papaya.asia",
-      displayName: "admin papaya",
+      email: "user@example.com",
+      displayName: "Example User",
       providerSpecificData: {
-        claudeAccountUuid: "90158bdc-084b-47fa-970e-47c858a0a54d",
+        claudeAccountUuid: "00000000-0000-4000-8000-000000000001",
         claudeHasMax: true,
         claudeHasPro: false,
-        claudeOrgUuid: "1990e095-ff60-4841-babc-e46a00092d12",
-        claudeOrgName: "admin@papaya.asia's Organization",
+        claudeOrgUuid: "00000000-0000-4000-8000-000000000002",
+        claudeOrgName: "user@example.com's Organization",
         claudeOrgType: "claude_max",
         claudeRateLimitTier: "default_claude_max_20x",
       },
@@ -123,3 +123,5 @@ describe("claude plan name (usage reply)", () => {
     expect(claudePlanName({})).toBe("Claude Code");
   });
 });
+
+

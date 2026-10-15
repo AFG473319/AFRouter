@@ -1,5 +1,8 @@
 # v0.5.98 (2026-10-12)
 
+## Documentation
+- **docs: neutral positioning, responsible-use notice, correct community video attribution** — rewritten README/provider docs positioning, added responsible-use disclaimer, corrected community video titles/attribution, normalized npm package metadata.
+
 ## Features
 - **Claude Code lists many custom models in its picker.** The card could pin exactly one model per family — each `ANTHROPIC_DEFAULT_*_MODEL` env var holds a single id, so `/model` offered at most four custom models. Claude Code's own `modelPicker.options` array (`settings.json`, user or managed scope, v2.1.242+) takes any number of `{ model, label?, description? }` rows verbatim, so the card now manages exactly that one key (add/remove, model + label + description, Select Model modal, `[1m]` marker typed verbatim, blanks/duplicates dropped, order preserved, capped at 50) while `replaceBuiltInOptions`/`behavesAs` stay user-owned and are preserved across Apply and Reset. GET/POST/DELETE round-trip the rows and Manual Config includes them.
 
