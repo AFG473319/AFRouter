@@ -136,11 +136,12 @@ import p131 from "./typesafe.js";
 import p132 from "./tinyfish.js";
 import p133 from "./v1m.js";
 import p134 from "./muse.js";
-// Restored: these three registry files existed but were never listed here, so
+// Restored: these registry files existed but were never listed here, so
 // PROVIDERS never built them and they were invisible on the providers page
 // (their OAuth/refresh/test wiring was dead code as a result). Each had its own
 // feature commit that added the file without re-running the index.
-import p135 from "./agnesai.js";
+// (agnesai.js was one of them too; it was merged into agnes.js and removed —
+// see the "agnesai" alias there plus the 002-agnesai-to-agnes DB migration.)
 import p136 from "./nous-portal.js";
 import p137 from "./orcarouter.js";
 export default [
@@ -277,7 +278,6 @@ export default [
   p132,
   p133,
   p134,
-  p135,
   p136,
   p137,
 ];

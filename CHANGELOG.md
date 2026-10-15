@@ -1,3 +1,10 @@
+# Unreleased
+
+## Fixes
+- **The duplicate Agnes AI provider is gone, and the survivor keeps working for existing users.** Two registry entries pointed at `apihub.agnes-ai.com` and shipped the same "Agnes 2.5 / 3.0" models: `agnes` (branded colour, `priority: 120`, curated seeds, a curated `agnes.png`, and no `modelsFetcher` because `/v1/models` is token-gated) and `agnesai` (no priority, an off-brand near-black colour, a `modelsFetcher` on the token-gated endpoint, non-catalog `agnes-image-2.5-flash` / `agnes-video-2.5-flash` ids, and an `agnes` alias that shadowed the real provider in alias resolution — so `agnes/…` requests were routed into the duplicate and never found their saved connection). The `agnesai` entry and its icon are removed and `agnesai` becomes an alias on `agnes`, so saved `agnesai/agnes-2.5-flash` model strings still resolve. Stored state is migrated by `002-agnesai-to-agnes`: `providerConnections.provider`, combo model lists and user model aliases are rewritten from `agnesai` to `agnes`, and an `/providers/agnesai.png` icon lookup falls back to the brand mark.
+
+Tests: `tests/unit/agnesai-merged-into-agnes.test.js` (new).
+
 # v0.5.98 (2026-10-12)
 
 ## Documentation

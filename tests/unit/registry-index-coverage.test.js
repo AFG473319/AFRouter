@@ -8,7 +8,8 @@ import registry from "../../open-sse/providers/registry/index.js";
 // nothing regenerates or checks it. Three providers (agnesai, nous-portal,
 // orcarouter) shipped as registry files that were never listed here, so
 // PROVIDERS never built them: they were absent from the providers page and all
-// their OAuth/refresh/test wiring was unreachable dead code. This test makes that
+// their OAuth/refresh/test wiring was unreachable dead code. (agnesai has since
+// been merged into agnes and its registry file deleted.) This test makes that
 // drift loud instead of silent.
 
 const REGISTRY_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "open-sse", "providers", "registry");
