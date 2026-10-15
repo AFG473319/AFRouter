@@ -20,7 +20,7 @@ AFRouter is a smart proxy that sits between your coding tools (Cursor, Cline, Cl
 - ✅ **Maximize Subscriptions** - Track and use every bit of Claude Code, Codex, Gemini quota
 - ✅ **FREE Available** - Access iFlow, Qwen, Kiro models via CLI
 - ✅ **Ultra-Cheap Backup** - GLM ($0.6/1M), MiniMax M2.1 ($0.20/1M)
-- ✅ **Smart Fallback** - Subscription → Cheap → Free, automatic switching
+- ✅ **Smart Fallback** - Configurable provider fallback chains, automatic switching
 
 ---
 

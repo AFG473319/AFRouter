@@ -247,7 +247,7 @@ Use in CLI: complete-fallback
 - Tier 3: Cheap backup (GLM, MiniMax)
 - Tier 4: FREE fallback (iFlow, Kiro)
 
-**Never stop coding!**
+**Keep working across your configured providers.**
 
 ---
 

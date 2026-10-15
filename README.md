@@ -1,13 +1,15 @@
 <div align="center">
   <img src="./images/afrouter.png?1" alt="AFRouter Dashboard" width="800"/>
   
-  # AFRouter - FREE AI Router & Token Saver
+  # AFRouter - Self-hosted AI Gateway & LLM Router
 
-> **AFRouter** is a maintained personal fork of [9Router](https://github.com/decolua/9router) with extra providers and fixes not yet upstream: Nous Portal (Hermes CLI OAuth), OrcaRouter, concurrent model testing, and a multi-model Grok Build integration. Runs on port **20128** with its own data directory (`%APPDATA%/afrouter` / `~/.afrouter`), so it coexists with a stock 9Router install. Install: `npm install -g @afg473319/afrouter`.
-  
-  **Never stop coding. Save 20-40% tokens with RTK + auto-fallback to FREE & cheap AI models.**
-  
-  **Connect All AI Code Tools (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, OpenClaw...) to 40+ AI Providers & 100+ Models.**
+> **AFRouter** is a self-hosted, OpenAI/Anthropic-compatible AI gateway that routes coding CLIs (Claude Code, Codex, OpenCode, Cline, Zed, etc.) across 40+ providers with fallback, quota tracking and per-model capability resolution.
+>
+> AFRouter is a maintained fork of [decolua/9router](https://github.com/decolua/9router) (MIT).
+
+**AFRouter is a maintained personal fork of [9Router](https://github.com/decolua/9router) with extra providers and fixes not yet upstream: Nous Portal (Hermes CLI OAuth), OrcaRouter, concurrent model testing, and a multi-model Grok Build integration. Runs on port **20128** with its own data directory (`%APPDATA%/afrouter` / `~/.afrouter`), so it coexists with a stock 9Router install. Install: `npm install -g @afg473319/afrouter`.**
+
+**Unify your AI coding tools behind one OpenAI/Anthropic-compatible endpoint, with fallback chains, quota tracking, and RTK token savings.**
   
   [![npm](https://img.shields.io/npm/v/@afg473319/afrouter.svg)](https://www.npmjs.com/package/@afg473319/afrouter)
   [![Downloads](https://img.shields.io/npm/dm/@afg473319/afrouter.svg)](https://www.npmjs.com/package/@afg473319/afrouter)
@@ -22,23 +24,30 @@
 
 ---
 
+## ⚠️ Responsible use
+
+AFRouter is a self-hosted gateway. You are responsible for complying with each provider's Terms of Service.
+
+Routing a personal subscription (e.g. Claude, ChatGPT/Codex, GitHub Copilot, Kiro) into third-party tools may violate that provider's terms and can lead to account suspension. Prefer official API keys where the terms require them.
+
+The Kiro MITM / traffic-interception feature is **advanced, opt-in, and use at your own risk** — it may violate Kiro's terms and can lead to account suspension.
+
+AFRouter is not affiliated with and is not endorsed by Anthropic, OpenAI, GitHub, Google, AWS/Kiro, xAI or any other provider. All trademarks belong to their respective owners.
+
+---
+
 ## 🤔 Why AFRouter?
 
-**Stop wasting money, tokens and hitting limits:**
+**AFRouter provides:**
 
-- ❌ Subscription quota expires unused every month
-- ❌ Rate limits stop you mid-coding
-- ❌ Tool outputs (git diff, grep, ls...) burn tokens fast
-- ❌ Expensive APIs ($20-50/month per provider)
-- ❌ Manual switching between providers
+- ✅ **Unified API** – One OpenAI/Anthropic-compatible endpoint for 40+ providers and 100+ models; switch providers without changing your CLI setup.
+- ✅ **Fallback chains** – Ordered model combinations (your choice of API-key, OAuth, and local providers) with automatic failover on errors or quota exhaustion.
+- ✅ **Per-model capability resolution** – Context windows, effort/thinking levels, and format handling derived from the provider registry, not hardcoded.
+- ✅ **Quota & usage tracking** – Live token counts, reset countdowns, and cost estimation across subscription and API-key accounts.
+- ✅ **CLI config writers** – Atomic, backup-first integration with Claude Code, Codex, Cursor, Cline, OpenCode, ZCode, and more.
+- ✅ **RTK token savings** – Auto-compress tool outputs (`git diff`, `grep`, `ls`, ...) before they reach the model, saving 20-40% input tokens per request.
 
-**AFRouter solves this:**
-
-- ✅ **RTK Token Saver** - Auto-compress tool_result content, save 20-40% tokens per request
-- ✅ **Maximize subscriptions** - Track quota, use every bit before reset
-- ✅ **Auto fallback** - Subscription → Cheap → Free, zero downtime
-- ✅ **Multi-account** - Round-robin between accounts per provider
-- ✅ **Universal** - Works with Claude Code, Codex, Cursor, Cline, any CLI tool
+Providers are grouped by credential type: API key, OAuth, and local/self-hosted.
 
 ---
 
@@ -46,26 +55,25 @@
 
 ```
 ┌─────────────┐
-│  Your CLI   │  (Claude Code, Codex, OpenClaw, Cursor, Cline...)
+│  Your CLI   │  (Claude Code, Codex, OpenClaw, Cursor, Cline, ...)
 │   Tool      │
 └──────┬──────┘
-       │ http://localhost:20128/v1
+       │ http://localhost:20128/v1  (OpenAI/Anthropic-compatible)
        ↓
 ┌─────────────────────────────────────────────┐
-│           AFRouter (Smart Router)            │
-│  • RTK Token Saver (cut tool_result tokens) │
-│  • Format translation (OpenAI ↔ Claude)     │
-│  • Quota tracking                           │
-│  • Auto token refresh                       │
+│           AFRouter (self-hosted gateway)     │
+│  • Format translation (OpenAI ↔ Claude ↔ ...)│
+│  • RTK Token Saver (compress tool_result)    │
+│  • Quota tracking + auto token refresh       │
+│  • Fallback chains + multi-account routing   │
+│  • Per-model capability resolution            │
 └──────┬──────────────────────────────────────┘
        │
-       ├─→ [Tier 1: SUBSCRIPTION] Claude Code, Codex, GitHub Copilot
-       │   ↓ quota exhausted
-       ├─→ [Tier 2: CHEAP] GLM ($0.6/1M), MiniMax ($0.2/1M)
-       │   ↓ budget limit
-       └─→ [Tier 3: FREE] Kiro, OpenCode Free, Vertex ($300 credits)
+       ├─→ [API key]     OpenAI, Anthropic, GLM, MiniMax, ...
+       ├─→ [OAuth]       Claude Code, Codex, GitHub Copilot, Cursor, ...
+       └─→ [Local]       whisper.cpp, vLLM, llama.cpp, ...
 
-Result: Never stop coding, minimal cost + 20-40% token savings via RTK
+Result: one OpenAI/Anthropic-compatible endpoint, configurable fallback, RTK token savings
 ```
 
 ---
@@ -164,7 +172,9 @@ Available domains: `providers`, `nodes`, `keys`, `combos`, `models`, `usage`, `s
 
 ---
 
-## Video Guides
+## Community videos (about upstream 9Router)
+
+These videos cover 9Router, the project AFRouter is based on. Titles are preserved as published by their authors.
 
 <div align="center">
 
@@ -172,106 +182,98 @@ Available domains: `providers`, `nodes`, `keys`, `combos`, `models`, `usage`, `s
   <tr>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=X69n5Lm06Yw">
-        <img src="https://img.youtube.com/vi/X69n5Lm06Yw/maxresdefault.jpg" alt="Tiết kiệm chi phí LLM với AFRouter" width="300"/>
+        <img src="https://img.youtube.com/vi/X69n5Lm06Yw/maxresdefault.jpg" alt="Tiết kiệm chi phí gọi LLM cho Openclaw với 9Router - Mì AI" width="300"/>
       </a><br/>
       <b>🇻🇳 Tiếng Việt</b><br/>
-      <sub>Tiết kiệm chi phí LLM cho OpenClaw với AFRouter<br/>by <a href="https://www.youtube.com/c/M%C3%ACAIblog">Mì AI</a></sub>
+      <sub>Tiết kiệm chi phí gọi LLM cho Openclaw với 9Router - Mì AI<br/>by <a href="https://www.youtube.com/@miaivn">Mì AI</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://youtu.be/VQAw612S27Y">
-        <img src="https://img.youtube.com/vi/VQAw612S27Y/maxresdefault.jpg" alt="AFRouter + Claude Code FREE Unlimited Setup" width="300"/>
+        <img src="https://img.youtube.com/vi/VQAw612S27Y/maxresdefault.jpg" alt="Claude Code FREE UNLIMITED - No Refresh Token | 2026 Working Method (One Time Setup)" width="300"/>
       </a><br/>
       <b>🇵🇰 اردو / हिन्दी</b><br/>
-      <sub>AFRouter + Claude Code FREE Unlimited Setup<br/>by <a href="https://www.youtube.com/@BuildAIWithHamid">Build AI With Hamid</a></sub>
+      <sub>Claude Code FREE UNLIMITED - No Refresh Token | 2026 Working Method (One Time Setup)<br/>by <a href="https://www.youtube.com/@BuildWithAIHamid">Build AI With – Hamid</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=raEyZPg5xE0">
-        <img src="https://img.youtube.com/vi/raEyZPg5xE0/maxresdefault.jpg" alt="AFRouter Setup Tutorial" width="300"/>
+        <img src="https://img.youtube.com/vi/raEyZPg5xE0/maxresdefault.jpg" alt="How to Use Claude Code FREE | 9Router Setup Tutorial | Step-by-Step Guide 2026" width="300"/>
       </a><br/>
       <b>🇺🇸 English</b><br/>
-      <sub>AFRouter + Claude Code FREE Setup<br/>by <a href="https://www.youtube.com/@BuildAIWithHamid">Build AI With Hamid</a></sub>
+      <sub>How to Use Claude Code FREE | 9Router Setup Tutorial | Step-by-Step Guide 2026<br/>by <a href="https://www.youtube.com/@BuildWithAIHamid">Build AI With – Hamid</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://youtu.be/3dF5GIYMrcQ?si=bAyfyiHbARJQAHj_">
-        <img src="https://img.youtube.com/vi/3dF5GIYMrcQ/hqdefault.jpg" alt="AFRouter Setup Tutorial" width="300"/>
+        <img src="https://img.youtube.com/vi/3dF5GIYMrcQ/hqdefault.jpg" alt="Free Claude Code + OpenClaw + Codex — Latest Models via 9Router (Updated 2026)" width="300"/>
       </a><br/>
       <b>🇺🇸 English</b><br/>
-      <sub>AFRouter + Claude Code FREE Setup<br/>by <a href="https://www.youtube.com/@BuildAIWithHamid">Build AI With Hamid</a></sub>
+      <sub>Free Claude Code + OpenClaw + Codex — Latest Models via 9Router (Updated 2026)<br/>by <a href="https://www.youtube.com/@BuildWithAIHamid">Build AI With – Hamid</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=o3qYCyjrFYg">
-        <img src="https://img.youtube.com/vi/o3qYCyjrFYg/maxresdefault.jpg" alt="Claude Code FREE Forever" width="300"/>
+        <img src="https://img.youtube.com/vi/o3qYCyjrFYg/maxresdefault.jpg" alt="How to Use Claude Code FREE Forever | 9Router Complete Setup | Unlimited Models 2026 🚀" width="300"/>
       </a><br/>
       <b>🇺🇸 English</b><br/>
-      <sub>Claude Code FREE Forever — Unlimited Models<br/>by <a href="https://www.youtube.com/@BuildAIWithHamid">Build AI With Hamid</a></sub>
+      <sub>How to Use Claude Code FREE Forever | 9Router Complete Setup | Unlimited Models 2026 🚀<br/>by <a href="https://www.youtube.com/@BuildWithAIHamid">Build AI With – Hamid</a></sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=Ttpc26m39Dw">
-        <img src="https://img.youtube.com/vi/Ttpc26m39Dw/maxresdefault.jpg" alt="Claude CLI Free Setup" width="300"/>
+        <img src="https://img.youtube.com/vi/Ttpc26m39Dw/maxresdefault.jpg" alt="Claude CLI Free Setup with 9Router 🚀" width="300"/>
       </a><br/>
       <b>🇺🇸 English</b><br/>
-      <sub>Claude CLI Free Setup with AFRouter 🚀<br/>by <a href="https://www.youtube.com/@CodeVerseSoban">CodeVerse Soban</a></sub>
+      <sub>Claude CLI Free Setup with 9Router 🚀<br/>by <a href="https://www.youtube.com/@CodeVerseSoban">CodeVerse Soban</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=G-5A_D5Pm6Y">
-        <img src="https://img.youtube.com/vi/G-5A_D5Pm6Y/maxresdefault.jpg" alt="Cài đặt OpenClaw Free A-Z" width="300"/>
+        <img src="https://img.youtube.com/vi/G-5A_D5Pm6Y/maxresdefault.jpg" alt="Hướng Dẫn Cài Đặt OpenClaw Free Từ A-Z | Kết Nối 9Router, OpenAI, Telegram Bot Trên Máy Ảo#maivangia" width="300"/>
       </a><br/>
       <b>🇻🇳 Tiếng Việt</b><br/>
-      <sub>Cài Đặt OpenClaw Free Từ A-Z + AFRouter<br/>by <a href="https://www.youtube.com/@maigia">Mai Gia</a></sub>
+      <sub>Hướng Dẫn Cài Đặt OpenClaw Free Từ A-Z | Kết Nối 9Router, OpenAI, Telegram Bot Trên Máy Ảo#maivangia<br/>by <a href="https://www.youtube.com/@MaiGia">Mai Gia</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=JXmg8_gccgE">
-        <img src="https://img.youtube.com/vi/JXmg8_gccgE/maxresdefault.jpg" alt="FREE OpenClaw with Claude Opus" width="300"/>
+        <img src="https://img.youtube.com/vi/JXmg8_gccgE/maxresdefault.jpg" alt="FREE OpenClaw with Claude Opus 4.6 | 9Router Method | No Ollama, Unlimited! 🤯" width="300"/>
       </a><br/>
       <b>🇺🇸 English</b><br/>
-      <sub>FREE OpenClaw + Claude Opus 4.6<br/>by <a href="https://www.youtube.com/@BuildAIWithHamid">Build AI With Hamid</a></sub>
+      <sub>FREE OpenClaw with Claude Opus 4.6 | 9Router Method | No Ollama, Unlimited! 🤯<br/>by <a href="https://www.youtube.com/@BuildWithAIHamid">Build AI With – Hamid</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=CkVZZUSTXAI">
-        <img src="https://img.youtube.com/vi/CkVZZUSTXAI/mqdefault.jpg" alt="Claude CLI Free Setup" width="300"/>
+        <img src="https://img.youtube.com/vi/CkVZZUSTXAI/mqdefault.jpg" alt="Koding 24 Jam Anti Rate Limit! Hemat Token AI 65% | Tutorial Quick Setup 9Router Indonesia" width="300"/>
       </a><br/>
       <b>🇮🇩 Indonesia</b><br/>
-      <sub>Koding 24 Jam Anti Rate Limit! Hemat Token AI 65% | Tutorial Quick Setup AFRouter 🚀<br/>by <a href="https://www.youtube.com/@krisswuh">Krisswuh</a></sub>
+      <sub>Koding 24 Jam Anti Rate Limit! Hemat Token AI 65% | Tutorial Quick Setup 9Router Indonesia<br/>by <a href="https://www.youtube.com/@krisswuh">Kris Ytc</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=TXGv4eofe1I">
-        <img src="https://img.youtube.com/vi/TXGv4eofe1I/mqdefault.jpg" alt="Cara Deploy AFRouter di Hugging Face GRATIS Non-Stop! | Alternatif VPS RAM 16GB" width="300"/>
+        <img src="https://img.youtube.com/vi/TXGv4eofe1I/mqdefault.jpg" alt="Cara Deploy 9Router di Hugging Face GRATIS Non-Stop! | Alternatif VPS RAM 16GB" width="300"/>
       </a><br/>
       <b>🇮🇩 Indonesia</b><br/>
-      <sub>Cara Deploy AFRouter di Hugging Face GRATIS Non-Stop! | Alternatif VPS RAM 16GB<br/>by <a href="https://www.youtube.com/@krisswuh">Krisswuh</a></sub>
+      <sub>Cara Deploy 9Router di Hugging Face GRATIS Non-Stop! | Alternatif VPS RAM 16GB<br/>by <a href="https://www.youtube.com/@krisswuh">Kris Ytc</a></sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=GyX-DLvePW8">
-        <img src="https://img.youtube.com/vi/GyX-DLvePW8/hqdefault.jpg" alt="این شکلی از هر API ای استفاده کن برای هوش مصنوعی" width="300"/>
+        <img src="https://img.youtube.com/vi/GyX-DLvePW8/hqdefault.jpg" alt="این شکلی از هر API ای استفاده کن برای هوش مصنوعی🩸 آموزش 9router" width="300"/>
       </a><br/>
       <b>🇮🇷 Persian-فارسی</b><br/>
-      <sub dir="rtl">این شکلی از هر API ای استفاده کن برای هوش مصنوعی<br/>by <a href="https://www.youtube.com/@Matin_SenPai">Matin SenPai</a></sub>
+      <sub dir="rtl">این شکلی از هر API ای استفاده کن برای هوش مصنوعی🩸 آموزش 9router<br/>by <a href="https://www.youtube.com/@Matin_SenPai">Matin SenPai</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=hPusYX-5Pmw">
-        <img src="https://img.youtube.com/vi/hPusYX-5Pmw/maxresdefault.jpg" alt="Hướng Dẫn Setup OpenClaw + AFRouter: Tạo Bot Zalo AI Tự Động Từ A-Z" width="300"/>
+        <img src="https://img.youtube.com/vi/hPusYX-5Pmw/maxresdefault.jpg" alt="Hướng Dẫn Setup OpenClaw + 9Router từ A-Z Free 100%: Tạo Bot Zalo Trợ Lý AI Tự Động Phục vụ 24/7" width="300"/>
       </a><br/>
       <b>🇻🇳 Tiếng Việt</b><br/>
-      <sub>Hướng Dẫn Setup OpenClaw + AFRouter: Tạo Bot Zalo AI Tự Động Từ A-Z<br/>by <a href="https://github.com/tuanminhhole">tuanminhhole</a></sub>
+      <sub>Hướng Dẫn Setup OpenClaw + 9Router từ A-Z Free 100%: Tạo Bot Zalo Trợ Lý AI Tự Động Phục vụ 24/7<br/>by <a href="https://www.youtube.com/@monkeytech-vn">MonkeyTech | Ông Già Thích Công Nghệ</a></sub>
     </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=hgnE7MKi3Y4">
-        <img src="https://img.youtube.com/vi/hgnE7MKi3Y4/maxresdefault.jpg" alt="Bye Limit! Cara Bikin Sistem 'AI Unlimited' 100% Gratis Dengan 9Router!
-" width="300"/>
+        <img src="https://img.youtube.com/vi/hgnE7MKi3Y4/maxresdefault.jpg" alt="Bye Limit! Cara Bikin Sistem &quot;AI Unlimited&quot; 100% Gratis Dengan 9Router!" width="300"/>
       </a><br/>
       <b>🇮🇩 Indonesia</b><br/>
-      <sub>Bye Limit! Cara Bikin Sistem "AI Unlimited" 100% Gratis Dengan 9Router!<br/>by <a href="https://www.youtube.com/@neptiver">neptiver</a></sub>
-    </td>
-    <td align="center" width="320">
-      <a href="https://www.youtube.com/watch?v=hgnE7MKi3Y4">
-        <img src="https://img.youtube.com/vi/hgnE7MKi3Y4/maxresdefault.jpg" alt="Bye Limit! Cara Bikin Sistem 'AI Unlimited' 100% Gratis Dengan 9Router!" width="300"/>
-      </a><br/>
-      <b>🇮🇩 Indonesia</b><br/>
-      <sub>Bye Limit! Cara Bikin Sistem "AI Unlimited" 100% Gratis Dengan 9Router!<br/>by <a href="https://www.youtube.com/@neptiver">neptiver</a></sub>
+      <sub>Bye Limit! Cara Bikin Sistem "AI Unlimited" 100% Gratis Dengan 9Router!<br/>by <a href="https://www.youtube.com/@neptiver">Neptiver Tech</a></sub>
     </td>
     <td align="center" width="320"></td>
     <td align="center" width="320"></td>
@@ -280,7 +282,7 @@ Available domains: `providers`, `nodes`, `keys`, `combos`, `models`, `usage`, `s
 
 </div>
 
-> 🎬 **Made a video about AFRouter?** Submit a [Pull Request](https://github.com/AFG473319/AFRouter/pulls) adding your video to this section — we'll merge it!
+> 🎬 **Made a video about 9Router?** Submit a [Pull Request](https://github.com/AFG473319/AFRouter/pulls) adding your video to this section — we'll merge it!
 
 ---
 
@@ -574,7 +576,7 @@ a third party under a provider named "Self-hosted".
 | 🧠 **Headroom Token Saver** ([Headroom](https://github.com/chopratejas/headroom)) | Optional external `/v1/compress` proxy before provider routing                           | Save more context tokens without changing clients |
 | 🪨 **Caveman Mode** ([Caveman](https://github.com/JuliusBrussee/caveman) ⭐52K)   | Inject caveman-speak prompt → LLM replies terse, technical substance preserved           | Save **up to 65% output tokens**                  |
 | 🐴 **Ponytail** ([Ponytail](https://github.com/DietrichGebert/ponytail))          | Inject "lazy senior dev" prompt → LLM writes minimal, YAGNI-first code (Lite/Full/Ultra) | **Fewer output tokens, less refactoring**         |
-| 🎯 **Smart 3-Tier Fallback**                                                      | Auto-route: Subscription → Cheap → Free                                                  | Never stop coding, zero downtime                  |
+| 🎯 **Smart Fallback**                                                             | Auto-route across your configured providers (API key, OAuth, local)                      | Configurable failover, zero downtime              |
 | 📊 **Real-Time Quota Tracking**                                                   | Live token count + reset countdown                                                       | Maximize subscription value                       |
 | 🔄 **Format Translation**                                                         | OpenAI ↔ Claude ↔ Gemini ↔ Cursor ↔ Kiro ↔ Vertex                                        | Works with any CLI tool                           |
 | 👥 **Multi-Account Support**                                                      | Multiple accounts per provider                                                           | Load balancing + redundancy                       |
@@ -771,7 +773,7 @@ Seamless translation between formats:
 
 **AFRouter Billing Reality:**
 
-✅ **AFRouter software = FREE forever** (open source, never charges)  
+✅ **AFRouter software = open source** (never charges)  
 ✅ **Dashboard "costs" = Display/tracking only** (not actual bills)  
 ✅ **You pay providers directly** (subscriptions or API fees)  
 ✅ **FREE providers stay FREE** (Kiro ~50 credits/mo, OpenCode Free, Vertex $300 credits = $0 within free-tier limits) — note iFlow/Qwen/Gemini CLI free tiers were discontinued in 2026
@@ -975,7 +977,7 @@ AFRouter's smart fallback prevents surprise charges:
 
 - ✅ Subscription hits limit → Auto-fallback to cheap tier
 - ✅ Cheap tier gets expensive → Auto-fallback to free tier
-- ✅ Never stop coding → Predictable costs
+- ✅ Automatic fallback → Predictable costs
 
 **You're in control:** Set spending limits per provider in dashboard, and AFRouter respects them.
 
