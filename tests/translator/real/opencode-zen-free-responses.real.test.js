@@ -9,9 +9,9 @@
 // or the official API and stay in the opencode-go / deepseek real suites.
 //
 // The free tier only accepts requests carrying the client fingerprint
-// (opencode UA + session header + stream:true + bash/glob/grep/read quartet);
-// the opencode-zen executor injects all of it, which is part of what this
-// smoke verifies.
+// (OpenCode v2 CLI UA + mirrored session headers + stream:true + the verbatim
+// read/shell tools on /inference/v1); the opencode-zen executor injects all of
+// it, which is part of what this smoke verifies.
 //
 //   OPENCODE_ZEN_KEY=oc_sk... RUN_REAL=1 npx vitest run --config tests/vitest.config.js tests/translator/real/opencode-zen-free-responses.real.test.js
 //
