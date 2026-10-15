@@ -2,8 +2,12 @@ export default {
   id: "agnes",
   priority: 120,
   alias: "agnes",
+  // "agnesai" is the id of the duplicate registry entry that was removed; it is
+  // kept as an alias so existing model strings ("agnesai/agnes-2.5-flash"),
+  // combos and saved connections keep resolving to this provider after upgrade.
   aliases: [
     "agnes-ai",
+    "agnesai",
   ],
   uiAlias: "agnes",
   display: {
