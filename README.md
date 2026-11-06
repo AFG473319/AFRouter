@@ -178,6 +178,20 @@ Available domains: `providers`, `nodes`, `keys`, `combos`, `models`, `usage`, `s
 
 ---
 
+## 🧪 Agent harness
+
+AFRouter ships a repo-local verification CLI for coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Antigravity, Grok Build, Cursor, Copilot, …). It runs the app in an isolated sandbox (temp data dir and fake `HOME`, a free port, never `20128`, a fake OpenAI-compatible upstream so no real provider quota is spent) and prints **one JSON line (≤20 KB)** per command, with bulky artifacts in `.agent/runs/`.
+
+```bash
+npm run agent -- doctor          # what works on this machine (Vitest, happy-dom, browser, ffmpeg)
+npm run agent -- check           # after every change: lint changed lines, related tests vs baseline, API/chat/page smoke
+npm run agent -- render /dashboard/endpoint   # client page in happy-dom after its data loads (no browser)
+npm run agent -- shot /dashboard  # only for visual changes: headless system Edge/Chrome, PNG + aria snapshot
+npm run agent -- down            # stop the sandbox server
+```
+
+Browserless by default; the real-browser lane (`shot`, `record`) uses an installed Edge/Chrome/Chromium through `playwright-core` and never downloads one (choose with `--browser`, `AFROUTER_HARNESS_BROWSER_PATH` or `agent-harness.config.json`). Commands, rules, output shape: **[AGENTS.md → Agent harness](AGENTS.md#agent-harness)**.
+
 ## Community videos (about upstream 9Router)
 
 These videos cover 9Router, the project AFRouter is based on. Titles are preserved as published by their authors.

@@ -1,0 +1,11 @@
+---
+description: Verify AFRouter changes with the repo's agent harness (npm run agent)
+alwaysApply: true
+---
+
+All agent instructions for this repository live in `AGENTS.md` at the repo root (single source of truth), section **Agent harness**. @AGENTS.md
+
+- After every change: `npm run agent -- check` and fix until `"ok": true`.
+- No browser (`shot`, `record`, `flow --engine browser`) unless the change is visual or the user asked.
+- Stop after 2 failures on the same step; report the error and `runDir`.
+- Never use port 20128 or the real AFRouter data dir; the harness picks a free port and a temp sandbox.
