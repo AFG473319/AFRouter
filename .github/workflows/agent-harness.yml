@@ -1,0 +1,111 @@
+name: Agent harness
+
+# Runs the repo's agent harness (scripts/agent, `npm run agent -- <cmd>`) the way a coding
+# agent would: doctor -> check (lint changed lines, related tests vs known-fails baseline,
+# isolated server smoke) -> DOM lane tests -> one Layer 2 screenshot + recorded flow.
+# The browser lane uses the runner's preinstalled Google Chrome through playwright-core;
+# no browser is ever downloaded (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD, no `playwright install`).
+# Screenshots, frames and result.json files are uploaded from .agent/runs.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: Agent harness (doctor, check, DOM tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: true
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      # ubuntu-latest ships Google Chrome; pin the harness to it instead of auto-probing.
+      AFROUTER_HARNESS_BROWSER: chrome
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `check` diffs against the merge-base with master.
+          fetch-depth: 0
+
+      - name: Make origin/master available for the merge-base
+        run: git fetch --no-tags origin master:refs/remotes/origin/master || true
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-root-${{ hashFiles('package-lock.json') }}-tests-${{ hashFiles('tests/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-root-
+            npm-${{ runner.os }}-
+
+      - name: Install root deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Install test deps (tests/ is an independent package)
+        run: npm ci --no-audit --no-fund
+        working-directory: tests
+
+      - name: Preinstalled browser
+        run: google-chrome --version || echo "google-chrome not on PATH"
+
+      - name: doctor
+        run: npm run -s agent -- doctor
+
+      - name: Harness unit tests
+        run: npx vitest run harness/
+        working-directory: tests
+
+      - name: DOM lane tests (happy-dom + Testing Library)
+        run: npm run -s agent -- test --dom
+
+      - name: check (changed files vs master)
+        run: npm run -s agent -- check
+
+      - name: shot /dashboard (Layer 2, advisory)
+        continue-on-error: true
+        run: npm run -s agent -- shot /dashboard
+
+      - name: record create-api-key flow (Layer 2, advisory)
+        continue-on-error: true
+        run: npm run -s agent -- record scripts/agent/flows/create-api-key.json
+
+      - name: Stop the sandbox server
+        if: always()
+        run: npm run -s agent -- down || true
+
+      - name: Server log tail (on failure)
+        if: failure()
+        run: tail -n 80 "$(node -p "require('os').tmpdir()")"/afrouter-agent/*/server.log || true
+
+      - name: Upload harness artifacts (screenshots, frames, results)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-harness-runs-${{ github.sha }}
+          # .agent is a dot-directory: upload-artifact v4 skips those unless asked.
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            .agent/runs/**/*.png
+            .agent/runs/**/*.jpg
+            .agent/runs/**/*.jpeg
+            .agent/runs/**/*.webm
+            .agent/runs/**/result.json
+            .agent/capabilities.json
