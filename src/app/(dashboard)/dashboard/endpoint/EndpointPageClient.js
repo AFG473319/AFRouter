@@ -78,6 +78,14 @@ export default function APIPageClient({ machineId }) {
   // API key visibility toggle state
   const [visibleKeys, setVisibleKeys] = useState(new Set());
 
+  // API key export state (secrets are never held in React state — only ids).
+  const [selectedKeyIds, setSelectedKeyIds] = useState(new Set());
+  const [exportRequest, setExportRequest] = useState(null); // { ids: string[] | null, label: string }
+  const [exportFormat, setExportFormat] = useState("json");
+  const [exportAcknowledged, setExportAcknowledged] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+
   // Client-side local/remote detection (UI hint only, not a security gate)
   const [isRemoteHost, setIsRemoteHost] = useState(false);
   useEffect(() => {
@@ -267,6 +275,7 @@ export default function APIPageClient({ machineId }) {
         } catch { /* fall through to empty render */ }
       }
       setKeys(existing);
+      setSelectedKeyIds((prev) => new Set([...prev].filter((id) => existing.some((k) => k.id === id))));
     } catch (error) {
       console.log("Error fetching data:", error);
     } finally {
@@ -651,6 +660,11 @@ export default function APIPageClient({ machineId }) {
               next.delete(id);
               return next;
             });
+            setSelectedKeyIds(prev => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
           }
         } catch (error) {
           console.log("Error deleting key:", error);
@@ -688,6 +702,80 @@ export default function APIPageClient({ machineId }) {
     });
   };
 
+  const toggleKeySelection = (keyId) => {
+    setSelectedKeyIds(prev => {
+      const next = new Set(prev);
+      if (next.has(keyId)) next.delete(keyId);
+      else next.add(keyId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllKeys = () => {
+    setSelectedKeyIds(prev => {
+      if (keys.length > 0 && keys.every((k) => prev.has(k.id))) return new Set();
+      return new Set(keys.map((k) => k.id));
+    });
+  };
+
+  const openExportModal = (ids, label) => {
+    setExportError("");
+    setExportAcknowledged(false);
+    setExportRequest({ ids, label });
+  };
+
+  const closeExportModal = () => {
+    if (exporting) return;
+    setExportRequest(null);
+    setExportAcknowledged(false);
+    setExportError("");
+  };
+
+  const exportFilenameFromDisposition = (disposition) => {
+    const match = /filename="([^"]+)"/i.exec(disposition || "");
+    return match ? match[1] : null;
+  };
+
+  // Downloads the file straight to disk. The response body is never parsed into
+  // state or the DOM, so the plaintext keys exist only in the browser's download.
+  const handleExportKeys = async () => {
+    if (!exportRequest || !exportAcknowledged || exporting) return;
+    setExporting(true);
+    setExportError("");
+    try {
+      const res = await fetch("/api/keys/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ ids: exportRequest.ids, format: exportFormat }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const filename = exportFilenameFromDisposition(res.headers.get("Content-Disposition"))
+        || `afrouter-api-keys.${exportFormat}`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Let the browser start the download before releasing the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setExportRequest(null);
+      setExportAcknowledged(false);
+    } catch (error) {
+      setExportError(error.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const [baseUrl, setBaseUrl] = useState("/v1");
 
   // Hydration fix: Only access window on client side
@@ -696,6 +784,8 @@ export default function APIPageClient({ machineId }) {
       setBaseUrl(`${window.location.origin}/v1`);
     }
   }, []);
+
+  const allKeysSelected = keys.length > 0 && keys.every((k) => selectedKeyIds.has(k.id));
 
   if (loading) {
     return (
@@ -962,9 +1052,21 @@ export default function APIPageClient({ machineId }) {
             <span className="material-symbols-outlined text-primary">vpn_key</span>
             API Keys
           </h2>
-          <Button icon="add" onClick={() => setShowAddModal(true)}>
-            Create Key
-          </Button>
+          <div className="flex items-center gap-2">
+            {keys.length > 0 && (
+              <Button
+                variant="secondary"
+                icon="download"
+                onClick={() => openExportModal(null, `all ${keys.length} API key${keys.length === 1 ? "" : "s"}`)}
+                title="Export every API key to a file"
+              >
+                Export all
+              </Button>
+            )}
+            <Button icon="add" onClick={() => setShowAddModal(true)}>
+              Create Key
+            </Button>
+          </div>
         </div>
 
         <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
@@ -999,12 +1101,45 @@ export default function APIPageClient({ machineId }) {
           </div>
         ) : (
           <div className="flex flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-black/[0.03] dark:border-white/[0.03]">
+              <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-brand-500 cursor-pointer"
+                  checked={allKeysSelected}
+                  onChange={toggleSelectAllKeys}
+                />
+                Select all
+              </label>
+              {selectedKeyIds.size > 0 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon="download"
+                  onClick={() => openExportModal(
+                    [...selectedKeyIds],
+                    `${selectedKeyIds.size} selected API key${selectedKeyIds.size === 1 ? "" : "s"}`
+                  )}
+                >
+                  Export selected ({selectedKeyIds.size})
+                </Button>
+              )}
+            </div>
             {keys.map((key) => (
               <div
                 key={key.id}
                 className={`group flex items-center justify-between py-3 border-b border-black/[0.03] dark:border-white/[0.03] last:border-b-0 ${key.isActive === false ? "opacity-60" : ""}`}
               >
-                <div className="flex-1 min-w-0">
+                <label className="flex shrink-0 items-center self-start pt-0.5 sm:self-center sm:pt-0 cursor-pointer" title="Select for export">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-brand-500 cursor-pointer"
+                    checked={selectedKeyIds.has(key.id)}
+                    onChange={() => toggleKeySelection(key.id)}
+                    aria-label={`Select ${key.name} for export`}
+                  />
+                </label>
+                <div className="flex-1 min-w-0 pl-3">
                   <p className="text-sm font-medium">{key.name}</p>
                   <div className="flex items-center gap-2 mt-1">
                     <code className="text-xs text-text-muted font-mono">
@@ -1026,6 +1161,13 @@ export default function APIPageClient({ machineId }) {
                       <span className="material-symbols-outlined text-[14px]">
                         {copied === key.id ? "check" : "content_copy"}
                       </span>
+                    </button>
+                    <button
+                      onClick={() => openExportModal([key.id], `\u201c${key.name}\u201d`)}
+                      className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
+                      title="Export this key"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">download</span>
                     </button>
                   </div>
                   <p className="text-xs text-text-muted mt-1">
@@ -1067,6 +1209,80 @@ export default function APIPageClient({ machineId }) {
           </div>
         )}
       </Card>
+
+      {/* Export Keys Modal */}
+      <Modal
+        isOpen={!!exportRequest}
+        title="Export API Keys"
+        onClose={closeExportModal}
+      >
+        {exportRequest && (
+          <div className="flex flex-col gap-4">
+            <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-500/5 p-4">
+              <p className="flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-300">
+                <span className="material-symbols-outlined text-[18px]">warning</span>
+                This file contains plaintext secrets
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                You are about to export {exportRequest.label}. Anyone who opens the file can call
+                your endpoint with those keys. Store it securely, keep it out of source control,
+                and delete it when you are done.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium">File format</span>
+              <div className="flex gap-1">
+                {["json", "csv"].map((format) => (
+                  <button
+                    key={format}
+                    onClick={() => setExportFormat(format)}
+                    className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
+                      exportFormat === format
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border text-text-muted hover:text-text-main"
+                    }`}
+                  >
+                    {format.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="flex items-start gap-2 text-xs text-text-muted cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-3.5 w-3.5 accent-brand-500 cursor-pointer"
+                checked={exportAcknowledged}
+                onChange={(e) => setExportAcknowledged(e.target.checked)}
+              />
+              I understand this file contains plaintext API keys and will store it securely.
+            </label>
+
+            {exportError && (
+              <p className="text-xs text-red-500 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[14px]">error</span>
+                {exportError}
+              </p>
+            )}
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleExportKeys}
+                fullWidth
+                icon="download"
+                loading={exporting}
+                disabled={!exportAcknowledged}
+              >
+                {exporting ? "Exporting..." : "Export"}
+              </Button>
+              <Button onClick={closeExportModal} variant="ghost" fullWidth disabled={exporting}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Add Key Modal */}
       <Modal

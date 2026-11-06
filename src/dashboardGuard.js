@@ -3,6 +3,7 @@ import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
+import { isSameOriginRequest } from "@/lib/auth/sameOrigin";
 
 const CLI_TOKEN_HEADER = "x-afr-cli-token";
 const CLI_TOKEN_SALT = "afr-cli-auth";
@@ -167,6 +168,16 @@ async function canAccessLocalOnlyRoute(request) {
   return false;
 }
 
+// Plaintext credentials export is a high-value target: unlike ordinary dashboard
+// routes it never accepts the `requireLogin=false` bypass from a remote host. It
+// needs a real dashboard session or CLI token, or a loopback browser whose owner
+// deliberately runs the dashboard without login.
+export async function canAccessCredentialExport(request) {
+  if (await hasValidCliToken(request)) return true;
+  if (await hasValidToken(request)) return true;
+  return isLocalRequest(request) && await isAuthenticated(request);
+}
+
 async function hasValidToken(request) {
   const token = request.cookies.get("auth_token")?.value;
   return await verifyDashboardAuthToken(token);
@@ -202,6 +213,7 @@ export const __test__ = {
   extractApiKey,
   canAccessPublicLlmApi,
   canAccessLocalOnlyRoute,
+  canAccessCredentialExport,
 };
 
 export async function proxy(request) {
@@ -211,6 +223,21 @@ export async function proxy(request) {
   if (LOCAL_ONLY_PATHS.some((p) => pathname.startsWith(p))) {
     if (!(await canAccessLocalOnlyRoute(request))) {
       return NextResponse.json({ error: "Local only: CLI token required" }, { status: 403 });
+    }
+  }
+
+  // Plaintext API-key export: stricter than the deny-by-default /api/* branch,
+  // which is satisfied by requireLogin=false. The route handler re-checks both
+  // conditions so a missing/changed middleware cannot expose keys.
+  if (pathname === "/api/keys/export") {
+    if (!(await canAccessCredentialExport(request))) {
+      return NextResponse.json(
+        { error: "Export requires an authenticated dashboard session" },
+        { status: 403 }
+      );
+    }
+    if (!isSameOriginRequest(request)) {
+      return NextResponse.json({ error: "Cross-origin export requests are rejected" }, { status: 403 });
     }
   }
 
