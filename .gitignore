@@ -20,6 +20,10 @@
 /.next/
 /.next-bench/
 /.next-cli-build/
+# agent harness: isolated dev build + run artifacts (npm run agent)
+/.next-agent/
+/.agent/
+/agent-harness.config.json
 /out/
 cli/.build-home/
 product
@@ -53,6 +57,10 @@ data/
 logs/*
 source/*
 .cursor/*
+# Cursor project rules for the agent harness are committed.
+!.cursor/rules/
+.cursor/rules/*
+!.cursor/rules/agent-harness.mdc
 docs/*
 !docs/ARCHITECTURE.md
 test/*
@@ -115,6 +123,8 @@ debug.log
 .demo-shot/
 specs/
 AGENTS.md
+# ...except the root AGENTS.md: the committed agent instructions (single source of truth).
+!/AGENTS.md
 
 # npm pack artifacts + one-off publish scratch
 *.tgz
