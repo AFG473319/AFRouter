@@ -9,6 +9,9 @@ const eslintConfig = defineConfig([
     ".next/**",
     // Benchmark build output (NEXT_DIST_DIR for scripts/bench):
     ".next-bench/**",
+    // Agent harness: isolated dev build and run artifacts (scripts/agent):
+    ".next-agent/**",
+    ".agent/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

@@ -10,6 +10,10 @@
     "bench": "vitest bench --run"
   },
   "devDependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.8",
+    "happy-dom": "21.0.4",
     "vitest": "^4.0.0"
   },
   "engines": {

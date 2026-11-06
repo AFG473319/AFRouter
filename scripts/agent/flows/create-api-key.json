@@ -1,0 +1,13 @@
+{
+  "name": "create an API key from the Endpoint page",
+  "route": "/dashboard/endpoint",
+  "steps": [
+    { "expect": "role=heading[name=API Keys]" },
+    { "click": "role=button[name=Create Key]" },
+    { "fill": "placeholder=Production Key", "value": "flow-key" },
+    { "click": "role=button[name=Create][exact=true]" },
+    { "expectText": "flow-key" },
+    { "api": { "path": "/api/keys", "status": 200, "json": { "keys.length": { "gte": 2 } } } },
+    { "snap": true }
+  ]
+}

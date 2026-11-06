@@ -20,6 +20,10 @@
 /.next/
 /.next-bench/
 /.next-cli-build/
+# agent harness: isolated dev build + run artifacts (npm run agent)
+/.next-agent/
+/.agent/
+/agent-harness.config.json
 /out/
 cli/.build-home/
 product
